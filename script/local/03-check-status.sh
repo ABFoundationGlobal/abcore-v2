@@ -13,11 +13,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
 
+# Count number of validators
+NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
+if [ "$NUM_VALIDATORS" -eq 0 ]; then
+    echo -e "${RED}Error: No validators found. Run ./01-setup.sh first${NC}"
+    exit 1
+fi
+
 echo -e "${BLUE}=== Parlia Network Status ===${NC}"
 echo ""
 
 # Check each validator
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
     PORT=$((8544 + i))
 
@@ -99,7 +106,7 @@ done
 echo -e "${BLUE}=== Recent Logs (last 5 lines each) ===${NC}"
 echo ""
 
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
     if [ -f "$VAL_DIR/geth.log" ]; then
         echo -e "${YELLOW}Validator $i:${NC}"

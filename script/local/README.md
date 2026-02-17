@@ -1,14 +1,19 @@
-# Local 3-Validator Parlia Network
+# Local Parlia Network
 
-This directory contains scripts to launch a local Parlia network with 3 validators for testing ABCore v2.0.
+This directory contains scripts to launch a local Parlia network with 1-5 validators for testing ABCore v2.0.
 
 ## Quick Start
 
 ```bash
-# 1. Generate validator keys and genesis
-./01-setup.sh
+# 1. Generate validator keys and genesis (default: 1 validator)
+./01-setup.sh [num_validators]  # num_validators: 1-5 (default: 1)
 
-# 2. Start all 3 validators
+# Examples:
+./01-setup.sh     # 1 validator
+./01-setup.sh 3   # 3 validators
+./01-setup.sh 5   # 5 validators
+
+# 2. Start all validators
 ./02-start-validators.sh
 
 # 3. Check status
@@ -24,13 +29,15 @@ This directory contains scripts to launch a local Parlia network with 3 validato
 ## Network Configuration
 
 - **Chain ID**: 7140 (custom for local testing)
-- **Validators**: 3 (validator-1, validator-2, validator-3)
+- **Validators**: 1-5 (configurable)
 - **Block time**: 3 seconds
 - **Epoch**: 200 blocks
-- **Ports**:
-  - Validator 1: RPC 8545, P2P 30303
-  - Validator 2: RPC 8546, P2P 30304
-  - Validator 3: RPC 8547, P2P 30305
+- **Ports** (dynamic based on validator count):
+  - Validator N: RPC `8544 + N`, P2P `30302 + N`, WebSocket `9544 + N`
+  - Examples:
+    - Validator 1: RPC 8545, P2P 30303, WS 9545
+    - Validator 2: RPC 8546, P2P 30304, WS 9546
+    - Validator 5: RPC 8549, P2P 30307, WS 9549
 
 ## Directory Structure
 

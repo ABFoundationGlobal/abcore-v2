@@ -12,7 +12,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
 
-echo -e "${GREEN}=== Setting up 3-validator Parlia network ===${NC}"
+# Parse number of validators (default: 1, max: 5)
+NUM_VALIDATORS=${1:-1}
+if ! [[ "$NUM_VALIDATORS" =~ ^[1-5]$ ]]; then
+    echo -e "${RED}Error: Number of validators must be between 1 and 5${NC}"
+    echo "Usage: $0 [num_validators]"
+    echo "  num_validators: 1-5 (default: 1)"
+    exit 1
+fi
+
+echo -e "${GREEN}=== Setting up ${NUM_VALIDATORS}-validator Parlia network ===${NC}"
 
 # Check if geth binary exists
 if [ ! -f "$GETH" ]; then
@@ -29,10 +38,10 @@ fi
 
 mkdir -p "$DATA_DIR"
 
-# Generate 3 validator accounts
+# Generate validator accounts
 echo -e "${GREEN}Generating validator accounts...${NC}"
 
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
     mkdir -p "$VAL_DIR"
 
@@ -57,37 +66,47 @@ for i in 1 2 3; do
     echo -e "  Address: ${GREEN}$ADDRESS${NC}"
 done
 
-# Read validator addresses (remove 0x prefix properly)
-VAL1_ADDR=$(cat "$DATA_DIR/validator-1/address.txt" | sed 's/^0x//')
-VAL2_ADDR=$(cat "$DATA_DIR/validator-2/address.txt" | sed 's/^0x//')
-VAL3_ADDR=$(cat "$DATA_DIR/validator-3/address.txt" | sed 's/^0x//')
+# Read validator addresses (remove 0x prefix properly) and build validator list
+echo -e "${GREEN}Validator addresses:${NC}"
+VALIDATORS=""
+for i in $(seq 1 $NUM_VALIDATORS); do
+    ADDR=$(cat "$DATA_DIR/validator-$i/address.txt" | sed 's/^0x//')
 
-# Validate addresses are 40 hex characters
-for i in 1 2 3; do
-    eval "ADDR=\$VAL${i}_ADDR"
+    # Validate address is 40 hex characters
     if [ ${#ADDR} -ne 40 ]; then
         echo -e "${RED}Error: Validator $i address is not 40 characters (got ${#ADDR}): $ADDR${NC}"
         exit 1
     fi
-done
 
-echo -e "${GREEN}Validator addresses:${NC}"
-echo -e "  Validator 1: ${GREEN}0x$VAL1_ADDR${NC}"
-echo -e "  Validator 2: ${GREEN}0x$VAL2_ADDR${NC}"
-echo -e "  Validator 3: ${GREEN}0x$VAL3_ADDR${NC}"
+    echo -e "  Validator $i: ${GREEN}0x$ADDR${NC}"
+    VALIDATORS="${VALIDATORS}${ADDR}"
+done
 
 # Generate genesis extraData
 # Format: 32 bytes vanity + N * 20 bytes validators + 65 bytes seal
-# For 3 validators: 32 + 60 + 65 = 157 bytes = 314 hex chars
+# Total hex chars: 64 + (N * 40) + 130
 
-VANITY="0000000000000000000000000000000000000000000000000000000000000000"
-VALIDATORS="${VAL1_ADDR}${VAL2_ADDR}${VAL3_ADDR}"
-SEAL="00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+VANITY="0000000000000000000000000000000000000000000000000000000000000000"  # 32 bytes = 64 hex chars
+# VALIDATORS is built above: N * 20 bytes = N * 40 hex chars
+SEAL="0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"  # 65 bytes = 130 hex chars
 
 EXTRA_DATA="0x${VANITY}${VALIDATORS}${SEAL}"
 
 echo -e "${GREEN}Genesis extraData:${NC}"
 echo "  $EXTRA_DATA"
+
+# Build alloc section for genesis
+ALLOC_ENTRIES=""
+for i in $(seq 1 $NUM_VALIDATORS); do
+    ADDR=$(cat "$DATA_DIR/validator-$i/address.txt" | sed 's/^0x//')
+    if [ $i -gt 1 ]; then
+        ALLOC_ENTRIES="${ALLOC_ENTRIES},"
+    fi
+    ALLOC_ENTRIES="${ALLOC_ENTRIES}
+        \"0x${ADDR}\": {
+            \"balance\": \"0x200000000000000000000000000000000000000000000000000000000000000\"
+        }"
+done
 
 # Create genesis.json
 echo -e "${GREEN}Creating genesis.json...${NC}"
@@ -134,6 +153,23 @@ cat > "$SCRIPT_DIR/genesis.json" <<EOF
         "parlia": {
             "period": 3,
             "epoch": 200
+        },
+        "blobSchedule": {
+            "cancun": {
+                "target": 3,
+                "max": 6,
+                "baseFeeUpdateFraction": 3338477
+            },
+            "prague": {
+                "target": 3,
+                "max": 6,
+                "baseFeeUpdateFraction": 3338477
+            },
+            "osaka": {
+                "target": 3,
+                "max": 6,
+                "baseFeeUpdateFraction": 3338477
+            }
         }
     },
     "nonce": "0x0",
@@ -143,16 +179,7 @@ cat > "$SCRIPT_DIR/genesis.json" <<EOF
     "difficulty": "0x1",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE",
-    "alloc": {
-        "0x$VAL1_ADDR": {
-            "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
-        },
-        "0x$VAL2_ADDR": {
-            "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
-        },
-        "0x$VAL3_ADDR": {
-            "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
-        }
+    "alloc": {$ALLOC_ENTRIES
     }
 }
 EOF
@@ -162,7 +189,7 @@ echo -e "${GREEN}Genesis file created at: $SCRIPT_DIR/genesis.json${NC}"
 # Initialize each validator with genesis
 echo -e "${GREEN}Initializing validators with genesis...${NC}"
 
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
     echo -e "${YELLOW}Initializing validator-$i...${NC}"
     $GETH init --datadir "$VAL_DIR" "$SCRIPT_DIR/genesis.json"

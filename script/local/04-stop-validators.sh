@@ -10,9 +10,12 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="$SCRIPT_DIR/data"
 
+# Count number of validators
+NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
+
 echo -e "${YELLOW}=== Stopping validators ===${NC}"
 
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
 
     if [ ! -f "$VAL_DIR/geth.pid" ]; then

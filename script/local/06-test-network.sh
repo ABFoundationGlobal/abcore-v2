@@ -13,6 +13,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
 
+# Count number of validators
+NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
+if [ "$NUM_VALIDATORS" -eq 0 ]; then
+    echo -e "${RED}Error: No validators found. Run ./01-setup.sh first${NC}"
+    exit 1
+fi
+
 echo -e "${BLUE}=== Testing Parlia Network ===${NC}"
 echo ""
 
@@ -49,7 +56,7 @@ fi
 
 echo ""
 echo -e "${YELLOW}3. Checking peer connectivity...${NC}"
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     PEERS=$($GETH attach --exec "admin.peers.length" "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null || echo "0")
     if [ "$PEERS" -gt "0" ]; then
         echo -e "   Validator $i: ${GREEN}$PEERS peers${NC}"
@@ -60,7 +67,7 @@ done
 
 echo ""
 echo -e "${YELLOW}4. Checking validator participation...${NC}"
-for i in 1 2 3; do
+for i in $(seq 1 $NUM_VALIDATORS); do
     MINING=$($GETH attach --exec "eth.mining" "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null || echo "false")
     ADDR=$(cat "$DATA_DIR/validator-$i/address.txt")
     if [ "$MINING" = "true" ]; then

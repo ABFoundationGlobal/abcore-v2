@@ -12,18 +12,20 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
 
-echo -e "${GREEN}=== Starting 3-validator Parlia network ===${NC}"
-
 # Check if setup was done
 if [ ! -d "$DATA_DIR/validator-1" ]; then
     echo -e "${RED}Error: Setup not done. Run ./01-setup.sh first${NC}"
     exit 1
 fi
 
-# Read validator addresses
-VAL1_ADDR=$(cat "$DATA_DIR/validator-1/address.txt")
-VAL2_ADDR=$(cat "$DATA_DIR/validator-2/address.txt")
-VAL3_ADDR=$(cat "$DATA_DIR/validator-3/address.txt")
+# Count number of validators
+NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
+if [ "$NUM_VALIDATORS" -eq 0 ]; then
+    echo -e "${RED}Error: No validators found. Run ./01-setup.sh first${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}=== Starting ${NUM_VALIDATORS}-validator Parlia network ===${NC}"
 
 # Function to start a validator
 start_validator() {
@@ -98,16 +100,18 @@ if [ -z "$ENODE" ]; then
     echo "Validators will start but may not connect initially"
     BOOTNODE_FLAG=""
 else
+    # Remove query parameters from enode (e.g., ?discport=0)
+    ENODE=$(echo "$ENODE" | sed 's/?.*$//')
     echo -e "${GREEN}Validator-1 enode: $ENODE${NC}"
     BOOTNODE_FLAG="--bootnodes $ENODE"
 fi
 
-# Start validator 2 and 3 with bootnode
-for NUM in 2 3; do
-    local PORT=$((8544 + NUM))
-    local P2P_PORT=$((30302 + NUM))
-    local VAL_DIR="$DATA_DIR/validator-$NUM"
-    local VAL_ADDR=$(cat "$VAL_DIR/address.txt")
+# Start remaining validators with bootnode
+for NUM in $(seq 2 $NUM_VALIDATORS); do
+    PORT=$((8544 + NUM))
+    P2P_PORT=$((30302 + NUM))
+    VAL_DIR="$DATA_DIR/validator-$NUM"
+    VAL_ADDR=$(cat "$VAL_DIR/address.txt")
 
     echo -e "${YELLOW}Starting validator-$NUM...${NC}"
     echo "  Address: $VAL_ADDR"
@@ -139,7 +143,7 @@ for NUM in 2 3; do
         --verbosity 3 \
         > "$VAL_DIR/geth.log" 2>&1 &
 
-    local PID=$!
+    PID=$!
     echo $PID > "$VAL_DIR/geth.pid"
     echo -e "  ${GREEN}Started with PID: $PID${NC}"
 
@@ -150,9 +154,11 @@ echo ""
 echo -e "${GREEN}=== All validators started! ===${NC}"
 echo ""
 echo "Validator endpoints:"
-echo "  Validator 1: http://127.0.0.1:8545 (WS: 9545)"
-echo "  Validator 2: http://127.0.0.1:8546 (WS: 9546)"
-echo "  Validator 3: http://127.0.0.1:8547 (WS: 9547)"
+for i in $(seq 1 $NUM_VALIDATORS); do
+    PORT=$((8544 + i))
+    WS_PORT=$((PORT + 1000))
+    echo "  Validator $i: http://127.0.0.1:$PORT (WS: $WS_PORT)"
+done
 echo ""
 echo "Check status with: ./03-check-status.sh"
 echo "View logs: tail -f data/validator-1/geth.log"
