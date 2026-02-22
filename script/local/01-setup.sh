@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
+GENESIS_CONTRACTS_JSON="$SCRIPT_DIR/genesis-contracts-dev.json"
 
 # Parse number of validators (default: 1, max: 5)
 NUM_VALIDATORS=${1:-1}
@@ -23,10 +24,15 @@ fi
 
 echo -e "${GREEN}=== Setting up ${NUM_VALIDATORS}-validator Parlia network ===${NC}"
 
-# Check if geth binary exists
+# Check prerequisites
 if [ ! -f "$GETH" ]; then
     echo -e "${RED}Error: geth binary not found at $GETH${NC}"
     echo "Please run 'make geth' first from $REPO_ROOT"
+    exit 1
+fi
+
+if [ ! -f "$GENESIS_CONTRACTS_JSON" ]; then
+    echo -e "${RED}Error: genesis-contracts-dev.json not found at $GENESIS_CONTRACTS_JSON${NC}"
     exit 1
 fi
 
@@ -66,58 +72,56 @@ for i in $(seq 1 $NUM_VALIDATORS); do
     echo -e "  Address: ${GREEN}$ADDRESS${NC}"
 done
 
-# Read validator addresses (remove 0x prefix properly) and build validator list
+# Validate and display addresses
 echo -e "${GREEN}Validator addresses:${NC}"
-VALIDATORS=""
 for i in $(seq 1 $NUM_VALIDATORS); do
     ADDR=$(cat "$DATA_DIR/validator-$i/address.txt" | sed 's/^0x//')
-
-    # Validate address is 40 hex characters
     if [ ${#ADDR} -ne 40 ]; then
-        echo -e "${RED}Error: Validator $i address is not 40 characters (got ${#ADDR}): $ADDR${NC}"
+        echo -e "${RED}Error: Validator $i address is not 40 hex chars (got ${#ADDR}): $ADDR${NC}"
         exit 1
     fi
-
     echo -e "  Validator $i: ${GREEN}0x$ADDR${NC}"
-    VALIDATORS="${VALIDATORS}${ADDR}"
 done
 
-# Generate genesis extraData
-# Format: 32 bytes vanity + N * 20 bytes validators + 65 bytes seal
-# Total hex chars: 64 + (N * 40) + 130
-
-VANITY="0000000000000000000000000000000000000000000000000000000000000000"  # 32 bytes = 64 hex chars
-# VALIDATORS is built above: N * 20 bytes = N * 40 hex chars
-SEAL="0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"  # 65 bytes = 130 hex chars
-
-EXTRA_DATA="0x${VANITY}${VALIDATORS}${SEAL}"
-
-echo -e "${GREEN}Genesis extraData:${NC}"
-echo "  $EXTRA_DATA"
-
-# Build alloc section for genesis
-ALLOC_ENTRIES=""
-for i in $(seq 1 $NUM_VALIDATORS); do
-    ADDR=$(cat "$DATA_DIR/validator-$i/address.txt" | sed 's/^0x//')
-    if [ $i -gt 1 ]; then
-        ALLOC_ENTRIES="${ALLOC_ENTRIES},"
-    fi
-    ALLOC_ENTRIES="${ALLOC_ENTRIES}
-        \"0x${ADDR}\": {
-            \"balance\": \"0x200000000000000000000000000000000000000000000000000000000000000\"
-        }"
-done
-
-# Create genesis.json
+# Build genesis.json using Python:
+#   - Take system contract alloc from genesis-dev.json (all 0x1000-0x3000 contracts)
+#   - Use pre-Luban extraData format (plain 20-byte addresses, no BLS keys)
+#     because lubanBlock > 0, so block 0 is pre-Luban
+#   - Inject our validator addresses and ABCore chain config
 echo -e "${GREEN}Creating genesis.json...${NC}"
 
-cat > "$SCRIPT_DIR/genesis.json" <<EOF
-{
+python3 - <<PYEOF
+import json, sys
+
+with open("$GENESIS_CONTRACTS_JSON") as f:
+    dev = json.load(f)
+
+# Collect our validator addresses
+validator_addrs = []
+for i in range(1, $NUM_VALIDATORS + 1):
+    with open("$DATA_DIR/validator-{}/address.txt".format(i)) as f:
+        addr = f.read().strip()
+    validator_addrs.append(addr.lower().replace("0x", ""))
+
+# Build pre-Luban extraData: 32B vanity + N*20B addresses + 65B seal
+vanity = "00" * 32
+seal   = "00" * 65
+extra  = "0x" + vanity + "".join(validator_addrs) + seal
+
+# System contract alloc from genesis-dev.json (all non-validator entries)
+alloc = {k: v for k, v in dev["alloc"].items()
+         if k.startswith("0x0000000000000000000000000000000000") or
+            k == "0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"}
+
+# Add our validators with initial balance
+for addr in validator_addrs:
+    alloc["0x" + addr] = {"balance": "0x84595161401484a000000"}
+
+genesis = {
     "config": {
         "chainId": 7140,
         "homesteadBlock": 0,
         "eip150Block": 0,
-        "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "eip155Block": 0,
         "eip158Block": 0,
         "byzantiumBlock": 0,
@@ -127,19 +131,19 @@ cat > "$SCRIPT_DIR/genesis.json" <<EOF
         "muirGlacierBlock": 0,
         "ramanujanBlock": 0,
         "nielsBlock": 0,
-        "mirrorSyncBlock": 0,
-        "brunoBlock": 0,
-        "eulerBlock": 0,
-        "gibbsBlock": 0,
-        "nanoBlock": 0,
-        "moranBlock": 0,
-        "planckBlock": 0,
-        "lubanBlock": 0,
-        "platoBlock": 0,
-        "berlinBlock": 0,
-        "londonBlock": 0,
-        "hertzBlock": 0,
-        "hertzfixBlock": 0,
+        "mirrorSyncBlock": 1,
+        "brunoBlock": 1,
+        "eulerBlock": 2,
+        "nanoBlock": 3,
+        "moranBlock": 3,
+        "gibbsBlock": 4,
+        "planckBlock": 5,
+        "lubanBlock": 6,
+        "platoBlock": 7,
+        "berlinBlock": 8,
+        "londonBlock": 8,
+        "hertzBlock": 8,
+        "hertzfixBlock": 8,
         "shanghaiTime": 0,
         "keplerTime": 0,
         "feynmanTime": 0,
@@ -150,39 +154,30 @@ cat > "$SCRIPT_DIR/genesis.json" <<EOF
         "bohrTime": 0,
         "pascalTime": 0,
         "pragueTime": 0,
-        "parlia": {
-            "period": 3,
-            "epoch": 200
-        },
-        "blobSchedule": {
-            "cancun": {
-                "target": 3,
-                "max": 6,
-                "baseFeeUpdateFraction": 3338477
-            },
-            "prague": {
-                "target": 3,
-                "max": 6,
-                "baseFeeUpdateFraction": 3338477
-            },
-            "osaka": {
-                "target": 3,
-                "max": 6,
-                "baseFeeUpdateFraction": 3338477
-            }
-        }
+        "lorentzTime": 0,
+        "parlia": {"period": 3, "epoch": 200},
+        "blobSchedule": dev["config"]["blobSchedule"],
     },
     "nonce": "0x0",
     "timestamp": "0x0",
-    "extraData": "$EXTRA_DATA",
+    "extraData": extra,
     "gasLimit": "0x2625a00",
     "difficulty": "0x1",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE",
-    "alloc": {$ALLOC_ENTRIES
-    }
+    "alloc": alloc,
 }
-EOF
+
+with open("$SCRIPT_DIR/genesis.json", "w") as f:
+    json.dump(genesis, f, indent=4)
+
+print("  extraData: " + extra[:80] + "...")
+print("  alloc entries: {} ({} system contracts + {} validators)".format(
+    len(alloc),
+    len(alloc) - $NUM_VALIDATORS,
+    $NUM_VALIDATORS,
+))
+PYEOF
 
 echo -e "${GREEN}Genesis file created at: $SCRIPT_DIR/genesis.json${NC}"
 
