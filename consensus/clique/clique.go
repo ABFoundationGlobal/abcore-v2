@@ -624,7 +624,9 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 }
 
 func (c *Clique) Delay(chain consensus.ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration {
-	return nil
+	// TODO: temporarily replace null with zero.
+	delay := time.Duration(0)
+	return &delay
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
