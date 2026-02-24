@@ -1,0 +1,5 @@
+# Generated validator data
+local/data/
+
+# Generated genesis file
+local/genesis.json
