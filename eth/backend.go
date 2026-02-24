@@ -863,8 +863,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	if !s.config.DisableSnapProtocol && s.config.SnapshotCache > 0 {
 		protos = append(protos, snap.MakeProtocols((*snapHandler)(s.handler))...)
 	}
-	protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)
-
+	// BSC extension protocol should only be enabled on Parlia/BSC chains.
+	if s.blockchain.Config().IsInBSC() {
+		protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)
+	}
 	return protos
 }
 
@@ -981,7 +983,7 @@ func (s *Ethereum) setupDiscovery() error {
 	}
 
 	// Add bsc nodes from DNS.
-	if len(s.config.BscDiscoveryURLs) > 0 {
+	if s.blockchain.Config().IsInBSC() && len(s.config.BscDiscoveryURLs) > 0 {
 		iter, err := dnsclient.NewIterator(s.config.BscDiscoveryURLs...)
 		if err != nil {
 			return err
