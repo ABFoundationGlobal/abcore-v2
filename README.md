@@ -1,3 +1,59 @@
+# ABCore v2
+
+ABCore v2 is a fork of [bnb-chain/bsc](https://github.com/bnb-chain/bsc) upgrading ABCore from Clique PoA (go-ethereum v1.13) to Parlia PoSA with full modern EVM support.
+
+**Upstream base:** `bnb-chain/bsc` at commit [`1efeee04`](https://github.com/bnb-chain/bsc/commit/1efeee0421003c6e9a28c56dd40b55bf482cf26c) (tag: `v1.7.0-alpha`)
+
+## Branch Strategy
+
+| Branch | Purpose |
+|---|---|
+| `master` | ABCore stable — default branch, all PRs target here |
+| `bsc-master` | Pure upstream mirror of `bnb-chain/bsc` master — **never commit here directly** |
+| `feature/*` | Development branches, branched from `master` |
+
+### Syncing upstream changes
+
+When BSC releases new changes, sync them via a dedicated branch to keep both `bsc-master` and `master` clean:
+
+```bash
+# 1. Update bsc-master (fast-forward only — must never diverge from upstream)
+git fetch bsc
+git checkout bsc-master
+git merge --ff-only bsc/master
+git push origin bsc-master
+
+# 2. Create a sync branch from bsc-master
+git checkout -b sync/upstream-YYYY-MM-DD bsc-master
+
+# 3. Merge master into the sync branch (conflicts resolved here)
+git merge master
+# resolve any conflicts, then:
+git push origin sync/upstream-YYYY-MM-DD
+
+# 4. Open PR: sync/upstream-YYYY-MM-DD → master
+#    Use "Create a merge commit" (not squash, not rebase)
+```
+
+If there are conflicts (e.g. we modified a consensus file that upstream also changed), they are resolved on the sync branch. Neither `bsc-master` nor `master` is touched until the PR is merged.
+
+### Normal feature development
+
+```bash
+git checkout -b feature/my-thing master
+# ... develop ...
+git push origin feature/my-thing
+# Open PR → master, merge via "Squash and merge"
+```
+
+---
+
+## Original BSC README
+
+*The following is the original README from bnb-chain/bsc.*
+
+---
+
 ## BNB Smart Chain
 
 The goal of BNB Smart Chain is to bring programmability and interoperability to BNB Beacon Chain. In order to embrace the existing popular community and advanced technology, it will bring huge benefits by staying compatible with all the existing smart contracts on Ethereum and Ethereum tooling. And to achieve that, the easiest solution is to develop based on go-ethereum fork, as we respect the great work of Ethereum very much.
