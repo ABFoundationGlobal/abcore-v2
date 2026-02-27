@@ -486,11 +486,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		number = head.Number.Uint64()
 		td     = h.chain.GetTd(hash, number)
 	)
-	var statusExt *eth.UpgradeStatusExtension
+	// The custom UpgradeStatus exchange is a BSC extension over eth/68.
+	// Do not use it when the peer doesn't have the bsc satellite protocol,
+	// otherwise vanilla geth peers may disconnect on unknown message code.
+	var extension *eth.UpgradeStatusExtension
 	if bscExt != nil {
-		statusExt = &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: h.disablePeerTxBroadcast}
+		extension = &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: h.disablePeerTxBroadcast}
 	}
-	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange(), td, statusExt); err != nil {
+	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange(), td, extension); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}

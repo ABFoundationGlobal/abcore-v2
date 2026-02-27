@@ -357,6 +357,11 @@ loop:
 			if err := c.Write(ethProto, eth.StatusMsg, status); err != nil {
 				return fmt.Errorf("write to connection failed: %v", err)
 			}
+			// UpgradeStatus is a BSC-only extension over eth/68.
+			// Non-BSC nodes skip it, so we exit the loop after Status exchange.
+			if !chain.config.IsInBSC() {
+				break loop
+			}
 		case eth.UpgradeStatusMsg + protoOffset(ethProto):
 			msg := new(eth.UpgradeStatusPacket)
 			if err := rlp.DecodeBytes(data, &msg); err != nil {

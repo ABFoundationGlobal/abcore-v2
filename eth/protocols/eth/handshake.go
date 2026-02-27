@@ -81,13 +81,12 @@ func (p *Peer) handshake68(networkID uint64, chain forkid.Blockchain, td *big.In
 		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
 	}
 
-	// The UpgradeStatusMsg round-trip is a BSC-specific extension to the eth/68
-	// handshake. Vanilla geth peers (e.g. v1.13.x) don't implement it, so only
-	// perform the exchange when the caller explicitly provides an extension.
+	// UpgradeStatus is a chain-specific extension over eth/68.
+	// When extension is nil, skip this extra exchange and stay compatible with
+	// vanilla eth/68 peers.
 	if extension == nil {
 		return nil
 	}
-
 	var upgradeStatus UpgradeStatusPacket // safe to read after two values have been received from errc
 	extensionRaw, err := extension.Encode()
 	if err != nil {
