@@ -486,7 +486,11 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		number = head.Number.Uint64()
 		td     = h.chain.GetTd(hash, number)
 	)
-	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange(), td, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: h.disablePeerTxBroadcast}); err != nil {
+	var statusExt *eth.UpgradeStatusExtension
+	if bscExt != nil {
+		statusExt = &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: h.disablePeerTxBroadcast}
+	}
+	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange(), td, statusExt); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/filtermaps"
@@ -570,6 +571,9 @@ func (s *Ethereum) APIs() []rpc.API {
 	if p, ok := s.engine.(*parlia.Parlia); ok {
 		apis = append(apis, p.APIs(s.BlockChain())...)
 	}
+	if c, ok := s.engine.(*clique.Clique); ok {
+		apis = append(apis, c.APIs(s.BlockChain())...)
+	}
 
 	// Append all the local APIs and return
 	return append(apis, []rpc.API{
@@ -778,34 +782,44 @@ func (s *Ethereum) handleAdditions(parlia *parlia.Parlia, nonce uint64, register
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining() error {
-	// If the miner was not running, initialize it
+	// Propagate the initial price point to the transaction pool
+	s.lock.RLock()
+	price := s.gasPrice
+	s.lock.RUnlock()
+	s.txPool.SetGasTip(price)
+
+	// Configure the local mining address
+	eb, err := s.Etherbase()
+	if err != nil {
+		log.Error("Cannot start mining without etherbase", "err", err)
+		return fmt.Errorf("etherbase missing: %v", err)
+	}
+	// Authorize the consensus engine with local signing credentials.
+	// Do this even if mining is already running, so changing accounts/etherbase
+	// and restarting mining doesn't leave the engine unauthorised.
+	if parlia, ok := s.engine.(*parlia.Parlia); ok {
+		wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+		if wallet == nil || err != nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
+		}
+		parlia.Authorize(eb, wallet.SignData, wallet.SignTx)
+		// Start a goroutine to handle node ID registration after sync
+		go func() {
+			s.waitForSyncAndMaxwell(parlia)
+		}()
+	}
+	if cliqueEngine, ok := s.engine.(*clique.Clique); ok {
+		wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+		if wallet == nil || err != nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
+		}
+		cliqueEngine.Authorize(eb, wallet.SignData)
+	}
+
+	// If the miner was not running, start it
 	if !s.IsMining() {
-		// Propagate the initial price point to the transaction pool
-		s.lock.RLock()
-		price := s.gasPrice
-		s.lock.RUnlock()
-		s.txPool.SetGasTip(price)
-
-		// Configure the local mining address
-		eb, err := s.Etherbase()
-		if err != nil {
-			log.Error("Cannot start mining without etherbase", "err", err)
-			return fmt.Errorf("etherbase missing: %v", err)
-		}
-		if parlia, ok := s.engine.(*parlia.Parlia); ok {
-			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
-			if wallet == nil || err != nil {
-				log.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %v", err)
-			}
-			parlia.Authorize(eb, wallet.SignData, wallet.SignTx)
-
-			// Start a goroutine to handle node ID registration after sync
-			go func() {
-				s.waitForSyncAndMaxwell(parlia)
-			}()
-		}
-
 		go s.miner.Start()
 	}
 	return nil
