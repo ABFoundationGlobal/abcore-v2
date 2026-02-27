@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 
@@ -806,6 +807,15 @@ func (s *Ethereum) StartMining() error {
 			}()
 		}
 
+		if clique, ok := s.engine.(*clique.Clique); ok {
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+			if wallet == nil || err != nil {
+				log.Error("Etherbase account unavailable locally", "err", err)
+				return fmt.Errorf("signer missing: %v", err)
+			}
+			clique.Authorize(eb, wallet.SignData)
+		}
+
 		go s.miner.Start()
 	}
 	return nil
@@ -853,8 +863,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	if !s.config.DisableSnapProtocol && s.config.SnapshotCache > 0 {
 		protos = append(protos, snap.MakeProtocols((*snapHandler)(s.handler))...)
 	}
-	protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)
-
+	// BSC extension protocol should only be enabled on Parlia/BSC chains.
+	if s.blockchain.Config().IsInBSC() {
+		protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)
+	}
 	return protos
 }
 
@@ -971,7 +983,7 @@ func (s *Ethereum) setupDiscovery() error {
 	}
 
 	// Add bsc nodes from DNS.
-	if len(s.config.BscDiscoveryURLs) > 0 {
+	if s.blockchain.Config().IsInBSC() && len(s.config.BscDiscoveryURLs) > 0 {
 		iter, err := dnsclient.NewIterator(s.config.BscDiscoveryURLs...)
 		if err != nil {
 			return err
