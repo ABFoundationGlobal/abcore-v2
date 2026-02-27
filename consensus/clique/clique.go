@@ -633,10 +633,11 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
-func (c *Clique) Delay(chain consensus.ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration {
-	// TODO: temporarily replace null with zero.
-	delay := time.Duration(0)
-	return &delay
+func (c *Clique) Delay(_ consensus.ChainReader, _ *types.Header, _ *time.Duration) *time.Duration {
+	// Clique does not use BSC-style timed block building (no DelayLeftOver config).
+	// Returning nil signals the miner to commit with whatever transactions are
+	// available immediately, bypassing the LOOP_WAIT path in commitWork.
+	return nil
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
