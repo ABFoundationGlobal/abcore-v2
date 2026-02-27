@@ -55,7 +55,7 @@ start_validator() {
         --ws.addr "127.0.0.1" \
         --ws.port $((PORT + 1000)) \
         --ws.api "eth,net,web3,debug,parlia,admin,personal" \
-        --nodiscover \
+        --nat extip:127.0.0.1 \
         --maxpeers 25 \
         --mine \
         --unlock "$VAL_ADDR" \
@@ -131,6 +131,7 @@ for NUM in $(seq 2 $NUM_VALIDATORS); do
         --ws.addr "127.0.0.1" \
         --ws.port $((PORT + 1000)) \
         --ws.api "eth,net,web3,debug,parlia,admin,personal" \
+        --nat extip:127.0.0.1 \
         $BOOTNODE_FLAG \
         --maxpeers 25 \
         --mine \
@@ -148,6 +149,24 @@ for NUM in $(seq 2 $NUM_VALIDATORS); do
     echo -e "  ${GREEN}Started with PID: $PID${NC}"
 
     sleep 2
+done
+
+# Wire all validators into a full mesh via admin.addPeer
+echo -e "${YELLOW}Connecting validators (full mesh)...${NC}"
+ENODES=()
+for NUM in $(seq 1 $NUM_VALIDATORS); do
+    IPC="$DATA_DIR/validator-$NUM/geth.ipc"
+    ENODE=$($GETH attach --exec "admin.nodeInfo.enode" "$IPC" 2>/dev/null \
+        | tr -d '"' | sed 's/?.*$//')
+    ENODES+=("$ENODE")
+done
+for i in $(seq 1 $NUM_VALIDATORS); do
+    for j in $(seq 1 $NUM_VALIDATORS); do
+        [ $i -eq $j ] && continue
+        $GETH attach --exec "admin.addPeer(\"${ENODES[$((j-1))]}\") + ''" \
+            "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null >/dev/null
+    done
+    echo -e "  validator-$i: connected to $(($NUM_VALIDATORS - 1)) peers"
 done
 
 echo ""
