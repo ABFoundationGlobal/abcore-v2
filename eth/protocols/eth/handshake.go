@@ -81,10 +81,13 @@ func (p *Peer) handshake68(networkID uint64, chain forkid.Blockchain, td *big.In
 		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
 	}
 
-	var upgradeStatus UpgradeStatusPacket // safe to read after two values have been received from errc
+	// UpgradeStatus is a chain-specific extension over eth/68.
+	// When extension is nil, skip this extra exchange and stay compatible with
+	// vanilla eth/68 peers.
 	if extension == nil {
-		extension = &UpgradeStatusExtension{}
+		return nil
 	}
+	var upgradeStatus UpgradeStatusPacket // safe to read after two values have been received from errc
 	extensionRaw, err := extension.Encode()
 	if err != nil {
 		return err
