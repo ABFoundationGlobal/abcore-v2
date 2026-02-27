@@ -151,6 +151,24 @@ for NUM in $(seq 2 $NUM_VALIDATORS); do
     sleep 2
 done
 
+# Wire all validators into a full mesh via admin.addPeer
+echo -e "${YELLOW}Connecting validators (full mesh)...${NC}"
+ENODES=()
+for NUM in $(seq 1 $NUM_VALIDATORS); do
+    IPC="$DATA_DIR/validator-$NUM/geth.ipc"
+    ENODE=$($GETH attach --exec "admin.nodeInfo.enode" "$IPC" 2>/dev/null \
+        | tr -d '"' | sed 's/?.*$//')
+    ENODES+=("$ENODE")
+done
+for i in $(seq 1 $NUM_VALIDATORS); do
+    for j in $(seq 1 $NUM_VALIDATORS); do
+        [ $i -eq $j ] && continue
+        $GETH attach --exec "admin.addPeer(\"${ENODES[$((j-1))]}\") + ''" \
+            "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null >/dev/null
+    done
+    echo -e "  validator-$i: connected to $(($NUM_VALIDATORS - 1)) peers"
+done
+
 echo ""
 echo -e "${GREEN}=== All validators started! ===${NC}"
 echo ""
