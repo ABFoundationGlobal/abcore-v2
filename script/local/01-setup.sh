@@ -60,7 +60,7 @@ for i in $(seq 1 $NUM_VALIDATORS); do
     ACCOUNT_OUTPUT=$($GETH account new --datadir "$VAL_DIR" --password "$VAL_DIR/password.txt" 2>&1)
 
     # Extract address from output
-    ADDRESS=$(echo "$ACCOUNT_OUTPUT" | grep -oP 'Public address of the key:\s+\K0x[a-fA-F0-9]{40}' || echo "$ACCOUNT_OUTPUT" | grep -oP '0x[a-fA-F0-9]{40}' | head -1)
+    ADDRESS=$(echo "$ACCOUNT_OUTPUT" | grep -Eo '0x[0-9a-fA-F]{40}' | head -1)
 
     if [ -z "$ADDRESS" ]; then
         echo -e "${RED}Failed to extract address for validator-$i${NC}"
