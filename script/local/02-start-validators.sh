@@ -55,7 +55,7 @@ start_validator() {
         --ws.addr "127.0.0.1" \
         --ws.port $((PORT + 1000)) \
         --ws.api "eth,net,web3,debug,parlia,admin,personal" \
-        --nodiscover \
+        --nat extip:127.0.0.1 \
         --maxpeers 25 \
         --mine \
         --unlock "$VAL_ADDR" \
@@ -131,6 +131,7 @@ for NUM in $(seq 2 $NUM_VALIDATORS); do
         --ws.addr "127.0.0.1" \
         --ws.port $((PORT + 1000)) \
         --ws.api "eth,net,web3,debug,parlia,admin,personal" \
+        --nat extip:127.0.0.1 \
         $BOOTNODE_FLAG \
         --maxpeers 25 \
         --mine \
