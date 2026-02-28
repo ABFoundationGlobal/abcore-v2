@@ -116,12 +116,13 @@ wait_for_ipc "$ABCORE_V2_GETH" "$V4_IPC"
 
 # Ensure it's peered.
 add_peer "$ABCORE_V2_GETH" "$V4_IPC" "$ENODE1" >/dev/null || true
+wait_for_min_peers "$ABCORE_V2_GETH" "$V4_IPC" 1 60
 
 log "Waiting for validator-4 to seal at least one recent block"
 wait_for_recent_signer "$ABCORE_V1_GETH" "$(val_ipc 1)" "$V4_ADDR" 180
 
 # All nodes should still be on same head.
-assert_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" \
+wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 120 \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V1_GETH" "$(val_ipc 3)" \
   "$ABCORE_V2_GETH" "$V4_IPC"

@@ -156,6 +156,75 @@ head_hash() {
   attach_exec "$geth_bin" "$ipc_path" "eth.getBlock('latest').hash"
 }
 
+wait_for_min_peers() {
+  local geth_bin="$1"
+  local ipc_path="$2"
+  local min_peers=${3:-1}
+  local tries=${4:-60}
+
+  for ((i=0; i<tries; i++)); do
+    local pc
+    pc=$(peer_count "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
+    if [[ "$pc" -ge "$min_peers" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "peer count did not reach ${min_peers} (ipc=${ipc_path})"
+}
+
+wait_for_head_at_least() {
+  local geth_bin="$1"
+  local ipc_path="$2"
+  local target="$3"
+  local tries=${4:-60}
+
+  for ((i=0; i<tries; i++)); do
+    local n
+    n=$(head_number "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
+    if [[ "$n" -ge "$target" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "head did not reach height ${target} (ipc=${ipc_path})"
+}
+
+assert_same_hash_at() {
+  local height="$1"
+  shift
+  local ref_geth="$1"
+  local ref_ipc="$2"
+  shift 2
+
+  local ref_hash
+  ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$height")
+  [[ -n "$ref_hash" && "$ref_hash" != "null" ]] || die "ref block hash is empty at height ${height} (ipc=${ref_ipc})"
+
+  while [[ $# -gt 0 ]]; do
+    local geth_bin="$1"
+    local ipc_path="$2"
+    shift 2
+    local h
+    h=$(block_hash_at "$geth_bin" "$ipc_path" "$height")
+    if [[ "$h" != "$ref_hash" ]]; then
+      die "block hash mismatch at height ${height}: ref=${ref_hash} other=${h} ipc=${ipc_path}"
+    fi
+  done
+}
+
+miner_start() {
+  local geth_bin="$1"
+  local ipc_path="$2"
+  # abcore-v2 exposes miner.start() with no args. Some other geth variants allow
+  # miner.start(1). Try both and fail loudly if neither works.
+  local out
+  out=$(attach_exec "$geth_bin" "$ipc_path" "(function(){try{miner.start();return 'ok'}catch(e){try{miner.start(1);return 'ok-legacy'}catch(e2){return 'err:'+e+'|'+e2}}})()" || true)
+  if [[ "$out" != ok* ]]; then
+    die "failed to start miner via IPC (ipc=${ipc_path}): ${out}"
+  fi
+}
+
 block_hash_at() {
   local geth_bin="$1"
   local ipc_path="$2"
@@ -218,6 +287,61 @@ assert_same_head() {
       die "head hash mismatch at height ${target}: ref=${ref_hash} other=${h} ipc=${ipc_path}"
     fi
   done
+}
+
+check_same_head() {
+  local ref_geth="$1"
+  local ref_ipc="$2"
+  shift 2
+
+  local target
+  target=$(head_number "$ref_geth" "$ref_ipc")
+
+  local args=("$@")
+  for ((i=0; i<${#args[@]}; i+=2)); do
+    local geth_bin="${args[$i]}"
+    local ipc_path="${args[$((i+1))]}"
+    local n
+    n=$(head_number "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
+    if [[ "$n" -lt "$target" ]]; then
+      target="$n"
+    fi
+  done
+
+  local ref_hash
+  ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$target")
+  if [[ -z "$ref_hash" || "$ref_hash" == "null" ]]; then
+    return 1
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    local geth_bin="$1"
+    local ipc_path="$2"
+    shift 2
+    local h
+    h=$(block_hash_at "$geth_bin" "$ipc_path" "$target")
+    if [[ "$h" != "$ref_hash" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+wait_for_same_head() {
+  local ref_geth="$1"
+  local ref_ipc="$2"
+  local tries="$3"
+  shift 3
+
+  [[ "$tries" =~ ^[0-9]+$ ]] || die "wait_for_same_head: tries must be a number"
+
+  for ((i=0; i<tries; i++)); do
+    if check_same_head "$ref_geth" "$ref_ipc" "$@"; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "nodes did not converge on same head within timeout"
 }
 
 stop_pidfile() {

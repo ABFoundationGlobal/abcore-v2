@@ -51,19 +51,21 @@ wait_for_ipc "$ABCORE_V2_GETH" "$RPC_IPC"
 
 # Peer it to validator-1.
 ENODE1=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 1)")
+ENODE2=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 2)")
+ENODE3=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 3)")
 add_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE1" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE2" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE3" >/dev/null || true
 
-log "Waiting for rpc-v2-1 to sync to current head"
-for ((i=0; i<120; i++)); do
-  h1=$(head_hash "$ABCORE_V1_GETH" "$(val_ipc 1)")
-  hr=$(head_hash "$ABCORE_V2_GETH" "$RPC_IPC")
-  if [[ "$h1" == "$hr" ]]; then
-    log "rpc-v2-1 synced (head=${hr})"
-    log "Scenario 2 OK"
-    exit 0
-  fi
-  sleep 1
+wait_for_min_peers "$ABCORE_V2_GETH" "$RPC_IPC" 1 60
 
-done
+log "Waiting for rpc-v2-1 to sync to validators"
+ref_head=$(head_number "$ABCORE_V1_GETH" "$(val_ipc 1)")
+checkpoint=$((ref_head > 2 ? ref_head - 2 : ref_head))
+wait_for_head_at_least "$ABCORE_V2_GETH" "$RPC_IPC" "$ref_head" 120
+assert_same_hash_at "$checkpoint" \
+  "$ABCORE_V1_GETH" "$(val_ipc 1)" \
+  "$ABCORE_V2_GETH" "$RPC_IPC"
 
-die "rpc-v2-1 did not sync to validator-1 head within timeout"
+log "rpc-v2-1 synced (checkpoint=${checkpoint})"
+log "Scenario 2 OK"

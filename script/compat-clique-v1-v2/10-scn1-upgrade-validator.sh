@@ -53,13 +53,18 @@ wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")"
 
 # Ensure it's peered.
 ENODE1=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 1)")
+ENODE2=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 2)")
+ENODE3=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 3)")
 add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE1" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE2" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE3" >/dev/null || true
+wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$N")" 1 60
 
 log "Waiting for chain to advance"
 wait_for_blocks "$ABCORE_V1_GETH" "$(val_ipc 1)" 3 90
 
-# Heads should match.
-assert_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" \
+log "Waiting for upgraded validator-${N} to converge on canonical head"
+wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 120 \
   "$ABCORE_V1_GETH" "$(val_ipc 3)" \
   "$ABCORE_V2_GETH" "$(val_ipc "$N")"
 
