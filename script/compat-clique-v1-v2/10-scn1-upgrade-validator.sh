@@ -51,22 +51,25 @@ log "Starting validator-${N} with v2 binary (same datadir)"
 
 wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")"
 
-# Ensure it's peered.
-ENODE1=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 1)")
-ENODE2=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 2)")
-ENODE3=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 3)")
-add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE1" >/dev/null || true
-add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE2" >/dev/null || true
-add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$ENODE3" >/dev/null || true
+# Ensure it's peered. Skip validator N itself (its IPC now belongs to the new v2 process).
+for peer in 1 2 3; do
+  [[ "$peer" -eq "$N" ]] && continue
+  enode=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc "$peer")")
+  add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$enode" >/dev/null || true
+done
 wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$N")" 1 60
 
 log "Waiting for chain to advance"
 wait_for_blocks "$ABCORE_V1_GETH" "$(val_ipc 1)" 3 90
 
 log "Waiting for upgraded validator-${N} to converge on canonical head"
-wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 120 \
-  "$ABCORE_V1_GETH" "$(val_ipc 3)" \
-  "$ABCORE_V2_GETH" "$(val_ipc "$N")"
+same_head_args=()
+for peer in 1 2 3; do
+  [[ "$peer" -eq "$N" ]] && continue
+  same_head_args+=("$ABCORE_V1_GETH" "$(val_ipc "$peer")")
+done
+same_head_args+=("$ABCORE_V2_GETH" "$(val_ipc "$N")")
+wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 120 "${same_head_args[@]}"
 
 # Confirm the upgraded validator sealed at least one recent block.
 log "Checking that validator-${N} appears in clique snapshot recents"
