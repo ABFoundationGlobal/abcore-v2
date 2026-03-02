@@ -35,7 +35,7 @@ This will:
 - clean any prior state (`data/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 3 scenarios in sequence, then stop all nodes
+- run the 4 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -51,6 +51,11 @@ an archive/RPC node in a predominantly v1 network.
 into the Clique signer set via `clique.propose` from two existing validators, then restart it
 with mining enabled. Verify it seals blocks and all nodes (v1 and v2) agree on the canonical
 chain. Tests dynamic validator set changes across versions.
+
+**Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (1 and 3)
+to v2 in sequence. Verify the fully-v2 4-validator network continues producing blocks and all
+validators converge on the same head. Tests the end-state of a complete rolling upgrade where no
+v1 nodes remain.
 
 ## Environment variables
 
@@ -74,10 +79,6 @@ chain. Tests dynamic validator set changes across versions.
 ## Suggested future scenarios
 
 These are not yet implemented but cover additional compatibility surface:
-
-**Scenario 4 — Complete rolling upgrade**: Stop the remaining v1 validators and restart them with
-the v2 binary, leaving a fully-v2 network. Verify all nodes converge on the same head and each
-upgraded validator seals at least one block. Tests the end-state where no v1 nodes remain.
 
 **Scenario 5 — v1/v2 re-org resilience**: Isolate a v1 and v2 node for 3 blocks (drop peers),
 then reconnect and verify they converge on the same canonical chain via highest-difficulty fork
