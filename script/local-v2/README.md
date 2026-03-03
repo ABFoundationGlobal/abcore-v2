@@ -1,4 +1,4 @@
-# Local Parlia Network
+# Local Parlia Network (v2)
 
 Scripts to spin up a local Parlia (PoSA) test network using the ABCore v2 binary.
 
