@@ -4,7 +4,7 @@
 # Usage:
 #   ./07-docker-up.sh
 #
-# Prerequisite: run ./01-setup.sh [1|3] first.
+# Prerequisite: run ./01-setup.sh [1-5] first.
 set -euo pipefail
 
 RED='\033[0;31m'

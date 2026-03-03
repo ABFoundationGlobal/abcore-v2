@@ -110,11 +110,13 @@ docker run -d \
   --name abcore-node \
   -v $(pwd)/my-node/config:/bsc/config \
   -v $(pwd)/my-node/data:/data \
-  -p 8545:8545 \
-  -p 8546:8546 \
-  -p 30303:30303 \
+  -p 127.0.0.1:8545:8545 \
+  -p 127.0.0.1:8546:8546 \
+  -p 127.0.0.1:30303:30303 \
   abcore:local
 ```
+
+> **Note:** Ports are bound to `127.0.0.1` by default. The config template above includes `admin` and `personal` in `HTTPModules` — these are convenient for local development but should be removed or restricted before exposing the node on a public network.
 
 ### Run (validator — block-producing)
 
@@ -127,9 +129,9 @@ docker run -d \
   -e MINER_ADDR=0xYourValidatorAddress \
   -v $(pwd)/my-node/config:/bsc/config \
   -v $(pwd)/my-node/data:/data \
-  -p 8545:8545 \
-  -p 8546:8546 \
-  -p 30303:30303 \
+  -p 127.0.0.1:8545:8545 \
+  -p 127.0.0.1:8546:8546 \
+  -p 127.0.0.1:30303:30303 \
   abcore:local
 ```
 
@@ -151,7 +153,7 @@ docker run ... abcore:local --verbosity 4 --gcmode archive
 
 ## Scenario 2 — Local Parlia Devnet (Docker Compose)
 
-Runs 1 or 3 validators on a private Docker network, equivalent to the bare-metal `script/local/` workflow.
+Runs 1–5 validators on a private Docker network, equivalent to the bare-metal `script/local/` workflow.
 
 ### Quick start
 
