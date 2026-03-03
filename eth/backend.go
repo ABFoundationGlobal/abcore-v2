@@ -571,6 +571,9 @@ func (s *Ethereum) APIs() []rpc.API {
 	if p, ok := s.engine.(*parlia.Parlia); ok {
 		apis = append(apis, p.APIs(s.BlockChain())...)
 	}
+	if c, ok := s.engine.(*clique.Clique); ok {
+		apis = append(apis, c.APIs(s.BlockChain())...)
+	}
 
 	// Append all the local APIs and return
 	return append(apis, []rpc.API{

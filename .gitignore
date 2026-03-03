@@ -66,3 +66,8 @@ cmd/keeper/keeper
 # ABCore project files
 .claude/
 CLAUDE.md
+
+# Compat Clique suite generated data
+script/compat-clique-v1-v2/data/
+script/compat-clique-v1-v2/genesis.json
+script/compat-clique-v1-v2/bin/

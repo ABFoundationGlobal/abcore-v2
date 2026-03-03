@@ -519,7 +519,19 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 
 // NextInTurnValidator return the next in-turn validator for header
 func (c *Clique) NextInTurnValidator(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, error) {
-	return common.Address{}, errors.New("not implemented")
+	if header == nil {
+		return common.Address{}, errors.New("nil header")
+	}
+	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+	signers := snap.signers()
+	if len(signers) == 0 {
+		return common.Address{}, errors.New("no signers")
+	}
+	idx := (header.Number.Uint64() + 1) % uint64(len(signers))
+	return signers[idx], nil
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
