@@ -99,11 +99,10 @@ wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 2)" 120 \
 # Use wait_for_block_miner rather than wait_for_recent_signer: with 4 signers the
 # Clique recents window is only 3 slots, so a validator's recent entry can roll over
 # before we check it. Scanning block headers via clique.getSigner() is more reliable.
-# Must use ABCORE_V1_GETH as the attach client — v2's JS console lacks clique bindings.
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
-  wait_for_block_miner "$ABCORE_V1_GETH" "$(val_ipc 2)" "$addr" 16 120
+  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc 2)" "$addr" 16 120
 done
 
 log "Scenario 4 OK: all validators running v2, network healthy"
