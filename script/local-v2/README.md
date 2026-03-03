@@ -24,6 +24,75 @@ Scripts to spin up a local Parlia (PoSA) test network using the ABCore v2 binary
 ./05-cleanup.sh
 ```
 
+## Running with Docker
+
+An alternative to the bare-metal workflow above. No Go toolchain required — the image is built from the repo's root `Dockerfile`.
+
+### Prerequisites
+
+- Docker 24+
+- Docker Compose v2 (`docker compose`)
+- Python 3 (still needed by `01-setup.sh` for genesis generation)
+
+### Quick Start
+
+```bash
+# 1. Generate validator keys and genesis (same as bare metal)
+./01-setup.sh [num_validators]   # 1–5 validators supported
+
+# 2. Build image (first time only) and start
+./07-docker-up.sh
+```
+
+`07-docker-up.sh` handles the rest: builds the image if not present, copies shared config files, writes `.env` with validator addresses and the active Compose profile, then starts all containers.
+
+### Endpoints
+
+Validator-1 always starts. Additional validators start based on the count passed to `01-setup.sh` (1–5).
+
+| Node | HTTP RPC | WebSocket | P2P |
+|------|----------|-----------|-----|
+| validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
+| validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
+| validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+| validator-4 | `http://localhost:8548` | `ws://localhost:9548` | `30306` |
+| validator-5 | `http://localhost:8549` | `ws://localhost:9549` | `30307` |
+
+All ports are bound to `127.0.0.1` (localhost only). Only the ports for the validators that were set up will be active.
+
+### Common operations
+
+```bash
+# View logs for all containers
+docker compose -f docker-compose.yml logs -f
+
+# View logs for a single validator
+docker compose -f docker-compose.yml logs -f validator-2
+
+# Stop all containers
+docker compose -f docker-compose.yml down
+
+# Open a geth console on validator-1
+docker exec -it abcore-v1 geth attach /data/geth.ipc
+
+# Open a shell
+docker exec -it abcore-v1 /bin/bash
+
+# Force rebuild the image (e.g. after source changes)
+docker build -t abcore:local ../..
+```
+
+### Reset
+
+```bash
+docker compose -f docker-compose.yml down
+./05-cleanup.sh          # removes data/ and genesis.json
+./01-setup.sh 3          # re-generate keys and genesis
+./07-docker-up.sh        # restart (image already cached)
+```
+
+---
+
 ## Network Configuration
 
 | Parameter  | Value                    |
