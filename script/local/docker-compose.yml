@@ -4,12 +4,14 @@
 #   Run ./01-setup.sh [1|3] from this directory first.
 #   Then start with ./07-docker-up.sh
 #
-# Or manually:
+# Or manually (requires .env with VALIDATOR_*_ADDR and COMPOSE_PROFILES set,
+# or the equivalent env vars exported in the shell):
 #   Single validator:  docker compose up -d
 #   Three validators:  COMPOSE_PROFILES=multi docker compose up -d
 #
-# Note: 07-docker-up.sh writes COMPOSE_PROFILES into .env automatically,
-# so plain `docker compose logs/down` work for all containers after that.
+# Note: 07-docker-up.sh writes COMPOSE_PROFILES (and all required vars) into
+# .env automatically, so plain `docker compose logs/down` work for all
+# containers after that.
 
 version: '3.8'
 
@@ -50,10 +52,10 @@ services:
       - ./config:/bsc/config:ro        # config.toml + genesis.json + password.txt
       - ./data/validator-1:/data       # keystore + chain state
     ports:
-      - "8545:8545"          # HTTP RPC
-      - "9545:8546"          # WebSocket
-      - "30303:30303"        # P2P TCP
-      - "30303:30303/udp"    # P2P UDP
+      - "127.0.0.1:8545:8545"          # HTTP RPC
+      - "127.0.0.1:9545:8546"          # WebSocket
+      - "127.0.0.1:30303:30303"        # P2P TCP
+      - "127.0.0.1:30303:30303/udp"    # P2P UDP
 
   # ── Validator 2 (multi profile) ───────────────────────────────────────────
   validator-2:
@@ -68,10 +70,10 @@ services:
       - ./config:/bsc/config:ro
       - ./data/validator-2:/data
     ports:
-      - "8546:8545"
-      - "9546:8546"
-      - "30304:30303"
-      - "30304:30303/udp"
+      - "127.0.0.1:8546:8545"
+      - "127.0.0.1:9546:8546"
+      - "127.0.0.1:30304:30303"
+      - "127.0.0.1:30304:30303/udp"
     depends_on:
       validator-1:
         condition: service_healthy
@@ -89,10 +91,10 @@ services:
       - ./config:/bsc/config:ro
       - ./data/validator-3:/data
     ports:
-      - "8547:8545"
-      - "9547:8546"
-      - "30305:30303"
-      - "30305:30303/udp"
+      - "127.0.0.1:8547:8545"
+      - "127.0.0.1:9547:8546"
+      - "127.0.0.1:30305:30303"
+      - "127.0.0.1:30305:30303/udp"
     depends_on:
       validator-1:
         condition: service_healthy
@@ -103,7 +105,7 @@ services:
   # validator isn't ready yet.
   mesh:
     profiles: [multi]
-    image: alpine
+    image: alpine:3.21
     container_name: abcore-mesh
     command: ["/bin/sh", "/mesh.sh"]
     volumes:

@@ -159,7 +159,7 @@ Runs 1 or 3 validators on a private Docker network, equivalent to the bare-metal
 cd script/local
 
 # 1. Generate validator accounts and genesis.json
-#    Supports 1 or 3 validators (other counts start only validator-1 in Docker)
+#    Docker Compose supports exactly 1 or 3 validators; other counts are rejected.
 ./01-setup.sh 3
 
 # 2. Start the devnet

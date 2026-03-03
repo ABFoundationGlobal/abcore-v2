@@ -48,11 +48,15 @@ An alternative to the bare-metal workflow above. No Go toolchain required — th
 
 ### Endpoints
 
+Validator-1 is always started. Validator-2 and validator-3 are only available when running in 3-validator mode (`./01-setup.sh 3`).
+
 | Node | HTTP RPC | WebSocket | P2P |
 |------|----------|-----------|-----|
 | validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
-| validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
-| validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+| validator-2 *(multi only)* | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
+| validator-3 *(multi only)* | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+
+All ports are bound to `127.0.0.1` (localhost only).
 
 ### Common operations
 

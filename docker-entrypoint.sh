@@ -42,4 +42,4 @@ elif [ -n "${NAT:-}" ]; then
   NAT_ARGS=(--nat "${NAT}")
 fi
 
-exec "geth" "--config" ${BSC_CONFIG} "${MINE_ARGS[@]}" "${NAT_ARGS[@]}" "$@"
+exec "geth" "--config" "${BSC_CONFIG}" "${MINE_ARGS[@]}" "${NAT_ARGS[@]}" "$@"

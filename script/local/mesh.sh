@@ -27,14 +27,26 @@ wait_for() {
 }
 
 get_enode() {
-  # Extract enode string and strip ?discport query param
-  rpc "$1" "admin_nodeInfo" \
+  enode=$(rpc "$1" "admin_nodeInfo" \
     | sed 's/.*"enode":"\([^"]*\)".*/\1/' \
-    | sed 's/?[^"]*$//'
+    | sed 's/?[^"]*$//')
+  if [ -z "$enode" ]; then
+    echo "ERROR: failed to get enode from $1" >&2
+    exit 1
+  fi
+  printf '%s\n' "$enode"
 }
 
 add_peer() {
-  rpc "$1" "admin_addPeer" "[\"$2\"]" >/dev/null
+  response=$(rpc "$1" "admin_addPeer" "[\"$2\"]")
+  if echo "$response" | grep -q '"error"'; then
+    echo "ERROR: admin_addPeer failed ($1 -> $2): $response" >&2
+    exit 1
+  fi
+  if ! echo "$response" | grep -q '"result":true'; then
+    echo "ERROR: admin_addPeer did not return true ($1 -> $2): $response" >&2
+    exit 1
+  fi
 }
 
 # ── wait for all three validators ─────────────────────────────────────────────

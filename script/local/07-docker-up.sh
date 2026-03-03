@@ -36,7 +36,14 @@ fi
 # ── count validators set up on disk ───────────────────────────────────────────
 
 NUM_VALIDATORS=$(ls -d "$SCRIPT_DIR/data"/validator-* 2>/dev/null | wc -l | tr -d ' ')
-echo -e "${GREEN}Found ${NUM_VALIDATORS} validator(s)${NC}"
+echo -e "${GREEN}Found ${NUM_VALIDATORS} validator(s) on disk${NC}"
+
+# Docker Compose only defines services for 1 or 3 validators.
+if [ "$NUM_VALIDATORS" -ne 1 ] && [ "$NUM_VALIDATORS" -ne 3 ]; then
+    echo -e "${RED}Error: Docker devnet supports only 1 or 3 validators, got ${NUM_VALIDATORS}.${NC}"
+    echo -e "${RED}Re-run: ./01-setup.sh 1  or  ./01-setup.sh 3${NC}"
+    exit 1
+fi
 
 # ── build image only when not already present ─────────────────────────────────
 # To force a rebuild: docker build -t abcore:local <repo-root>
