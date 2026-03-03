@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Scenario 4:
-# - upgrade the remaining v1 validators (1 and 3) to v2 in sequence
+# - upgrade the remaining v1 validators (1 and 3) to v2 with a coordinated stop/start
+#   (stop both v1s, then start both v2s)
 # - confirm the fully-v2 4-validator network continues producing blocks
-# - confirm each upgraded validator seals at least one recent block
+# - confirm each upgraded validator seals at least one block
 #
 # Precondition: scenarios 1-3 have run (validator-2 and validator-4 are already v2).
 #
@@ -20,11 +21,21 @@ source "${SCRIPT_DIR}/lib.sh"
 resolve_binaries
 
 # After scenarios 1-3:
-#   validator-1: v1, still running
-#   validator-2: v2 (upgraded in scn1 with N=2 default)
-#   validator-3: v1, still running
+#   one of validators 1, 2, or 3 is already v2 (controlled by UPGRADE_VALIDATOR_N, default 2)
 #   validator-4: v2 (voted in via scn3)
-REMAINING_V1=(1 3)
+#
+# The remaining v1 validators are "all of {1,2,3} except UPGRADE_VALIDATOR_N".
+UPGRADE_N="${UPGRADE_VALIDATOR_N:-2}"
+case "$UPGRADE_N" in
+  1|2|3) ;;
+  *) die "UPGRADE_VALIDATOR_N must be 1, 2, or 3 (got: ${UPGRADE_N})" ;;
+esac
+REMAINING_V1=()
+for N in 1 2 3; do
+  if [[ "$N" -ne "$UPGRADE_N" ]]; then
+    REMAINING_V1+=("$N")
+  fi
+done
 
 # Phase 1: stop all remaining v1 validators before starting any v2 replacements.
 # This keeps validators 2 and 4 (both v2) running throughout — the network drops to
@@ -87,13 +98,13 @@ for N in "${REMAINING_V1[@]}"; do
 done
 
 log "Waiting for chain to advance on fully-v2 network"
-wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc 2)" 3 90
+wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc 4)" 3 90
 
 log "Waiting for all 4 v2 validators to converge on same head"
-wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 2)" 120 \
+wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 4)" 120 \
   "$ABCORE_V2_GETH" "$(val_ipc 1)" \
-  "$ABCORE_V2_GETH" "$(val_ipc 3)" \
-  "$ABCORE_V2_GETH" "$(val_ipc 4)"
+  "$ABCORE_V2_GETH" "$(val_ipc 2)" \
+  "$ABCORE_V2_GETH" "$(val_ipc 3)"
 
 # Confirm each newly upgraded validator sealed at least one block.
 # Use wait_for_block_miner rather than wait_for_recent_signer: with 4 signers the
@@ -102,7 +113,7 @@ wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 2)" 120 \
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
-  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc 2)" "$addr" 16 120
+  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc 4)" "$addr" 16 120
 done
 
 log "Scenario 4 OK: all validators running v2, network healthy"
