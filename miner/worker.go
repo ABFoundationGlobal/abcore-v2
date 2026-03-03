@@ -1260,9 +1260,11 @@ LOOP:
 		workList = append(workList, work)
 
 		delay := w.engine.Delay(w.chain, work.header, w.config.DelayLeftOver)
-		if delay == nil {
-			log.Warn("commitWork delay is nil, something is wrong")
-			stopTimer = nil
+		noDelay := delay == nil
+		if noDelay {
+			// Some engines (e.g. Clique/Ethash) don't use BSC-style timed block building.
+			// Treat nil as "no time budget / single build" and bypass timer-driven paths.
+			log.Debug("commitWork delay is nil, bypass timed loop", "block", work.header.Number)
 		} else if *delay <= 0 {
 			log.Debug("Not enough time for commitWork")
 			break
@@ -1305,7 +1307,11 @@ LOOP:
 
 		// Fill pending transactions from the txpool into the block.
 		fillStart := time.Now()
-		err = w.fillTransactions(interruptCh, work, stopTimer, nil)
+		var txFillTimer *time.Timer
+		if !noDelay {
+			txFillTimer = stopTimer
+		}
+		err = w.fillTransactions(interruptCh, work, txFillTimer, nil)
 		fillDuration := time.Since(fillStart)
 		switch {
 		case errors.Is(err, errBlockInterruptedByNewHead):
@@ -1322,9 +1328,8 @@ LOOP:
 			break LOOP
 		}
 
-		if interruptCh == nil || stopTimer == nil {
-			// it is single commit work, no need to try several time.
-			log.Info("commitWork interruptCh or stopTimer is nil")
+		if noDelay || interruptCh == nil {
+			// No timed loop for engines without Delay() or when interrupt is disabled.
 			break
 		}
 
@@ -1343,6 +1348,11 @@ LOOP:
 				return
 			case ev := <-txsCh:
 				delay := w.engine.Delay(w.chain, work.header, w.config.DelayLeftOver)
+				if delay == nil {
+					log.Debug("commitWork txsCh arrived but Delay() is nil; stop waiting", "fillDuration", fillDuration.String(), "work.tcount", work.tcount,
+						"newTxsNum", newTxsNum, "len(ev.Txs)", len(ev.Txs))
+					break LOOP
+				}
 				log.Debug("commitWork txsCh arrived", "fillDuration", fillDuration.String(),
 					"delay", delay.String(), "work.tcount", work.tcount,
 					"newTxsNum", newTxsNum, "len(ev.Txs)", len(ev.Txs))

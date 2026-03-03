@@ -18,6 +18,7 @@ package eth
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -28,6 +29,50 @@ import (
 
 // Tests that handshake failures are detected and reported correctly.
 func TestHandshake68(t *testing.T) { testHandshake(t, ETH68) }
+
+func TestHandshake68NoUpgradeStatusRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	backend := newTestBackend(3)
+	defer backend.close()
+
+	app, net := p2p.MsgPipe()
+	defer app.Close()
+	defer net.Close()
+
+	peer := NewPeer(ETH68, p2p.NewPeer(enode.ID{}, "peer", nil), net, nil)
+	defer peer.Close()
+
+	// Simulate a vanilla peer that performs only the standard StatusMsg exchange.
+	remoteErrc := make(chan error, 1)
+	go func() {
+		msg, err := app.ReadMsg()
+		if err != nil {
+			remoteErrc <- err
+			return
+		}
+		if msg.Code != StatusMsg {
+			remoteErrc <- fmt.Errorf("expected StatusMsg, got %d", msg.Code)
+			return
+		}
+		var status StatusPacket68
+		if err := msg.Decode(&status); err != nil {
+			remoteErrc <- err
+			return
+		}
+		remoteErrc <- p2p.Send(app, StatusMsg, &status)
+	}()
+
+	head := backend.chain.CurrentBlock()
+	td := backend.chain.GetTd(head.Hash(), head.Number.Uint64())
+
+	if err := peer.Handshake(1, backend.chain, BlockRangeUpdatePacket{}, td, nil); err != nil {
+		t.Fatalf("handshake failed: %v", err)
+	}
+	if err := <-remoteErrc; err != nil {
+		t.Fatalf("remote failed: %v", err)
+	}
+}
 
 func testHandshake(t *testing.T, protocol uint) {
 	t.Parallel()
