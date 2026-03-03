@@ -61,7 +61,7 @@ v1 nodes remain.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ABCORE_V1_GETH` | `/data/kai/workspace/ab/abcore/build/bin/geth` | Path to v1.13.x binary |
+| `ABCORE_V1_GETH` | `script/compat-clique-v1-v2/bin/geth-v1` (auto-downloaded) | Path to v1.13.x binary |
 | `ABCORE_V2_GETH` | `./build/bin/geth` | Path to v2 binary |
 | `KEEP_RUNNING` | `0` | Set to `1` to leave nodes running after pass |
 | `UPGRADE_VALIDATOR_N` | `2` | Which validator to upgrade in scenario 1 (1–3) |

@@ -1,0 +1,174 @@
+# Local Parlia devnet – Docker Compose
+#
+# Prerequisites:
+#   Run ./01-setup.sh [1-5] from this directory first.
+#   Then start with ./07-docker-up.sh
+#
+# Or manually (requires .env with VALIDATOR_*_ADDR, NUM_VALIDATORS, and
+# COMPOSE_PROFILES set, or equivalent env vars exported in the shell):
+#   1 validator:  docker compose up -d
+#   N validators: COMPOSE_PROFILES=vN docker compose up -d   (N = 2..5)
+#
+# Profile scheme:
+#   validator-2 included in profiles: v2 v3 v4 v5
+#   validator-3 included in profiles:    v3 v4 v5
+#   validator-4 included in profiles:       v4 v5
+#   validator-5 included in profiles:          v5
+#   mesh        included in profiles: v2 v3 v4 v5
+#
+# Note: 07-docker-up.sh writes COMPOSE_PROFILES (and all required vars) into
+# .env automatically, so plain `docker compose logs/down` work for all
+# containers after that.
+
+version: '3.8'
+
+# ── Shared validator defaults ──────────────────────────────────────────────────
+x-validator: &validator
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  image: abcore:local
+  restart: unless-stopped
+  networks:
+    - devnet
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >
+        wget -qO-
+        --post-data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
+        --header 'Content-Type: application/json'
+        http://localhost:8545 || exit 1
+    interval: 5s
+    timeout: 3s
+    retries: 12
+    start_period: 20s
+
+# ── Services ───────────────────────────────────────────────────────────────────
+services:
+
+  # ── Validator 1 (always starts, acts as anchor peer) ─────────────────────
+  validator-1:
+    <<: *validator
+    container_name: abcore-v1
+    environment:
+      MINE: "true"
+      MINER_ADDR: "${VALIDATOR_1_ADDR}"
+      NAT: "auto"
+    volumes:
+      - ./config:/bsc/config:ro        # config.toml + genesis.json + password.txt
+      - ./data/validator-1:/data       # keystore + chain state
+    ports:
+      - "127.0.0.1:8545:8545"          # HTTP RPC
+      - "127.0.0.1:9545:8546"          # WebSocket
+      - "127.0.0.1:30303:30303"        # P2P TCP
+      - "127.0.0.1:30303:30303/udp"    # P2P UDP
+
+  # ── Validator 2 ───────────────────────────────────────────────────────────
+  validator-2:
+    <<: *validator
+    profiles: [v2, v3, v4, v5]
+    container_name: abcore-v2
+    environment:
+      MINE: "true"
+      MINER_ADDR: "${VALIDATOR_2_ADDR}"
+      NAT: "auto"
+    volumes:
+      - ./config:/bsc/config:ro
+      - ./data/validator-2:/data
+    ports:
+      - "127.0.0.1:8546:8545"
+      - "127.0.0.1:9546:8546"
+      - "127.0.0.1:30304:30303"
+      - "127.0.0.1:30304:30303/udp"
+    depends_on:
+      validator-1:
+        condition: service_healthy
+
+  # ── Validator 3 ───────────────────────────────────────────────────────────
+  validator-3:
+    <<: *validator
+    profiles: [v3, v4, v5]
+    container_name: abcore-v3
+    environment:
+      MINE: "true"
+      MINER_ADDR: "${VALIDATOR_3_ADDR}"
+      NAT: "auto"
+    volumes:
+      - ./config:/bsc/config:ro
+      - ./data/validator-3:/data
+    ports:
+      - "127.0.0.1:8547:8545"
+      - "127.0.0.1:9547:8546"
+      - "127.0.0.1:30305:30303"
+      - "127.0.0.1:30305:30303/udp"
+    depends_on:
+      validator-1:
+        condition: service_healthy
+
+  # ── Validator 4 ───────────────────────────────────────────────────────────
+  validator-4:
+    <<: *validator
+    profiles: [v4, v5]
+    container_name: abcore-v4
+    environment:
+      MINE: "true"
+      MINER_ADDR: "${VALIDATOR_4_ADDR}"
+      NAT: "auto"
+    volumes:
+      - ./config:/bsc/config:ro
+      - ./data/validator-4:/data
+    ports:
+      - "127.0.0.1:8548:8545"
+      - "127.0.0.1:9548:8546"
+      - "127.0.0.1:30306:30303"
+      - "127.0.0.1:30306:30303/udp"
+    depends_on:
+      validator-1:
+        condition: service_healthy
+
+  # ── Validator 5 ───────────────────────────────────────────────────────────
+  validator-5:
+    <<: *validator
+    profiles: [v5]
+    container_name: abcore-v5
+    environment:
+      MINE: "true"
+      MINER_ADDR: "${VALIDATOR_5_ADDR}"
+      NAT: "auto"
+    volumes:
+      - ./config:/bsc/config:ro
+      - ./data/validator-5:/data
+    ports:
+      - "127.0.0.1:8549:8545"
+      - "127.0.0.1:9549:8546"
+      - "127.0.0.1:30307:30303"
+      - "127.0.0.1:30307:30303/udp"
+    depends_on:
+      validator-1:
+        condition: service_healthy
+
+  # ── Mesh connector ────────────────────────────────────────────────────────
+  # Runs once after validator-1 is healthy, then polls until all NUM_VALIDATORS
+  # validators respond before wiring them into a full peer mesh via
+  # admin_addPeer. Restarts on failure so it retries automatically.
+  mesh:
+    profiles: [v2, v3, v4, v5]
+    image: alpine:3.21
+    container_name: abcore-mesh
+    command: ["/bin/sh", "/mesh.sh"]
+    environment:
+      NUM_VALIDATORS: "${NUM_VALIDATORS}"
+    volumes:
+      - ./mesh.sh:/mesh.sh:ro
+    networks:
+      - devnet
+    depends_on:
+      validator-1:
+        condition: service_healthy
+    restart: on-failure
+
+# ── Network ────────────────────────────────────────────────────────────────────
+networks:
+  devnet:
+    driver: bridge
