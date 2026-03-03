@@ -11,7 +11,7 @@ CLIQUE_CHAIN_ID=${CLIQUE_CHAIN_ID:-7141}
 CLIQUE_NETWORK_ID=${CLIQUE_NETWORK_ID:-$CLIQUE_CHAIN_ID}
 CLIQUE_PERIOD=${CLIQUE_PERIOD:-3}
 
-V1_DEFAULT="/data/kai/workspace/ab/abcore/build/bin/geth"
+V1_DEFAULT="${SCRIPT_DIR}/bin/geth-v1"
 V2_DEFAULT="${REPO_ROOT}/build/bin/geth"
 
 ABCORE_V1_GETH=${ABCORE_V1_GETH:-""}
@@ -38,6 +38,10 @@ require_exe() {
 
 resolve_binaries() {
   if [[ -z "$ABCORE_V1_GETH" ]]; then
+    if [[ ! -x "$V1_DEFAULT" ]]; then
+      log "v1 binary not found at ${V1_DEFAULT}, downloading..."
+      "${SCRIPT_DIR}/00-get-v1-geth.sh"
+    fi
     if [[ -x "$V1_DEFAULT" ]]; then
       ABCORE_V1_GETH="$V1_DEFAULT"
     fi
@@ -386,41 +390,4 @@ wait_for_recent_signer() {
     sleep 1
   done
   die "did not observe signer in recents: $signer_addr"
-}
-
-# wait_for_block_miner: poll until a block sealed by signer_addr appears in the last
-# lookback_n blocks. Uses clique.getSigner(blockNumber) to get the actual Clique signer
-# (eth.getBlock().miner is always 0x0 for Clique blocks). More reliable than
-# wait_for_recent_signer when the signer set is large enough that recents rolls over.
-#
-# clique_bin: the binary whose geth attach client has the clique JS namespace — must be
-# ABCORE_V1_GETH because the v2 binary's JS console does not include clique bindings.
-# The ipc_path may belong to any running node (v1 or v2); the IPC protocol is compatible.
-wait_for_block_miner() {
-  local clique_bin="$1"  # use ABCORE_V1_GETH — v2 attach lacks clique JS namespace
-  local ipc_path="$2"
-  local signer_addr="$3"
-  local lookback_n=${4:-12}  # how many recent blocks to scan
-  local tries=${5:-90}
-
-  local addr_lower
-  addr_lower=$(echo "$signer_addr" | tr '[:upper:]' '[:lower:]')
-
-  for ((i=0; i<tries; i++)); do
-    local tip
-    tip=$(head_number "$clique_bin" "$ipc_path" 2>/dev/null || echo 0)
-    local start=$(( tip > lookback_n ? tip - lookback_n : 0 ))
-    for ((blk=tip; blk>=start; blk--)); do
-      # clique.getSigner requires a hex block number string (e.g., "0x1a")
-      local blk_hex
-      printf -v blk_hex '0x%x' "$blk"
-      local signer
-      signer=$(attach_exec "$clique_bin" "$ipc_path" "clique.getSigner('${blk_hex}')" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
-      if [[ "$signer" == "$addr_lower" ]]; then
-        return 0
-      fi
-    done
-    sleep 1
-  done
-  die "did not observe block signed by ${signer_addr} in last ${lookback_n} blocks"
 }

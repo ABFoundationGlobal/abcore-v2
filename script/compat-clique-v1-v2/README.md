@@ -6,18 +6,22 @@ This folder contains scripts to:
 
 ## Prerequisites
 
-- Build v2 binary:
-  - From repo root: `make geth` (produces `./build/bin/geth`)
-- Have an old v1.13.x geth binary available.
+- Build v2 binary from repo root: `make geth` (produces `./build/bin/geth`)
+- v1 binary: downloaded automatically on first run via `00-get-v1-geth.sh` (requires `gh` CLI
+  authenticated to GitHub). Saved to `script/compat-clique-v1-v2/bin/geth-v1` and reused on
+  subsequent runs. Override with `ABCORE_V1_GETH=/path/to/geth` if you have it locally.
+- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json`)
 
 ## Configure binaries
 
-Scripts look for these env vars:
+By default no configuration is needed. Scripts resolve binaries in this order:
 
-- `ABCORE_V1_GETH`: path to v1 binary (default: `/data/kai/workspace/ab/abcore/build/bin/geth` if present)
-- `ABCORE_V2_GETH`: path to v2 binary (default: `./build/bin/geth` if present)
+1. `ABCORE_V1_GETH` env var (if set)
+2. `script/compat-clique-v1-v2/bin/geth-v1` (auto-downloaded from the GitHub release on first run)
 
-They will fail fast if the binaries don't exist.
+For v2: `ABCORE_V2_GETH` env var, or `./build/bin/geth` (the result of `make geth`).
+
+They will fail fast if the binaries cannot be resolved.
 
 ## Run
 
