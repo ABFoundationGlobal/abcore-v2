@@ -59,12 +59,14 @@ web3._extend({
 		new web3._extend.Method({
 			name: 'propose',
 			call: 'clique_propose',
-			params: 2
+			params: 2,
+			inputFormatter: [web3._extend.formatters.inputAddressFormatter, null]
 		}),
 		new web3._extend.Method({
 			name: 'discard',
 			call: 'clique_discard',
-			params: 1
+			params: 1,
+			inputFormatter: [web3._extend.formatters.inputAddressFormatter]
 		}),
 		new web3._extend.Method({
 			name: 'status',
@@ -74,7 +76,8 @@ web3._extend({
 		new web3._extend.Method({
 			name: 'getSigner',
 			call: 'clique_getSigner',
-			params: 1
+			params: 1,
+			inputFormatter: [web3._extend.formatters.inputBlockNumberFormatter]
 		}),
 	],
 	properties: [

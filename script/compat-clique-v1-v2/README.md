@@ -52,10 +52,10 @@ into the Clique signer set via `clique.propose` from two existing validators, th
 with mining enabled. Verify it seals blocks and all nodes (v1 and v2) agree on the canonical
 chain. Tests dynamic validator set changes across versions.
 
-**Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (1 and 3)
-to v2 in sequence. Verify the fully-v2 4-validator network continues producing blocks and all
-validators converge on the same head. Tests the end-state of a complete rolling upgrade where no
-v1 nodes remain.
+**Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (those not
+upgraded in Scenario&nbsp;1, as determined by `UPGRADE_VALIDATOR_N`) to v2 in a coordinated step.
+Verify the fully-v2 4-validator network continues producing blocks and all validators converge on
+the same head. Tests the end-state of a complete rolling upgrade where no v1 nodes remain.
 
 ## Environment variables
 
