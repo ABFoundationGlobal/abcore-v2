@@ -38,10 +38,8 @@ fi
 NUM_VALIDATORS=$(ls -d "$SCRIPT_DIR/data"/validator-* 2>/dev/null | wc -l | tr -d ' ')
 echo -e "${GREEN}Found ${NUM_VALIDATORS} validator(s) on disk${NC}"
 
-# Docker Compose only defines services for 1 or 3 validators.
-if [ "$NUM_VALIDATORS" -ne 1 ] && [ "$NUM_VALIDATORS" -ne 3 ]; then
-    echo -e "${RED}Error: Docker devnet supports only 1 or 3 validators, got ${NUM_VALIDATORS}.${NC}"
-    echo -e "${RED}Re-run: ./01-setup.sh 1  or  ./01-setup.sh 3${NC}"
+if [ "$NUM_VALIDATORS" -lt 1 ] || [ "$NUM_VALIDATORS" -gt 5 ]; then
+    echo -e "${RED}Error: validator count must be 1–5, got ${NUM_VALIDATORS}.${NC}"
     exit 1
 fi
 
@@ -75,8 +73,14 @@ for i in $(seq 1 "$NUM_VALIDATORS"); do
     echo -e "  Validator $i: ${GREEN}${ADDR}${NC}"
 done
 
-if [ "$NUM_VALIDATORS" -ge 3 ]; then
-    echo "COMPOSE_PROFILES=multi" >> "$ENV_FILE"
+# NUM_VALIDATORS is read by the mesh container via docker-compose environment.
+echo "NUM_VALIDATORS=${NUM_VALIDATORS}" >> "$ENV_FILE"
+
+# Map validator count to the matching Compose profile (v2..v5).
+# Profile vN activates validators 2..N and the mesh sidecar.
+# Validator-1 has no profile and always starts.
+if [ "$NUM_VALIDATORS" -ge 2 ]; then
+    echo "COMPOSE_PROFILES=v${NUM_VALIDATORS}" >> "$ENV_FILE"
 fi
 
 # ── launch ─────────────────────────────────────────────────────────────────────

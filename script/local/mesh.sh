@@ -1,12 +1,10 @@
 #!/bin/sh
-# Connect the three devnet validators in a full peer mesh via admin_addPeer.
-# Runs once after all validators report healthy (Docker depends_on condition).
+# Connect N devnet validators in a full peer mesh via admin_addPeer.
+# Reads NUM_VALIDATORS from the environment (set by docker-compose via .env).
 # Uses only busybox tools available in the alpine image.
 set -e
 
-V1="http://validator-1:8545"
-V2="http://validator-2:8545"
-V3="http://validator-3:8545"
+NUM_VALIDATORS="${NUM_VALIDATORS:-3}"
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -15,6 +13,10 @@ rpc() {
   wget -qO- "$1" \
     --post-data "{\"jsonrpc\":\"2.0\",\"method\":\"$2\",\"params\":${3:-[]},\"id\":1}" \
     --header "Content-Type: application/json"
+}
+
+url_for() {
+  printf 'http://validator-%d:8545' "$1"
 }
 
 wait_for() {
@@ -49,26 +51,38 @@ add_peer() {
   fi
 }
 
-# ── wait for all three validators ─────────────────────────────────────────────
+# ── wait for all validators ────────────────────────────────────────────────────
 
-wait_for "$V1"
-wait_for "$V2"
-wait_for "$V3"
+i=1
+while [ "$i" -le "$NUM_VALIDATORS" ]; do
+  wait_for "$(url_for "$i")"
+  i=$((i + 1))
+done
 
-# ── fetch enodes ───────────────────────────────────────────────────────────────
+# ── fetch and cache enodes ─────────────────────────────────────────────────────
 
-E1=$(get_enode "$V1")
-E2=$(get_enode "$V2")
-E3=$(get_enode "$V3")
-
-printf "Enodes:\n  V1: %s\n  V2: %s\n  V3: %s\n" "$E1" "$E2" "$E3"
+echo "Fetching enodes..."
+i=1
+while [ "$i" -le "$NUM_VALIDATORS" ]; do
+  enode=$(get_enode "$(url_for "$i")")
+  echo "$enode" > "/tmp/enode-$i"
+  printf "  V%d: %s\n" "$i" "$enode"
+  i=$((i + 1))
+done
 
 # ── wire full mesh ─────────────────────────────────────────────────────────────
 
 echo "Connecting full mesh..."
+i=1
+while [ "$i" -le "$NUM_VALIDATORS" ]; do
+  j=1
+  while [ "$j" -le "$NUM_VALIDATORS" ]; do
+    if [ "$i" -ne "$j" ]; then
+      add_peer "$(url_for "$i")" "$(cat "/tmp/enode-$j")"
+    fi
+    j=$((j + 1))
+  done
+  i=$((i + 1))
+done
 
-add_peer "$V1" "$E2"; add_peer "$V1" "$E3"
-add_peer "$V2" "$E1"; add_peer "$V2" "$E3"
-add_peer "$V3" "$E1"; add_peer "$V3" "$E2"
-
-echo "Mesh complete – all three validators peered."
+echo "Mesh complete – all $NUM_VALIDATORS validators peered."

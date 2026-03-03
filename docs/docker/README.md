@@ -159,7 +159,7 @@ Runs 1 or 3 validators on a private Docker network, equivalent to the bare-metal
 cd script/local
 
 # 1. Generate validator accounts and genesis.json
-#    Docker Compose supports exactly 1 or 3 validators; other counts are rejected.
+#    Supports 1–5 validators.
 ./01-setup.sh 3
 
 # 2. Start the devnet
@@ -178,10 +178,14 @@ cd script/local
 | validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
 | validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
 | validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+| validator-4 | `http://localhost:8548` | `ws://localhost:9548` | `30306` |
+| validator-5 | `http://localhost:8549` | `ws://localhost:9549` | `30307` |
+
+Only ports for the validators that were set up will be active.
 
 ### How peer connectivity works
 
-Validators start with Kademlia discovery enabled (`NoDiscovery = false`). After all three report healthy, the `mesh` sidecar container calls `admin_addPeer` on each validator to build a full peer mesh. The `mesh` container then exits; geth's built-in peer management maintains connectivity thereafter.
+Validators start with Kademlia discovery enabled (`NoDiscovery = false`). After all validators report healthy, the `mesh` sidecar container calls `admin_addPeer` on each validator pair to build a full peer mesh. The `mesh` container then exits; geth's built-in peer management maintains connectivity thereafter.
 
 NAT is handled automatically: each container advertises its own Docker network IP via `--nat extip:<container-ip>`, so enodes are routable within the `devnet` bridge network.
 

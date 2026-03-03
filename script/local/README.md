@@ -38,7 +38,7 @@ An alternative to the bare-metal workflow above. No Go toolchain required — th
 
 ```bash
 # 1. Generate validator keys and genesis (same as bare metal)
-./01-setup.sh [num_validators]   # use 1 or 3
+./01-setup.sh [num_validators]   # 1–5 validators supported
 
 # 2. Build image (first time only) and start
 ./07-docker-up.sh
@@ -48,15 +48,17 @@ An alternative to the bare-metal workflow above. No Go toolchain required — th
 
 ### Endpoints
 
-Validator-1 is always started. Validator-2 and validator-3 are only available when running in 3-validator mode (`./01-setup.sh 3`).
+Validator-1 always starts. Additional validators start based on the count passed to `01-setup.sh` (1–5).
 
 | Node | HTTP RPC | WebSocket | P2P |
 |------|----------|-----------|-----|
 | validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
-| validator-2 *(multi only)* | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
-| validator-3 *(multi only)* | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+| validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
+| validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
+| validator-4 | `http://localhost:8548` | `ws://localhost:9548` | `30306` |
+| validator-5 | `http://localhost:8549` | `ws://localhost:9549` | `30307` |
 
-All ports are bound to `127.0.0.1` (localhost only).
+All ports are bound to `127.0.0.1` (localhost only). Only the ports for the validators that were set up will be active.
 
 ### Common operations
 
