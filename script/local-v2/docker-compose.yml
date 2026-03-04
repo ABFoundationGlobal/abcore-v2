@@ -20,8 +20,6 @@
 # .env automatically, so plain `docker compose logs/down` work for all
 # containers after that.
 
-version: '3.8'
-
 # ── Shared validator defaults ──────────────────────────────────────────────────
 x-validator: &validator
   build:
