@@ -3,6 +3,17 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
+# Auto-select a free PORT_BASE if not explicitly set, then derive DATADIR_ROOT.
+if [[ -z "${PORT_BASE:-}" ]]; then
+  PORT_BASE=$(find_free_port_base)
+  echo "[$(date +'%H:%M:%S')] Auto-selected PORT_BASE=${PORT_BASE}"
+fi
+export PORT_BASE
+export DATADIR_ROOT="${DATADIR_ROOT:-${SCRIPT_DIR}/data-${PORT_BASE}}"
+
 run() {
   echo
   echo "==> $*"
@@ -14,9 +25,9 @@ cleanup_on_exit() {
   if [[ "$code" -ne 0 ]]; then
     echo
     if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
-      echo "FAILED (exit=${code}). KEEP_RUNNING=1 so nodes remain running (logs under script/compat-clique-v1-v2/data)." >&2
+      echo "FAILED (exit=${code}). KEEP_RUNNING=1 so nodes remain running (logs under ${DATADIR_ROOT})." >&2
     else
-      echo "FAILED (exit=${code}). Stopping nodes (logs preserved under script/compat-clique-v1-v2/data)." >&2
+      echo "FAILED (exit=${code}). Stopping nodes (logs preserved under ${DATADIR_ROOT})." >&2
       "${SCRIPT_DIR}/04-stop.sh" || true
     fi
   fi

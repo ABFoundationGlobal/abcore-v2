@@ -33,13 +33,13 @@ else
     nohup "$ABCORE_V2_GETH" \
       --datadir "$RPC_DIR" \
       --networkid "$CLIQUE_NETWORK_ID" \
-      --port 30325 \
+      --port "$(rpc_p2p_port)" \
       --nat none \
       --nodiscover \
       --bootnodes "" \
       --ipcpath geth.ipc \
       --syncmode full \
-      --http --http.addr 127.0.0.1 --http.port 8555 \
+      --http --http.addr 127.0.0.1 --http.port "$(rpc_http_port)" \
       --http.api eth,net,web3 \
       --nousb \
       >>"$RPC_LOG" 2>&1 &

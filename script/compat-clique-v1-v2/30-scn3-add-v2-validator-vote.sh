@@ -61,7 +61,7 @@ else
     nohup "$ABCORE_V2_GETH" \
       --datadir "$V4_DIR" \
       --networkid "$CLIQUE_NETWORK_ID" \
-      --port 30326 \
+      --port "$(val4_p2p_port)" \
       --nat none \
       --nodiscover \
       --bootnodes "" \
