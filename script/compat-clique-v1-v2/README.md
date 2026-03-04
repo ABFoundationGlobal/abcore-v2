@@ -82,7 +82,7 @@ the same head. Tests the end-state of a complete rolling upgrade where no v1 nod
 - All control operations use IPC (no HTTP exposure required on validators).
 - Scenarios are cumulative: each builds on the state left by the previous one. Do not run them
   out of order.
-- On failure, logs are preserved under `data/` for debugging. Nodes are stopped automatically.
+- On failure, logs are preserved under `DATADIR_ROOT` (default `data-<PORT_BASE>/`) for debugging. Nodes are stopped automatically.
 
 ## Suggested future scenarios
 
