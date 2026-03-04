@@ -51,10 +51,11 @@ an archive/RPC node in a predominantly v1 network.
 versions. Phase 1: create a new v2 validator account, vote it into the signer set via
 `clique.propose` from two existing validators, restart it with mining enabled, and verify it
 seals blocks while all nodes agree on the canonical chain. Phase 2: vote it back out via
-`clique.propose(addr, false)` from three of the four current signers (one v1, two v2), confirm
-it disappears from `clique.getSigners()` on both a v1 and a v2 node independently, then verify
-the three-signer network continues producing blocks. Tests the full validator join/leave
-governance cycle across mixed v1/v2 networks.
+`clique.propose(addr, false)` from three of the four current signers (two v1, one v2 — the
+exact mix depends on `UPGRADE_VALIDATOR_N`), confirm it disappears from `clique.getSigners()`
+on both a v1 and a v2 node independently, then verify the three-signer network continues
+producing blocks. Tests the full validator join/leave governance cycle across mixed v1/v2
+networks.
 
 **Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (those not
 upgraded in Scenario&nbsp;1, as determined by `UPGRADE_VALIDATOR_N`) to v2 in a coordinated step.
