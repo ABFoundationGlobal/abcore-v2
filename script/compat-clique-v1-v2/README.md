@@ -35,7 +35,7 @@ This will:
 - clean any prior state (`data/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 3 scenarios in sequence, then stop all nodes
+- run the 4 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -52,11 +52,16 @@ into the Clique signer set via `clique.propose` from two existing validators, th
 with mining enabled. Verify it seals blocks and all nodes (v1 and v2) agree on the canonical
 chain. Tests dynamic validator set changes across versions.
 
+**Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (those not
+upgraded in Scenario&nbsp;1, as determined by `UPGRADE_VALIDATOR_N`) to v2 in a coordinated step.
+Verify the fully-v2 4-validator network continues producing blocks and all validators converge on
+the same head. Tests the end-state of a complete rolling upgrade where no v1 nodes remain.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ABCORE_V1_GETH` | `/data/kai/workspace/ab/abcore/build/bin/geth` | Path to v1.13.x binary |
+| `ABCORE_V1_GETH` | `script/compat-clique-v1-v2/bin/geth-v1` (auto-downloaded) | Path to v1.13.x binary |
 | `ABCORE_V2_GETH` | `./build/bin/geth` | Path to v2 binary |
 | `KEEP_RUNNING` | `0` | Set to `1` to leave nodes running after pass |
 | `UPGRADE_VALIDATOR_N` | `2` | Which validator to upgrade in scenario 1 (1–3) |
@@ -74,10 +79,6 @@ chain. Tests dynamic validator set changes across versions.
 ## Suggested future scenarios
 
 These are not yet implemented but cover additional compatibility surface:
-
-**Scenario 4 — Complete rolling upgrade**: Stop the remaining v1 validators and restart them with
-the v2 binary, leaving a fully-v2 network. Verify all nodes converge on the same head and each
-upgraded validator seals at least one block. Tests the end-state where no v1 nodes remain.
 
 **Scenario 5 — v1/v2 re-org resilience**: Isolate a v1 and v2 node for 3 blocks (drop peers),
 then reconnect and verify they converge on the same canonical chain via highest-difficulty fork

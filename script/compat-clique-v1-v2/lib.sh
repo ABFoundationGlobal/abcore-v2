@@ -391,3 +391,39 @@ wait_for_recent_signer() {
   done
   die "did not observe signer in recents: $signer_addr"
 }
+
+# wait_for_block_miner: poll until a block sealed by signer_addr appears in the last
+# lookback_n blocks. Uses clique.getSigner(blockNumber) to get the actual Clique signer
+# (eth.getBlock().miner is always 0x0 for Clique blocks). More reliable than
+# wait_for_recent_signer when the signer set is large enough that recents rolls over.
+#
+# geth_bin: any v1 or v2 binary — both expose clique.getSigner via the IPC console.
+# The ipc_path may belong to any running node; the IPC protocol is compatible.
+wait_for_block_miner() {
+  local geth_bin="$1"
+  local ipc_path="$2"
+  local signer_addr="$3"
+  local lookback_n=${4:-12}  # how many recent blocks to scan
+  local tries=${5:-90}
+
+  local addr_lower
+  addr_lower=$(echo "$signer_addr" | tr '[:upper:]' '[:lower:]')
+
+  for ((i=0; i<tries; i++)); do
+    local tip
+    tip=$(head_number "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
+    local start=$(( tip > lookback_n ? tip - lookback_n : 0 ))
+    for ((blk=tip; blk>=start; blk--)); do
+      # clique.getSigner requires a hex block number string (e.g., "0x1a")
+      local blk_hex
+      printf -v blk_hex '0x%x' "$blk"
+      local signer
+      signer=$(attach_exec "$geth_bin" "$ipc_path" "clique.getSigner('${blk_hex}')" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+      if [[ "$signer" == "$addr_lower" ]]; then
+        return 0
+      fi
+    done
+    sleep 1
+  done
+  die "did not observe block signed by ${signer_addr} in last ${lookback_n} blocks"
+}
