@@ -2,17 +2,20 @@
 set -euo pipefail
 
 # Scenario 4:
-# - upgrade the remaining v1 validators (1 and 3) to v2 with a coordinated stop/start
+# - upgrade the remaining v1 validators to v2 with a coordinated stop/start
 #   (stop both v1s, then start both v2s)
-# - confirm the fully-v2 4-validator network continues producing blocks
+# - confirm the fully-v2 3-validator network continues producing blocks
 # - confirm each upgraded validator seals at least one block
 #
-# Precondition: scenarios 1-3 have run (validator-2 and validator-4 are already v2).
+# Precondition: scenarios 1-3 have run.
+#   - validator-UPGRADE_VALIDATOR_N is already v2 (scenario 1)
+#   - validator-4 was voted in then voted back out and stopped (scenario 3)
+#   - active signers are validators 1, 2, 3 only (3-signer set)
 #
-# Important: stop BOTH v1 validators before starting EITHER v2 replacement. With 4
-# signers the Clique majority threshold is 3. A sequential stop-then-start loop would
-# leave only 2 active validators while the second node is being restarted, causing the
-# network to stall permanently (all recents slots fill and no new block clears them).
+# Important: stop BOTH remaining v1 validators before starting EITHER v2 replacement.
+# With 3 signers the Clique majority threshold is 2. A sequential stop-then-start loop
+# would leave only 1 active validator while the second is restarting, dropping below
+# majority and stalling the chain permanently.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -22,7 +25,7 @@ resolve_binaries
 
 # After scenarios 1-3:
 #   one of validators 1, 2, or 3 is already v2 (controlled by UPGRADE_VALIDATOR_N, default 2)
-#   validator-4: v2 (voted in via scn3)
+#   validator-4: stopped and evicted (scenario 3 voted it back out)
 #
 # The remaining v1 validators are "all of {1,2,3} except UPGRADE_VALIDATOR_N".
 UPGRADE_N="${UPGRADE_VALIDATOR_N:-2}"
@@ -83,8 +86,8 @@ done
 for N in "${REMAINING_V1[@]}"; do
   wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")"
 
-  # Peer to all other running validators (skip self).
-  for peer in 1 2 3 4; do
+  # Peer to all other running validators (skip self). validator-4 is stopped.
+  for peer in 1 2 3; do
     [[ "$peer" -eq "$N" ]] && continue
     peer_ipc=$(val_ipc "$peer")
     [[ -S "$peer_ipc" ]] || continue
@@ -98,22 +101,21 @@ for N in "${REMAINING_V1[@]}"; do
 done
 
 log "Waiting for chain to advance on fully-v2 network"
-wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc 4)" 3 90
+wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" 3 90
 
-log "Waiting for all 4 v2 validators to converge on same head"
-wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 4)" 120 \
-  "$ABCORE_V2_GETH" "$(val_ipc 1)" \
+log "Waiting for all 3 v2 validators to converge on same head"
+wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 120 \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V2_GETH" "$(val_ipc 3)"
 
 # Confirm each newly upgraded validator sealed at least one block.
-# Use wait_for_block_miner rather than wait_for_recent_signer: with 4 signers the
-# Clique recents window is only 3 slots, so a validator's recent entry can roll over
+# Use wait_for_block_miner rather than wait_for_recent_signer: with 3 signers the
+# Clique recents window is only 2 slots, so a validator's recent entry can roll over
 # before we check it. Scanning block headers via clique.getSigner() is more reliable.
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
-  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc 4)" "$addr" 16 120
+  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120
 done
 
 log "Scenario 4 OK: all validators running v2, network healthy"

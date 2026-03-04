@@ -47,15 +47,20 @@ alongside the remaining v1 validators. Tests in-place binary upgrade compatibili
 the v1 network, and verify it syncs to the current head with matching block hashes. Tests v2 as
 an archive/RPC node in a predominantly v1 network.
 
-**Scenario 3** (`30-scn3-add-v2-validator-vote.sh`): Create a new v2 validator account, vote it
-into the Clique signer set via `clique.propose` from two existing validators, then restart it
-with mining enabled. Verify it seals blocks and all nodes (v1 and v2) agree on the canonical
-chain. Tests dynamic validator set changes across versions.
+**Scenario 3** (`30-scn3-add-v2-validator-vote.sh`): Full Clique governance round-trip across
+versions. Phase 1: create a new v2 validator account, vote it into the signer set via
+`clique.propose` from two existing validators, restart it with mining enabled, and verify it
+seals blocks while all nodes agree on the canonical chain. Phase 2: vote it back out via
+`clique.propose(addr, false)` from three of the four current signers (one v1, two v2), confirm
+it disappears from `clique.getSigners()` on both a v1 and a v2 node independently, then verify
+the three-signer network continues producing blocks. Tests the full validator join/leave
+governance cycle across mixed v1/v2 networks.
 
 **Scenario 4** (`40-scn4-all-validators-v2.sh`): Upgrade the remaining v1 validators (those not
 upgraded in Scenario&nbsp;1, as determined by `UPGRADE_VALIDATOR_N`) to v2 in a coordinated step.
-Verify the fully-v2 4-validator network continues producing blocks and all validators converge on
+Verify the fully-v2 3-validator network continues producing blocks and all validators converge on
 the same head. Tests the end-state of a complete rolling upgrade where no v1 nodes remain.
+(validator-4 was voted out in Scenario 3 and is not part of this network.)
 
 ## Environment variables
 
@@ -88,7 +93,3 @@ selection. Tests that fork choice is identical across versions.
 validator with the same set of calls (`eth_getBlockByNumber`, `eth_getLogs`,
 `clique_getSnapshot`) and assert the responses are byte-identical. Catches any JSON encoding or
 field-ordering regressions.
-
-**Scenario 7 — Clique propose/discard round-trip**: Vote a v2 validator in (as in scenario 3),
-then vote it back out via `clique.discard` from a majority of signers, and confirm it stops
-appearing in `clique.getSnapshot().signers`. Tests the full governance cycle across versions.
