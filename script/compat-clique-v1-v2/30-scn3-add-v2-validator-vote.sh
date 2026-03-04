@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Scenario 3: Clique propose/discard round-trip
+# Scenario 3: Clique propose add/remove (authorize/deauthorize) round-trip
 #
 # Phase 1 — vote in:
 #   - Create a new v2 validator account (validator-4)
@@ -141,11 +141,13 @@ log "Phase 1 OK: validator-4 is an active signer and has sealed blocks"
 # ── Phase 2: vote validator-4 back out ───────────────────────────────────────
 #
 # 4 active signers → majority threshold = floor(4/2)+1 = 3.
-# We vote from validator-1 (v2), validator-2 (v2), validator-3 (v1) to cover
-# cross-version governance.
+# We vote from validator-1 (v1), validator-2 (v2, upgraded in scenario 1 when
+# UPGRADE_VALIDATOR_N=2), validator-3 (v1) to cover cross-version governance.
+# The actual v1/v2 mix depends on UPGRADE_VALIDATOR_N; with the default of 2 this
+# is 2×v1 + 1×v2. Adjust UPGRADE_VALIDATOR_N if a different mix is desired.
 
 log "Voting validator-4 out: proposing removal on validator-1, validator-2, validator-3"
-attach_exec "$ABCORE_V2_GETH" "$(val_ipc 1)" "clique.propose('${V4_ADDR}', false)" >/dev/null
+attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 

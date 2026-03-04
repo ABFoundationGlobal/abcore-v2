@@ -13,9 +13,12 @@ set -euo pipefail
 #   - active signers are validators 1, 2, 3 only (3-signer set)
 #
 # Important: stop BOTH remaining v1 validators before starting EITHER v2 replacement.
-# With 3 signers the Clique majority threshold is 2. A sequential stop-then-start loop
-# would leave only 1 active validator while the second is restarting, dropping below
-# majority and stalling the chain permanently.
+# With 3 active signers the Clique majority threshold is 2. Stopping both v1s at once
+# temporarily drops the network to 1 active signer (the v2 validator already upgraded
+# in Scenario 1), pausing block production briefly until the v2 replacements come up.
+# A sequential stop-then-start per validator would also satisfy the majority threshold
+# at each step, but the batch approach is simpler to implement and the brief pause is
+# acceptable here.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -41,9 +44,8 @@ for N in 1 2 3; do
 done
 
 # Phase 1: stop all remaining v1 validators before starting any v2 replacements.
-# This keeps validators 2 and 4 (both v2) running throughout — the network drops to
-# 2-of-4 signers momentarily, which is below the Clique signing threshold, so blocks
-# pause briefly. That is acceptable; the network resumes as soon as v2 nodes come up.
+# This temporarily drops the network to 1 active signer (the already-upgraded v2
+# from Scenario 1), pausing block production briefly until the new v2 nodes start.
 for N in "${REMAINING_V1[@]}"; do
   pidfile=$(val_pid "$N")
   [[ -f "$pidfile" ]] || die "validator-${N} not running (missing pidfile ${pidfile})"
