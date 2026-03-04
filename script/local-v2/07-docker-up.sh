@@ -14,7 +14,8 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-COMPOSE="docker compose -f $SCRIPT_DIR/docker-compose.yml"
+# Use an array so the path is passed as a single argument even if it contains spaces.
+COMPOSE=(docker compose -f "$SCRIPT_DIR/docker-compose.yml")
 
 # ── prerequisite checks ────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ fi
 # ── launch ─────────────────────────────────────────────────────────────────────
 
 echo ""
-$COMPOSE up -d
+"${COMPOSE[@]}" up -d
 
 # ── print endpoints ───────────────────────────────────────────────────────────
 
@@ -102,8 +103,8 @@ for i in $(seq 1 "$NUM_VALIDATORS"); do
 done
 echo ""
 echo "Commands (run from any directory):"
-echo "  Logs (all)  : $COMPOSE logs -f"
-echo "  Logs (one)  : $COMPOSE logs -f validator-1"
-echo "  Stop        : $COMPOSE down"
+echo "  Logs (all)  : ${COMPOSE[*]} logs -f"
+echo "  Logs (one)  : ${COMPOSE[*]} logs -f validator-1"
+echo "  Stop        : ${COMPOSE[*]} down"
 echo "  Shell       : docker exec -it abcore-v1 /bin/bash"
 echo "  Rebuild img : docker build -t abcore:local $REPO_ROOT"

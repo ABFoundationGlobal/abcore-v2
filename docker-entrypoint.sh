@@ -26,6 +26,9 @@ if [ "${MINE:-false}" = "true" ]; then
     --mine
     --unlock "${MINER_ADDR}"
     --miner.etherbase "${MINER_ADDR}"
+    # --allow-insecure-unlock is required to unlock accounts over the HTTP-RPC
+    # interface. Only enabled when MINE=true (i.e. this is a signing validator).
+    # Do NOT set MINE=true on internet-facing or production nodes.
     --allow-insecure-unlock
     --password /bsc/config/password.txt
   )
