@@ -24,6 +24,8 @@ OracleThreshold = 20
 
 [Node]
 DataDir = "/data"
+# Required for HTTP-RPC account unlock in the local devnet (MINE=true validators).
+# Never set this in a production or internet-facing node config.
 InsecureUnlockAllowed = true
 NoUSB = true
 IPCPath = "geth.ipc"

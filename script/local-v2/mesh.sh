@@ -6,6 +6,10 @@ set -e
 
 NUM_VALIDATORS="${NUM_VALIDATORS:-3}"
 
+# Maximum number of 2-second polls before giving up on a validator.
+# 150 × 2 s = 5 minutes, enough for a cold image pull + genesis init.
+WAIT_MAX_ATTEMPTS=150
+
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 rpc() {
@@ -21,7 +25,22 @@ url_for() {
 
 wait_for() {
   printf "Waiting for %s ..." "$1"
+  attempts=0
   until rpc "$1" "net_version" >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge "$WAIT_MAX_ATTEMPTS" ]; then
+      echo ""
+      echo "ERROR: timed out waiting for $1 after $((attempts * 2))s" >&2
+      echo "" >&2
+      echo "Possible causes:" >&2
+      echo "  • The container exited or crashed — check: docker compose logs" >&2
+      echo "  • Genesis init failed — check: docker compose logs validator-1" >&2
+      echo "  • Image not built — run: docker build -t abcore:local ../../" >&2
+      echo "" >&2
+      echo "To clean up and retry:" >&2
+      echo "  docker compose down -v && ./07-docker-up.sh" >&2
+      exit 1
+    fi
     printf "."
     sleep 2
   done
@@ -29,6 +48,9 @@ wait_for() {
 }
 
 get_enode() {
+  # Parse enode URI from admin_nodeInfo JSON using sed (no jq in alpine by default).
+  # The geth JSON-RPC response format for admin_nodeInfo is stable; this pattern
+  # extracts the value of the "enode" key and strips any query-string suffix (?...).
   enode=$(rpc "$1" "admin_nodeInfo" \
     | sed 's/.*"enode":"\([^"]*\)".*/\1/' \
     | sed 's/?[^"]*$//')
