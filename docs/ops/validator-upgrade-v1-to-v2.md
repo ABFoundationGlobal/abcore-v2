@@ -192,10 +192,10 @@ IPCPath = "geth.ipc"
 HTTPHost = "0.0.0.0"
 HTTPPort = 8545
 HTTPVirtualHosts = ["127.0.0.1", "localhost"]   # 生产环境限制访问
-HTTPModules = ["eth", "net", "web3", "debug", "parlia", "admin"]
+HTTPModules = ["eth", "net", "web3", "debug", "clique", "parlia", "admin"]
 WSHost = "0.0.0.0"
 WSPort = 8546
-WSModules = ["eth", "net", "web3", "debug", "parlia", "admin"]
+WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "admin"]
 
 [Node.P2P]
 MaxPeers = 50
@@ -291,16 +291,16 @@ echo "v1 process stopped"
 
 ### 步骤 2：迁移数据目录
 
-v2 与 v1 的数据格式完全兼容，推荐直接将原始 datadir 作为 bind mount 目标，避免复制大量链数据：
+v2 与 v1 的数据格式完全兼容。将原 v1 datadir 中的全部数据迁移到 `./data/`，与 docker-compose.yml 中 `./data:/data` 的 bind mount 保持一致：
 
 ```bash
-# 在 docker-compose.yml 中将 data volume 指向原 v1 datadir
-# volumes:
-#   - /opt/abcore/data:/data
+cd /opt/abcore-docker
 
-# 若需要复制 keystore 到新目录：
-cp -r /opt/abcore/data/keystore /opt/abcore-docker/data/
-# 链数据通过 bind mount 直接使用原路径即可
+# 创建数据目录（如尚未创建）
+mkdir -p ./data
+
+# 将 v1 datadir 完整同步过来（含 keystore 和链数据）
+rsync -av --progress /opt/abcore/data/ ./data/
 ```
 
 ### 步骤 3：启动 Docker 容器
@@ -378,7 +378,7 @@ supervisorctl update
            确认 V3 出块后：升级完成 ✓
 ```
 
-> **4 节点特别说明**：Clique 4 签名者出块门槛为 3。不可串行执行 stop-then-start，否则会出现"只剩 2 个活跃节点"的短暂停链。若需同时升级多个剩余 v1 节点，必须先停止所有目标节点，再同时启动所有 v2 容器。
+> **4 节点特别说明**：Clique 4 签名者出块门槛为 3，**任何时刻必须保证至少 3 个验证节点在线**，即最多只允许 1 台离线。4 节点场景同样应逐台滚动升级（每次仅停 1 台，待其恢复出块后再升级下一台），切勿同时停止多台。
 
 ---
 
