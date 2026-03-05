@@ -110,10 +110,18 @@ val4_p2p_port() { echo $((30326 + PORT_BASE)); }
 
 # find_free_port_base — walk offsets in steps of 100 until all suite ports are free.
 # Prints the chosen PORT_BASE to stdout. Used by 99-run-all.sh when PORT_BASE is unset.
+#
+# A sentinel file /tmp/compat-clique-reserved-<base> is written immediately on
+# selection so that a second run started shortly after skips this base even before any
+# geth process has bound a port.  The sentinel lives in /tmp, not in DATADIR_ROOT, so
+# 05-clean.sh removing the data directory does not free the reservation mid-run.
+# 04-stop.sh removes the sentinel when the run finishes.
 find_free_port_base() {
   local candidates=(30311 30312 30313 30325 30326 8541 8542 8543 8555 8551 8552 8553)
   local base
   for base in $(seq 0 100 9900); do
+    # Skip bases reserved by another run.
+    [[ -f "/tmp/compat-clique-reserved-${base}" ]] && continue
     local ok=1
     local rel port
     for rel in "${candidates[@]}"; do
@@ -127,6 +135,7 @@ find_free_port_base() {
       fi
     done
     if [[ "$ok" -eq 1 ]]; then
+      touch "/tmp/compat-clique-reserved-${base}"
       echo "$base"
       return 0
     fi

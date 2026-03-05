@@ -23,3 +23,6 @@ if [[ -f "${DATADIR_ROOT}/rpc-v2-1/geth.pid" ]]; then
 fi
 
 log "Stopped."
+
+# Release the port-base reservation created by find_free_port_base (if any).
+rm -f "/tmp/compat-clique-reserved-${PORT_BASE}"
