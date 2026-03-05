@@ -110,6 +110,13 @@ val4_p2p_port() { echo $((30326 + PORT_BASE)); }
 
 # find_free_port_base — walk offsets in steps of 100 until all suite ports are free.
 # Prints the chosen PORT_BASE to stdout. Used by 99-run-all.sh when PORT_BASE is unset.
+#
+# A sentinel directory /tmp/compat-clique-reserved-<base> is created atomically via
+# mkdir immediately on selection so that a second run started shortly after skips this
+# base even before any geth process has bound a port.  mkdir is atomic on Linux, so
+# two simultaneous callers cannot both succeed for the same base.  The sentinel lives
+# in /tmp, not in DATADIR_ROOT, so 05-clean.sh removing the data directory does not
+# free the reservation mid-run.  04-stop.sh removes the sentinel when the run finishes.
 find_free_port_base() {
   local candidates=(30311 30312 30313 30325 30326 8541 8542 8543 8555 8551 8552 8553)
   local base
@@ -118,17 +125,21 @@ find_free_port_base() {
     local rel port
     for rel in "${candidates[@]}"; do
       port=$((rel + base))
-      # ss is preferred; fall back to nc if ss is unavailable.
-      if ss -tlnp 2>/dev/null | grep -q ":${port}[[:space:]]"; then
+      # ss is preferred; -tunlp covers both TCP and UDP listening sockets.
+      # Fall back to nc (-z TCP, -uz UDP) if ss is unavailable.
+      if ss -tunlp 2>/dev/null | grep -q ":${port}[[:space:]]"; then
         ok=0; break
       fi
-      if nc -z 127.0.0.1 "$port" 2>/dev/null; then
+      if nc -z 127.0.0.1 "$port" 2>/dev/null || nc -uz 127.0.0.1 "$port" 2>/dev/null; then
         ok=0; break
       fi
     done
     if [[ "$ok" -eq 1 ]]; then
-      echo "$base"
-      return 0
+      # Atomically claim this base via mkdir; skip if another process beat us to it.
+      if mkdir "/tmp/compat-clique-reserved-${base}" 2>/dev/null; then
+        echo "$base"
+        return 0
+      fi
     fi
   done
   echo "find_free_port_base: no free port base found in range 0–9900" >&2
