@@ -90,6 +90,36 @@ v2 nodes — a critical property for safe rolling upgrades.
   out of order.
 - On failure, logs are preserved under `DATADIR_ROOT` (default `script/compat-clique-v1-v2/data-<PORT_BASE>/`) for debugging. Nodes are stopped automatically.
 
+## Coverage and EVM parity
+
+The suite tests **consensus-layer** compatibility: block sealing, Clique governance, reorg
+selection, and P2P sync across mixed v1/v2 networks. It submits no user transactions, so
+the EVM execution path is not exercised.
+
+**EVM execution tests are not required for this upgrade.** Here's why:
+
+v2 is based on BSC v1.7.0-alpha (geth v1.16.7), which ships many new EIPs — Shanghai,
+Cancun, Prague, Osaka — along with new precompiles (BLS12-381, KZG) and opcodes (CLZ,
+EXTCALL). However, none of these activate on the test network because of a double gate in
+`params/config.go`:
+
+```
+IsShanghai: (isMerge || c.IsInBSC()) && c.IsShanghai(num, timestamp)
+```
+
+`isMerge` is false (TerminalTotalDifficulty is set impossibly high) and `c.IsInBSC()`
+is false (the test genesis has no `"parlia"` field — only `"clique"`). So every time-based
+fork evaluates to false regardless of what timestamps are configured. The test network runs
+identical EVM rules to v1: Homestead through Petersburg (all activated at block 0), Istanbul
+and later not set.
+
+Additionally, v2's own diff vs upstream touches zero files in `core/vm/`, `core/state/`,
+or `core/txpool/`. The only code changes are Clique API restoration, P2P handshake
+conditionals for BSC extensions, and miner timing (nil-delay handling).
+
+The remaining coverage gap is transaction **propagation** across the version boundary (not
+execution) — covered by the planned Scenario 6.
+
 ## Suggested future scenarios
 
 These are not yet implemented but cover additional compatibility surface, ordered by priority
