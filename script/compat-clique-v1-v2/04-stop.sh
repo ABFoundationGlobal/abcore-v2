@@ -25,4 +25,4 @@ fi
 log "Stopped."
 
 # Release the port-base reservation created by find_free_port_base (if any).
-rm -f "/tmp/compat-clique-reserved-${PORT_BASE}"
+rmdir "/tmp/compat-clique-reserved-${PORT_BASE}" 2>/dev/null || true
