@@ -108,10 +108,11 @@ IsShanghai: (isMerge || c.IsInBSC()) && c.IsShanghai(num, timestamp)
 ```
 
 `isMerge` is false (TerminalTotalDifficulty is set impossibly high) and `c.IsInBSC()`
-is false (the test genesis has no `"parlia"` field — only `"clique"`). So every time-based
-fork evaluates to false regardless of what timestamps are configured. The test network runs
-identical EVM rules to v1: Homestead through Petersburg (all activated at block 0), Istanbul
-and later not set.
+is false (the test genesis has no `"parlia"` field — only `"clique"`). So, for this test
+genesis, the Ethereum timestamp-gated forks that use this pattern (Shanghai, Cancun, Prague,
+Osaka, etc.) all remain disabled regardless of the timestamps configured. The test network
+therefore runs identical EVM rules to v1: Homestead through Petersburg (all activated at
+block 0), with Istanbul and all later Ethereum forks left unset in the genesis.
 
 Additionally, v2's own diff vs upstream touches zero files in `core/vm/`, `core/state/`,
 or `core/txpool/`. The only code changes are Clique API restoration, P2P handshake
