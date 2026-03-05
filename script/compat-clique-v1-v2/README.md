@@ -35,7 +35,7 @@ This will:
 - clean any prior state (`data/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 4 scenarios in sequence, then stop all nodes
+- run the 5 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -63,6 +63,12 @@ Verify the fully-v2 3-validator network continues producing blocks and all valid
 the same head. Tests the end-state of a complete rolling upgrade where no v1 nodes remain.
 (validator-4 was voted out in Scenario 3 and is not part of this network.)
 
+**Scenario 5** (`50-scn5-reorg-resilience.sh`): Isolate validator-1 from validators 2 and 3 via
+`admin.removePeer`, let the majority fork (2-of-3 signers) advance 4 blocks, then reconnect and
+verify validator-1 reorgs to the canonical chain by asserting matching block hashes at the
+fork-point height. Confirms that Clique's highest-difficulty fork selection works identically on
+v2 nodes — a critical property for safe rolling upgrades.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -86,13 +92,27 @@ the same head. Tests the end-state of a complete rolling upgrade where no v1 nod
 
 ## Suggested future scenarios
 
-These are not yet implemented but cover additional compatibility surface:
+These are not yet implemented but cover additional compatibility surface, ordered by priority
+for the rolling v1→v2 upgrade:
 
-**Scenario 5 — v1/v2 re-org resilience**: Isolate a v1 and v2 node for 3 blocks (drop peers),
-then reconnect and verify they converge on the same canonical chain via highest-difficulty fork
-selection. Tests that fork choice is identical across versions.
+**Scenario 6 — Transaction propagation parity** *(highest priority)*: Submit a transaction via
+the v2 RPC node's HTTP endpoint and verify it is mined by a v1 validator. Then submit via a v1
+validator's IPC and verify it is included in a block sealed by the v2 validator. Exercises the
+full transaction-gossip path across the version boundary — the most likely place for a silent
+incompatibility to manifest during a partial rollout.
 
-**Scenario 6 — JSON-RPC response parity**: Query the v2 RPC node (from scenario 2) and a v1
-validator with the same set of calls (`eth_getBlockByNumber`, `eth_getLogs`,
-`clique_getSnapshot`) and assert the responses are byte-identical. Catches any JSON encoding or
-field-ordering regressions.
+**Scenario 7 — v1 syncing from a v2-majority network**: After Scenario 4 (all-v2 network),
+stop a v2 validator and start it again using the v1 binary. Verify it reconnects and syncs to
+the v2 canonical head without diverging or stalling. Tests rollback capability: whether an
+operator can safely revert a single node to v1 if an issue is found post-upgrade.
+
+**Scenario 8 — Epoch boundary with short epoch**: Run the full upgrade sequence (Scenarios
+1–4) with `CLIQUE_EPOCH=10` so an epoch boundary is crossed during the mixed-version phase.
+Verify all nodes agree on the signer set after the epoch transition. Catches divergence in how
+v1 and v2 encode or decode the epoch checkpoint `extraData` field.
+
+**Scenario 9 — JSON-RPC response parity** *(lower priority)*: Query the v2 RPC node (from
+Scenario 2) and a v1 validator with the same set of calls (`eth_getBlockByNumber`,
+`eth_getLogs`, `clique_getSnapshot`) and assert the responses are byte-identical. Catches any
+JSON encoding or field-ordering regressions. Requires adding `--http` to a v1 validator at
+startup (not currently done) or accepting IPC-only comparison.

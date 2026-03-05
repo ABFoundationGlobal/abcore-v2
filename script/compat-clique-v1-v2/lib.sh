@@ -175,6 +175,13 @@ add_peer() {
   attach_exec "$geth_bin" "$ipc_path" "admin.addPeer('${enode}')"
 }
 
+remove_peer() {
+  local geth_bin="$1"
+  local ipc_path="$2"
+  local enode="$3"
+  attach_exec "$geth_bin" "$ipc_path" "admin.removePeer('${enode}')"
+}
+
 peer_count() {
   local geth_bin="$1"
   local ipc_path="$2"

@@ -42,6 +42,7 @@ run "${SCRIPT_DIR}/10-scn1-upgrade-validator.sh"
 run "${SCRIPT_DIR}/20-scn2-add-v2-rpc-node.sh"
 run "${SCRIPT_DIR}/30-scn3-add-v2-validator-vote.sh"
 run "${SCRIPT_DIR}/40-scn4-all-validators-v2.sh"
+run "${SCRIPT_DIR}/50-scn5-reorg-resilience.sh"
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo
