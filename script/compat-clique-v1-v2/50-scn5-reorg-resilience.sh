@@ -32,6 +32,15 @@ ENODE1=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 1)")
 ENODE2=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 2)")
 ENODE3=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 3)")
 
+# Ensure val-2 and val-3 have a direct connection before we cut val-1 out.
+# Scn4 only guarantees >=1 peer per node; without this, val-2 and val-3 might
+# only know each other via val-1 and the "majority" would be isolated too.
+log "Ensuring direct val-2 ↔ val-3 peering before partition"
+add_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE3" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE2" >/dev/null || true
+wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 2)" 1 30
+wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 3)" 1 30
+
 log "Isolating validator-1 from validators 2 and 3"
 remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null || true
 remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null || true

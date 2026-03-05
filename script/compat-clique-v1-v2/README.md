@@ -32,7 +32,7 @@ script/compat-clique-v1-v2/99-run-all.sh
 ```
 
 This will:
-- clean any prior state (`data/`, `genesis.json`)
+- clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
 - run the 5 scenarios in sequence, then stop all nodes
