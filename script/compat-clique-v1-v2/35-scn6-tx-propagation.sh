@@ -28,6 +28,8 @@ source "${SCRIPT_DIR}/lib.sh"
 
 resolve_binaries
 
+command -v curl >/dev/null 2>&1 || die "curl is required but not found in PATH"
+
 N=${UPGRADE_VALIDATOR_N:-2}
 [[ "$N" -ge 1 && "$N" -le 3 ]] || die "UPGRADE_VALIDATOR_N must be 1..3"
 
@@ -48,10 +50,14 @@ RPC_IPC="${DATADIR_ROOT}/rpc-v2-1/geth.ipc"
 
 log "Scenario 6: tx propagation — v2 validator=val-${N} (${V2_ADDR}), v1 peer=val-${V1_PEER} (${V1_ADDR})"
 
-# Verify preconditions.
-[[ -e "$V2_IPC" ]] || die "v2 validator IPC not found: ${V2_IPC} (run scenarios 1–3 first)"
-[[ -e "$V1_IPC" ]] || die "v1 validator IPC not found: ${V1_IPC}"
-[[ -e "$RPC_IPC" ]] || die "v2 RPC node IPC not found: ${RPC_IPC} (run scenario 2 first)"
+# Verify preconditions — use active IPC handshake, not just file existence,
+# because stale socket files can linger after a crash.
+"$ABCORE_V2_GETH" attach --exec "web3.clientVersion" "$V2_IPC" >/dev/null 2>&1 \
+  || die "v2 validator not responding on ${V2_IPC} (run scenarios 1–3 first)"
+"$ABCORE_V1_GETH" attach --exec "web3.clientVersion" "$V1_IPC" >/dev/null 2>&1 \
+  || die "v1 validator not responding on ${V1_IPC}"
+"$ABCORE_V2_GETH" attach --exec "web3.clientVersion" "$RPC_IPC" >/dev/null 2>&1 \
+  || die "v2 RPC node not responding on ${RPC_IPC} (run scenario 2 first)"
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -97,11 +103,13 @@ SIGNED_TX=$(attach_exec "$ABCORE_V2_GETH" "$V2_IPC" \
 
 log "Raw tx signed (len=${#SIGNED_TX}), submitting via HTTP to ${RPC_URL}"
 
+CURL_ERR_FILE=$(mktemp "${DATADIR_ROOT}/curl-scn6.XXXXXX")
+trap 'rm -f "$CURL_ERR_FILE"' EXIT
 HTTP_RESP=$(curl -f --silent --show-error -X POST "$RPC_URL" \
   -H 'Content-Type: application/json' \
   -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendRawTransaction\",\"params\":[\"${SIGNED_TX}\"],\"id\":1}" \
-  2>/tmp/curl-scn6.err || true)
-[[ -n "$HTTP_RESP" ]] || die "HTTP request to ${RPC_URL} failed: $(cat /tmp/curl-scn6.err)"
+  2>"$CURL_ERR_FILE" || true)
+[[ -n "$HTTP_RESP" ]] || die "HTTP request to ${RPC_URL} failed: $(cat "$CURL_ERR_FILE")"
 
 TXHASH1=$(echo "$HTTP_RESP" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); r=d.get('result',''); print(r)" 2>/dev/null || true)

@@ -10,7 +10,8 @@ This folder contains scripts to:
 - v1 binary: downloaded automatically on first run via `00-get-v1-geth.sh` (requires `gh` CLI
   authenticated to GitHub). Saved to `script/compat-clique-v1-v2/bin/geth-v1` and reused on
   subsequent runs. Override with `ABCORE_V1_GETH=/path/to/geth` if you have it locally.
-- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json`)
+- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json` and by `35-scn6-tx-propagation.sh` to parse HTTP responses)
+- `curl` in PATH (used by `35-scn6-tx-propagation.sh` to submit transactions via the RPC HTTP endpoint)
 
 ## Configure binaries
 
