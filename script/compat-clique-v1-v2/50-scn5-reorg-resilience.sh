@@ -67,14 +67,15 @@ done
 [[ "$connected" == true ]] || die "val-3 does not list val-2 as a direct peer after 30s"
 
 log "Isolating validator-1 from validators 2 and 3"
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null || true
-
-# Wait for validator-1 to have no peers (true isolation).
-log "Waiting for validator-1 peer count to reach 0"
+# Re-issue remove_peer on every iteration of the wait loop.
+# admin.addPeer adds peers to the static list, so each node's dial scheduler
+# will retry the connection after a disconnect. We must keep evicting the peer
+# from both sides until the peer_count stays at 0.
 for ((i=0; i<30; i++)); do
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
   pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
   if [[ "$pc" -eq 0 ]]; then
     log "validator-1 isolated (peer_count=0)"
@@ -102,6 +103,26 @@ wait_for_head_at_least "$ABCORE_V2_GETH" "$(val_ipc 2)" "$TARGET" 60
 MAJORITY_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 2)")
 ISOLATED_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
 log "Majority fork head: ${MAJORITY_HEAD}, isolated val-1 head: ${ISOLATED_HEAD}"
+
+# Sanity-check: val-1 must be on a different fork from the majority, confirming
+# isolation actually produced a chain split.  In 3-signer Clique, val-1 can
+# still seal blocks solo (at a reduced rate), so it may reach H+4 on its own
+# fork — a height check would be wrong.  Instead compare the block hash at H+1:
+# if both nodes agree on that hash, val-1 was never isolated and the reorg
+# assertion below would pass vacuously.
+# Skip if val-1 hasn't reached H+1 yet (it may be slow but that is fine —
+# the reconnect will trigger a reorg regardless).
+VAL1_HASH_H1=$(block_hash_at "$ABCORE_V2_GETH" "$(val_ipc 1)" "$((H + 1))" 2>/dev/null || echo "")
+MAJ_HASH_H1=$(block_hash_at "$ABCORE_V2_GETH" "$(val_ipc 2)" "$((H + 1))" 2>/dev/null || echo "")
+if [[ -n "$VAL1_HASH_H1" && "$VAL1_HASH_H1" != "null" && \
+      -n "$MAJ_HASH_H1"  && "$MAJ_HASH_H1"  != "null" ]]; then
+  if [[ "$VAL1_HASH_H1" == "$MAJ_HASH_H1" ]]; then
+    die "val-1 is on the same chain as the majority at H+1=$((H+1)) (hash=${VAL1_HASH_H1}) — isolation did not produce a fork"
+  fi
+  log "Fork confirmed: val-1 hash at H+1 (${VAL1_HASH_H1:0:12}…) differs from majority (${MAJ_HASH_H1:0:12}…)"
+else
+  log "val-1 has not yet sealed H+1 — fork not yet observable, proceeding to reconnect"
+fi
 
 # ── Reconnect ─────────────────────────────────────────────────────────────────
 
