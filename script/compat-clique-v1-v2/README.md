@@ -73,6 +73,8 @@ the same head. Tests the end-state of a complete rolling upgrade where no v1 nod
 | `UPGRADE_VALIDATOR_N` | `2` | Which validator to upgrade in scenario 1 (1–3) |
 | `CLIQUE_CHAIN_ID` | `7141` | Chain ID for the test network |
 | `CLIQUE_PERIOD` | `3` | Block period in seconds |
+| `PORT_BASE` | auto-selected | Offset added to all port numbers. Auto-selected by `99-run-all.sh` using the first free 100-unit slot, so multiple users can run the suite concurrently on the same host without port conflicts. Override with e.g. `PORT_BASE=200` to pin a specific offset. |
+| `DATADIR_ROOT` | `script/compat-clique-v1-v2/data-<PORT_BASE>` | Root directory for all node data. Defaults to `data-<PORT_BASE>` relative to the script directory, isolating concurrent runs. Override to use a custom path. |
 
 ## Notes
 
@@ -80,7 +82,7 @@ the same head. Tests the end-state of a complete rolling upgrade where no v1 nod
 - All control operations use IPC (no HTTP exposure required on validators).
 - Scenarios are cumulative: each builds on the state left by the previous one. Do not run them
   out of order.
-- On failure, logs are preserved under `data/` for debugging. Nodes are stopped automatically.
+- On failure, logs are preserved under `DATADIR_ROOT` (default `script/compat-clique-v1-v2/data-<PORT_BASE>/`) for debugging. Nodes are stopped automatically.
 
 ## Suggested future scenarios
 

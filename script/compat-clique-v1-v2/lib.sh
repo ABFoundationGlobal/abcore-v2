@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 
-DATADIR_ROOT=${DATADIR_ROOT:-"${SCRIPT_DIR}/data"}
+PORT_BASE=${PORT_BASE:-0}
+DATADIR_ROOT=${DATADIR_ROOT:-"${SCRIPT_DIR}/data-${PORT_BASE}"}
 GENESIS_JSON=${GENESIS_JSON:-"${SCRIPT_DIR}/genesis.json"}
 
 CLIQUE_CHAIN_ID=${CLIQUE_CHAIN_ID:-7141}
@@ -89,17 +90,60 @@ val_pw() {
 
 p2p_port() {
   local n="$1"
-  echo $((30310 + n))
+  echo $((30310 + n + PORT_BASE))
 }
 
 http_port() {
   local n="$1"
-  echo $((8540 + n))
+  echo $((8540 + n + PORT_BASE))
 }
 
 authrpc_port() {
   local n="$1"
-  echo $((8550 + n))
+  echo $((8550 + n + PORT_BASE))
+}
+
+# Ports for nodes that don't fit the validator-N scheme.
+rpc_p2p_port()  { echo $((30325 + PORT_BASE)); }
+rpc_http_port() { echo $((8555  + PORT_BASE)); }
+val4_p2p_port() { echo $((30326 + PORT_BASE)); }
+
+# find_free_port_base — walk offsets in steps of 100 until all suite ports are free.
+# Prints the chosen PORT_BASE to stdout. Used by 99-run-all.sh when PORT_BASE is unset.
+#
+# A sentinel directory /tmp/compat-clique-reserved-<base> is created atomically via
+# mkdir immediately on selection so that a second run started shortly after skips this
+# base even before any geth process has bound a port.  mkdir is atomic on Linux, so
+# two simultaneous callers cannot both succeed for the same base.  The sentinel lives
+# in /tmp, not in DATADIR_ROOT, so 05-clean.sh removing the data directory does not
+# free the reservation mid-run.  04-stop.sh removes the sentinel when the run finishes.
+find_free_port_base() {
+  local candidates=(30311 30312 30313 30325 30326 8541 8542 8543 8555 8551 8552 8553)
+  local base
+  for base in $(seq 0 100 9900); do
+    local ok=1
+    local rel port
+    for rel in "${candidates[@]}"; do
+      port=$((rel + base))
+      # ss is preferred; -tunlp covers both TCP and UDP listening sockets.
+      # Fall back to nc (-z TCP, -uz UDP) if ss is unavailable.
+      if ss -tunlp 2>/dev/null | grep -q ":${port}[[:space:]]"; then
+        ok=0; break
+      fi
+      if nc -z 127.0.0.1 "$port" 2>/dev/null || nc -uz 127.0.0.1 "$port" 2>/dev/null; then
+        ok=0; break
+      fi
+    done
+    if [[ "$ok" -eq 1 ]]; then
+      # Atomically claim this base via mkdir; skip if another process beat us to it.
+      if mkdir "/tmp/compat-clique-reserved-${base}" 2>/dev/null; then
+        echo "$base"
+        return 0
+      fi
+    fi
+  done
+  echo "find_free_port_base: no free port base found in range 0–9900" >&2
+  return 1
 }
 
 wait_for_ipc() {
