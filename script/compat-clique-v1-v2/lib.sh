@@ -176,7 +176,13 @@ attach_exec() {
 get_enode() {
   local geth_bin="$1"
   local ipc_path="$2"
-  attach_exec "$geth_bin" "$ipc_path" "admin.nodeInfo.enode"
+  local enode
+  enode=$(attach_exec "$geth_bin" "$ipc_path" "admin.nodeInfo.enode")
+  # --nat none causes geth to advertise 0.0.0.0 as its P2P IP.  geth's dial
+  # scheduler skips peers whose enode IP is unspecified, so add_peer with such
+  # an enode never establishes a TCP connection.  Replace 0.0.0.0 with
+  # 127.0.0.1 here so all callers get a dialable enode.
+  echo "${enode//@0.0.0.0:/@127.0.0.1:}"
 }
 
 add_peer() {
