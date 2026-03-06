@@ -43,7 +43,7 @@ ENODE2_ID=${ENODE2%%@*}
 log "Verifying val-2 is directly peered with val-3"
 connected=false
 for ((i=0; i<30; i++)); do
-  peers_output=$("$ABCORE_V2_GETH" attach "$(val_ipc 2)" --exec 'admin.peers' 2>/dev/null || echo "")
+  peers_output=$("$ABCORE_V2_GETH" attach --exec 'admin.peers' "$(val_ipc 2)" 2>/dev/null || echo "")
   if grep -q "$ENODE3_ID" <<<"$peers_output"; then
     connected=true
     log "val-2 reports direct peer val-3"
@@ -56,7 +56,7 @@ done
 log "Verifying val-3 is directly peered with val-2"
 connected=false
 for ((i=0; i<30; i++)); do
-  peers_output=$("$ABCORE_V2_GETH" attach "$(val_ipc 3)" --exec 'admin.peers' 2>/dev/null || echo "")
+  peers_output=$("$ABCORE_V2_GETH" attach --exec 'admin.peers' "$(val_ipc 3)" 2>/dev/null || echo "")
   if grep -q "$ENODE2_ID" <<<"$peers_output"; then
     connected=true
     log "val-3 reports direct peer val-2"
