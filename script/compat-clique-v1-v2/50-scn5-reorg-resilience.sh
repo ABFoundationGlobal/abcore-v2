@@ -104,13 +104,24 @@ MAJORITY_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 2)")
 ISOLATED_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
 log "Majority fork head: ${MAJORITY_HEAD}, isolated val-1 head: ${ISOLATED_HEAD}"
 
-# Sanity-check: val-1 must be behind TARGET, confirming it was actually isolated.
-# If isolation silently failed (remove_peer returned || true without effect), val-1
-# would reach TARGET concurrently with the majority, and assert_same_hash_at below
-# would pass without having tested any reorg behaviour at all.
-# ISOLATED_HEAD="?" means the IPC call itself failed, which implies isolation is working.
-if [[ "$ISOLATED_HEAD" != "?" ]] && [[ "$ISOLATED_HEAD" -ge "$TARGET" ]]; then
-  die "val-1 was not isolated — it reached TARGET=${TARGET} concurrently with the majority (isolated_head=${ISOLATED_HEAD})"
+# Sanity-check: val-1 must be on a different fork from the majority, confirming
+# isolation actually produced a chain split.  In 3-signer Clique, val-1 can
+# still seal blocks solo (at a reduced rate), so it may reach H+4 on its own
+# fork — a height check would be wrong.  Instead compare the block hash at H+1:
+# if both nodes agree on that hash, val-1 was never isolated and the reorg
+# assertion below would pass vacuously.
+# Skip if val-1 hasn't reached H+1 yet (it may be slow but that is fine —
+# the reconnect will trigger a reorg regardless).
+VAL1_HASH_H1=$(block_hash_at "$ABCORE_V2_GETH" "$(val_ipc 1)" "$((H + 1))" 2>/dev/null || echo "")
+MAJ_HASH_H1=$(block_hash_at "$ABCORE_V2_GETH" "$(val_ipc 2)" "$((H + 1))" 2>/dev/null || echo "")
+if [[ -n "$VAL1_HASH_H1" && "$VAL1_HASH_H1" != "null" && \
+      -n "$MAJ_HASH_H1"  && "$MAJ_HASH_H1"  != "null" ]]; then
+  if [[ "$VAL1_HASH_H1" == "$MAJ_HASH_H1" ]]; then
+    die "val-1 is on the same chain as the majority at H+1=$((H+1)) (hash=${VAL1_HASH_H1}) — isolation did not produce a fork"
+  fi
+  log "Fork confirmed: val-1 hash at H+1 (${VAL1_HASH_H1:0:12}…) differs from majority (${MAJ_HASH_H1:0:12}…)"
+else
+  log "val-1 has not yet sealed H+1 — fork not yet observable, proceeding to reconnect"
 fi
 
 # ── Reconnect ─────────────────────────────────────────────────────────────────
