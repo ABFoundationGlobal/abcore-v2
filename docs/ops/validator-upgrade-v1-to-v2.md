@@ -6,6 +6,8 @@
 **适用网络**: ABCore 主网（Chain ID 36888）
 **共识机制**: Clique PoA
 
+> **路径说明**：本文档中出现的所有路径（`/opt/abcore/`、`/opt/abcore-docker/` 等）均为示例，请根据实际部署环境替换为对应的真实路径。
+
 ---
 
 ## 1. 升级概述
@@ -120,12 +122,12 @@ ls /opt/abcore/data/keystore/
 ```bash
 # 方式 A：在验证机上直接构建（约 10 分钟）
 cd /opt/abcore-v2-repo
-docker build -t abcore:v2 .
+docker build -t abcore:<tag> .
 
 # 方式 B：导出镜像，传输后导入（推荐用于多台验证机）
 # 构建机执行：
-docker build -t abcore:v2 .
-docker save abcore:v2 | gzip > abcore-v2.tar.gz
+docker build -t abcore:<tag> .
+docker save abcore:<tag> | gzip > abcore-v2.tar.gz
 
 # 验证机执行：
 scp builder:/path/abcore-v2.tar.gz /tmp/
@@ -136,7 +138,7 @@ docker images | grep abcore
 验证镜像：
 
 ```bash
-docker run --rm abcore:v2 geth version
+docker run --rm abcore:<tag> geth version
 # 应输出 v2.x.x 版本信息
 ```
 
@@ -218,7 +220,7 @@ IdleTimeout = 120000000000
 
 services:
   validator:
-    image: abcore:v2
+    image: abcore:<tag>
     container_name: abcore-validator
     restart: unless-stopped
     environment:
@@ -499,7 +501,7 @@ docker compose -f /opt/abcore-docker/docker-compose.yml restart validator
 docker compose -f /opt/abcore-docker/docker-compose.yml down
 
 # 强制重建镜像并重启
-docker build -t abcore:v2 /opt/abcore-v2-repo
+docker build -t abcore:<tag> /opt/abcore-v2-repo
 docker compose -f /opt/abcore-docker/docker-compose.yml up -d
 
 # 查看容器资源使用
