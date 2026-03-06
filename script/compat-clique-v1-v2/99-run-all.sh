@@ -52,6 +52,9 @@ run "${SCRIPT_DIR}/02-start-v1-validators.sh"
 run "${SCRIPT_DIR}/10-scn1-upgrade-validator.sh"
 run "${SCRIPT_DIR}/20-scn2-add-v2-rpc-node.sh"
 run "${SCRIPT_DIR}/30-scn3-add-v2-validator-vote.sh"
+# scn6 runs here (before scn4) because it requires a mixed v1/v2 environment;
+# after scn4 all validators are v2 and cross-version propagation cannot be tested.
+run "${SCRIPT_DIR}/35-scn6-tx-propagation.sh"
 run "${SCRIPT_DIR}/40-scn4-all-validators-v2.sh"
 run "${SCRIPT_DIR}/50-scn5-reorg-resilience.sh"
 
