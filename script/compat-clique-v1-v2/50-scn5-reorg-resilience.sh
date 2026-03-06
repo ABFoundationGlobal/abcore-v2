@@ -103,6 +103,15 @@ MAJORITY_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 2)")
 ISOLATED_HEAD=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
 log "Majority fork head: ${MAJORITY_HEAD}, isolated val-1 head: ${ISOLATED_HEAD}"
 
+# Sanity-check: val-1 must be behind TARGET, confirming it was actually isolated.
+# If isolation silently failed (remove_peer returned || true without effect), val-1
+# would reach TARGET concurrently with the majority, and assert_same_hash_at below
+# would pass without having tested any reorg behaviour at all.
+# ISOLATED_HEAD="?" means the IPC call itself failed, which implies isolation is working.
+if [[ "$ISOLATED_HEAD" != "?" ]] && [[ "$ISOLATED_HEAD" -ge "$TARGET" ]]; then
+  die "val-1 was not isolated — it reached TARGET=${TARGET} concurrently with the majority (isolated_head=${ISOLATED_HEAD})"
+fi
+
 # ── Reconnect ─────────────────────────────────────────────────────────────────
 
 log "Reconnecting validator-1 to validator-2"
