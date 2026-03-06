@@ -67,14 +67,15 @@ done
 [[ "$connected" == true ]] || die "val-3 does not list val-2 as a direct peer after 30s"
 
 log "Isolating validator-1 from validators 2 and 3"
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null || true
-
-# Wait for validator-1 to have no peers (true isolation).
-log "Waiting for validator-1 peer count to reach 0"
+# Re-issue remove_peer on every iteration of the wait loop.
+# admin.addPeer adds peers to the static list, so each node's dial scheduler
+# will retry the connection after a disconnect. We must keep evicting the peer
+# from both sides until the peer_count stays at 0.
 for ((i=0; i<30; i++)); do
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
+  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
   pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
   if [[ "$pc" -eq 0 ]]; then
     log "validator-1 isolated (peer_count=0)"
