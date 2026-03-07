@@ -71,17 +71,17 @@ log "Isolating validator-1 from validators 2 and 3"
 # admin.addPeer adds peers to the static list, so each node's dial scheduler
 # will retry the connection after a disconnect. We must keep evicting the peer
 # from both sides until the peer_count stays at 0.
-for ((i=0; i<30; i++)); do
+for ((i=0; i<60; i++)); do
   remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null 2>&1 || true
   remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
   remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
   remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
+  sleep 1  # allow TCP disconnect to propagate before sampling peer_count
   pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
   if [[ "$pc" -eq 0 ]]; then
     log "validator-1 isolated (peer_count=0)"
     break
   fi
-  sleep 1
 done
 pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
 [[ "$pc" -eq 0 ]] || die "validator-1 still has peers after isolation attempt (peer_count=${pc})"
