@@ -83,15 +83,14 @@ version boundary — the most likely place for a silent incompatibility to manif
 partial rollout.
 
 **Scenario 7** (`60-scn7-rollback-v1-sync.sh`): v1 syncing from a v2-majority network. Runs
-after Scenario 5, when all three validators are v2 and the network is live. Stops the validator
-that was first upgraded in Scenario 1 (controlled by `UPGRADE_VALIDATOR_N`), lets the remaining
-two v2 validators advance 3 blocks, then restarts the stopped node using the v1 binary against
-the same datadir. Re-peers it to the two v2 validators and asserts: (a) it syncs to the canonical
-chain and agrees on the block hash at the pre-shutdown height, (b) all three validators converge
-on the same head, and (c) the reverted v1 node resumes sealing blocks — confirming that Clique
-governance continues across the version rollback and the v2-produced chain is accepted as
-canonical by v1. Tests rollback capability: whether an operator can safely revert a single node
-from v2 back to v1 if an issue is found post-upgrade.
+after Scenario 5, when all three validators are v2 and the network is live. Starts a fresh v1
+node (new datadir, same genesis, no mining) and peers it to all three v2 validators; asserts it
+syncs to the canonical chain and agrees on the block hash at the v2 head height. Note: in-place
+downgrade (reusing a v2-written datadir with the v1 binary) is not possible because v2 upgrades
+the freezer table metadata to a format v1 cannot decode — in a real rollback an operator would
+provision a fresh node, which is what this scenario tests. Confirms that v1 can fully sync a
+chain produced entirely by v2 validators via standard P2P block propagation — the critical
+property for safe partial rollback.
 
 ## Environment variables
 
@@ -146,6 +145,20 @@ conditionals for BSC extensions, and miner timing (nil-delay handling).
 
 Transaction **propagation** across the version boundary (not execution) is covered by
 Scenario 6.
+
+## Database compatibility
+
+**v2 can read v1 datadirs** (confirmed by Scenario 1: v2 starts against a v1-written datadir
+and produces blocks). v2's DB layer is backwards-compatible for the chain data formats it
+inherits from go-ethereum v1.13.
+
+**v1 cannot read v2 datadirs.** v2 upgrades the freezer table metadata from a 2-field RLP
+struct (`Version`, `VirtualTail`) to a richer v2 format with additional fields. v1 decodes
+this as "input list has too many elements" and fails to start. In-place binary rollback is
+therefore not possible after v2 has written blocks to a node's datadir.
+
+The practical rollback path is to provision a fresh v1 node (new datadir) and let it sync from
+the v2 majority — which is exactly what Scenario 7 tests and confirms works correctly.
 
 ## Suggested future scenarios
 
