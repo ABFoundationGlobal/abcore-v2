@@ -36,7 +36,7 @@ This will:
 - clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 6 scenarios in sequence, then stop all nodes
+- run the 7 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -81,6 +81,17 @@ submit a transfer directly from a v1 validator's IPC and wait for the receipt to
 v2 validator's IPC. Exercises the full transaction-gossip path in both directions across the
 version boundary — the most likely place for a silent incompatibility to manifest during a
 partial rollout.
+
+**Scenario 7** (`60-scn7-rollback-v1-sync.sh`): v1 syncing from a v2-majority network. Runs
+after Scenario 5, when all three validators are v2 and the network is live. Stops the validator
+that was first upgraded in Scenario 1 (controlled by `UPGRADE_VALIDATOR_N`), lets the remaining
+two v2 validators advance 3 blocks, then restarts the stopped node using the v1 binary against
+the same datadir. Re-peers it to the two v2 validators and asserts: (a) it syncs to the canonical
+chain and agrees on the block hash at the pre-shutdown height, (b) all three validators converge
+on the same head, and (c) the reverted v1 node resumes sealing blocks — confirming that Clique
+governance continues across the version rollback and the v2-produced chain is accepted as
+canonical by v1. Tests rollback capability: whether an operator can safely revert a single node
+from v2 back to v1 if an issue is found post-upgrade.
 
 ## Environment variables
 
@@ -140,11 +151,6 @@ Scenario 6.
 
 These are not yet implemented but cover additional compatibility surface, ordered by priority
 for the rolling v1→v2 upgrade:
-
-**Scenario 7 — v1 syncing from a v2-majority network**: After Scenario 4 (all-v2 network),
-stop a v2 validator and start it again using the v1 binary. Verify it reconnects and syncs to
-the v2 canonical head without diverging or stalling. Tests rollback capability: whether an
-operator can safely revert a single node to v1 if an issue is found post-upgrade.
 
 **Scenario 8 — Epoch boundary with short epoch**: Run the full upgrade sequence (Scenarios
 1–4) with `CLIQUE_EPOCH=10` so an epoch boundary is crossed during the mixed-version phase.
