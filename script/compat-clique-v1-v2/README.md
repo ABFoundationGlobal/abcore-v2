@@ -10,7 +10,8 @@ This folder contains scripts to:
 - v1 binary: downloaded automatically on first run via `00-get-v1-geth.sh` (requires `gh` CLI
   authenticated to GitHub). Saved to `script/compat-clique-v1-v2/bin/geth-v1` and reused on
   subsequent runs. Override with `ABCORE_V1_GETH=/path/to/geth` if you have it locally.
-- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json`)
+- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json` and by `35-scn6-tx-propagation.sh` to parse HTTP responses)
+- `curl` in PATH (used by `35-scn6-tx-propagation.sh` to submit transactions via the RPC HTTP endpoint)
 
 ## Configure binaries
 
@@ -32,10 +33,10 @@ script/compat-clique-v1-v2/99-run-all.sh
 ```
 
 This will:
-- clean any prior state (`data/`, `genesis.json`)
+- clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 4 scenarios in sequence, then stop all nodes
+- run the 6 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -63,6 +64,24 @@ Verify the fully-v2 3-validator network continues producing blocks and all valid
 the same head. Tests the end-state of a complete rolling upgrade where no v1 nodes remain.
 (validator-4 was voted out in Scenario 3 and is not part of this network.)
 
+**Scenario 5** (`50-scn5-reorg-resilience.sh`): Isolate validator-1 from validators 2 and 3 via
+`admin.removePeer`, let the majority fork (2-of-3 signers) advance 4 blocks, then reconnect and
+verify validator-1 reorgs to the canonical chain by asserting matching block hashes at the
+fork-point height. Confirms that Clique's highest-difficulty fork selection works identically on
+v2 nodes — a critical property for safe rolling upgrades.
+
+**Scenario 6** (`35-scn6-tx-propagation.sh`): Transaction propagation parity across the v1/v2
+boundary. Runs after Scenario 3, while the network is still mixed (one v2 validator, two v1
+validators, and the v2 RPC node from Scenario 2). Part 1: sign a transfer on the v2 validator's
+IPC and submit the raw transaction via the v2 RPC node's HTTP endpoint (`eth_sendRawTransaction`);
+wait for the receipt to appear on a v1 validator node (confirming the tx was gossiped across the
+version boundary and accepted by v1 as part of the canonical chain — Clique is round-robin so
+the assertion is receipt visibility on v1, not that v1 specifically sealed the block). Part 2:
+submit a transfer directly from a v1 validator's IPC and wait for the receipt to appear on the
+v2 validator's IPC. Exercises the full transaction-gossip path in both directions across the
+version boundary — the most likely place for a silent incompatibility to manifest during a
+partial rollout.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -84,15 +103,56 @@ the same head. Tests the end-state of a complete rolling upgrade where no v1 nod
   out of order.
 - On failure, logs are preserved under `DATADIR_ROOT` (default `script/compat-clique-v1-v2/data-<PORT_BASE>/`) for debugging. Nodes are stopped automatically.
 
+## Coverage and EVM parity
+
+The suite tests **consensus-layer** compatibility: block sealing, Clique governance, reorg
+selection, P2P sync, and transaction propagation across mixed v1/v2 networks. Scenario 6
+submits simple ETH transfers (21 000 gas, no contract interaction), so the EVM execution
+path is exercised only minimally — enough to confirm basic transaction acceptance, not
+opcode-level parity.
+
+**EVM execution tests are not required for this upgrade.** Here's why:
+
+v2 is based on BSC v1.7.0-alpha (geth v1.16.7), which ships many new EIPs — Shanghai,
+Cancun, Prague, Osaka — along with new precompiles (BLS12-381, KZG) and opcodes (CLZ,
+EXTCALL). However, none of these activate on the test network because of a double gate in
+`params/config.go`:
+
+```
+IsShanghai: (isMerge || c.IsInBSC()) && c.IsShanghai(num, timestamp)
+```
+
+`isMerge` is false (TerminalTotalDifficulty is set impossibly high) and `c.IsInBSC()`
+is false (the test genesis has no `"parlia"` field — only `"clique"`). So, for this test
+genesis, the Ethereum timestamp-gated forks that use this pattern (Shanghai, Cancun, Prague,
+Osaka, etc.) all remain disabled regardless of the timestamps configured. The test network
+therefore runs identical EVM rules to v1: Homestead through Petersburg (all activated at
+block 0), with Istanbul and all later Ethereum forks left unset in the genesis.
+
+Additionally, v2's own diff vs upstream touches zero files in `core/vm/`, `core/state/`,
+or `core/txpool/`. The only code changes are Clique API restoration, P2P handshake
+conditionals for BSC extensions, and miner timing (nil-delay handling).
+
+Transaction **propagation** across the version boundary (not execution) is covered by
+Scenario 6.
+
 ## Suggested future scenarios
 
-These are not yet implemented but cover additional compatibility surface:
+These are not yet implemented but cover additional compatibility surface, ordered by priority
+for the rolling v1→v2 upgrade:
 
-**Scenario 5 — v1/v2 re-org resilience**: Isolate a v1 and v2 node for 3 blocks (drop peers),
-then reconnect and verify they converge on the same canonical chain via highest-difficulty fork
-selection. Tests that fork choice is identical across versions.
+**Scenario 7 — v1 syncing from a v2-majority network**: After Scenario 4 (all-v2 network),
+stop a v2 validator and start it again using the v1 binary. Verify it reconnects and syncs to
+the v2 canonical head without diverging or stalling. Tests rollback capability: whether an
+operator can safely revert a single node to v1 if an issue is found post-upgrade.
 
-**Scenario 6 — JSON-RPC response parity**: Query the v2 RPC node (from scenario 2) and a v1
-validator with the same set of calls (`eth_getBlockByNumber`, `eth_getLogs`,
-`clique_getSnapshot`) and assert the responses are byte-identical. Catches any JSON encoding or
-field-ordering regressions.
+**Scenario 8 — Epoch boundary with short epoch**: Run the full upgrade sequence (Scenarios
+1–4) with `CLIQUE_EPOCH=10` so an epoch boundary is crossed during the mixed-version phase.
+Verify all nodes agree on the signer set after the epoch transition. Catches divergence in how
+v1 and v2 encode or decode the epoch checkpoint `extraData` field.
+
+**Scenario 9 — JSON-RPC response parity** *(lower priority)*: Query the v2 RPC node (from
+Scenario 2) and a v1 validator with the same set of calls (`eth_getBlockByNumber`,
+`eth_getLogs`, `clique_getSnapshot`) and assert the responses are byte-identical. Catches any
+JSON encoding or field-ordering regressions. Requires adding `--http` to a v1 validator at
+startup (not currently done) or accepting IPC-only comparison.
