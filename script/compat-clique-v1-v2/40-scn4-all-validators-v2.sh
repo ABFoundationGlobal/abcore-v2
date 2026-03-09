@@ -120,4 +120,11 @@ for N in "${REMAINING_V1[@]}"; do
   wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120
 done
 
+# Sleep long enough for the RPC node's dial-history entry (dialHistoryExpiration=35s)
+# to expire and reconnect to the freshly-restarted v2 validators.  This stress-tests
+# scn5: if the isolation loop does not account for the RPC node's inbound connection
+# to val-1, peer_count will stay at 1 and the isolation will time out.
+log "Sleeping 35s so RPC node can reconnect before scn5 runs (stress test)"
+sleep 35
+
 log "Scenario 4 OK: all validators running v2, network healthy"
