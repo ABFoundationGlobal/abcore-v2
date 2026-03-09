@@ -50,6 +50,7 @@ graphql/__debug_bin
 tests/spec-tests/
 
 # binaries
+/geth
 cmd/abidump/abidump
 cmd/abigen/abigen
 cmd/blsync/blsync
