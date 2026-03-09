@@ -46,6 +46,7 @@ scn8_cleanup() {
   # Stop any running validators by walking pidfiles in our isolated datadir.
   for pidfile in "${DATADIR_ROOT}"/validator-*/geth.pid \
                  "${DATADIR_ROOT}"/rpc-node/geth.pid \
+                 "${DATADIR_ROOT}"/rpc-v2-1/geth.pid \
                  "${DATADIR_ROOT}"/validator-4/geth.pid; do
     [[ -f "$pidfile" ]] && stop_pidfile "$pidfile" || true
   done
