@@ -28,6 +28,11 @@ ENODE1=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 1)")
 ENODE2=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 2)")
 ENODE3=$(get_enode "$ABCORE_V2_GETH" "$(val_ipc 3)")
 
+# The RPC node started in Scenario 2 has all three validators in its static
+# peer list and will keep reconnecting to val-1 during the isolation phase,
+# preventing peer_count from reaching 0 and relaying majority blocks to val-1.
+RPC_IPC="${DATADIR_ROOT}/rpc-v2-1/geth.ipc"
+
 # Ensure val-2 and val-3 have a direct connection before we cut val-1 out.
 # Scn4 only guarantees >=1 peer per node; without this, val-2 and val-3 might
 # only know each other via val-1 and the "majority" would be isolated too.
@@ -67,24 +72,21 @@ done
 [[ "$connected" == true ]] || die "val-3 does not list val-2 as a direct peer after 30s"
 
 log "Isolating validator-1 from validators 2 and 3"
-# Re-issue remove_peer on every iteration of the wait loop.
-# admin.addPeer adds peers to the static list, so each node's dial scheduler
-# will retry the connection after a disconnect. We must keep evicting the peer
-# from both sides until the peer_count stays at 0.
-for ((i=0; i<30; i++)); do
-  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null 2>&1 || true
-  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
-  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
-  remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
-  pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
-  if [[ "$pc" -eq 0 ]]; then
-    log "validator-1 isolated (peer_count=0)"
-    break
-  fi
-  sleep 1
-done
+# Remove from all sides once.  With the RPC node also handled, every node
+# that holds val-1 in its static list is covered — no reconnection source
+# remains, so a single pass is sufficient and avoids accumulating dial
+# backoff on val-2/val-3 that would slow down the reconnect phase.
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null 2>&1 || true
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
+[[ -S "$RPC_IPC" ]] && remove_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE1" >/dev/null 2>&1 || true
+# Give the P2P layer time to tear down existing TCP connections before sampling
+# peer_count, otherwise we might see a stale count from a connection mid-close.
+sleep 2
 pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
 [[ "$pc" -eq 0 ]] || die "validator-1 still has peers after isolation attempt (peer_count=${pc})"
+log "validator-1 isolated (peer_count=0)"
 
 # Record the fork base height AFTER isolation is confirmed.  Sampling before
 # the partition means blocks sealed during setup can make TARGET reachable
@@ -126,9 +128,25 @@ fi
 
 # ── Reconnect ─────────────────────────────────────────────────────────────────
 
+# The isolation phase called remove_peer from both sides.  When a node receives
+# a DiscRequested message it did not initiate, it adds the sender to its
+# disconnectEnodeSet (p2p/server.go).  Every subsequent inbound connection from
+# that peer is then rejected with "explicitly disconnected peer previously",
+# regardless of add_peer — making reconnection impossible.
+#
+# Clear the set on all affected nodes using the magic enode defined in
+# p2p/server.go: admin.removePeer(magicEnode) resets disconnectEnodeSet to {}.
+MAGIC_ENODE="enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@127.0.0.1:30303"
+log "Clearing disconnectEnodeSet on all nodes before reconnect"
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
+remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
+[[ -S "$RPC_IPC" ]] && remove_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$MAGIC_ENODE" >/dev/null 2>&1 || true
+
 log "Reconnecting validator-1 to validator-2"
 add_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null || true
-wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 1)" 1 30
+add_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null || true
+wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 1)" 1 10
 
 # ── Assert convergence ────────────────────────────────────────────────────────
 
@@ -141,8 +159,12 @@ assert_same_hash_at "$TARGET" \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V2_GETH" "$(val_ipc 3)"
 
-# Re-peer val-1 to val-3 for the rest of the suite.
+# Re-peer val-1 <-> val-3 for the rest of the suite.
 add_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null || true
+add_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null || true
+
+# Restore val-1 in the RPC node's static peer list (removed during isolation).
+[[ -S "$RPC_IPC" ]] && add_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE1" >/dev/null || true
 
 # Confirm chain is still live after the reorg.
 wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc 1)" 2 30
