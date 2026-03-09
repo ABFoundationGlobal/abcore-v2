@@ -81,11 +81,14 @@ remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$ENODE1" >/dev/null 2>&1 || true
 remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null 2>&1 || true
 remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE3" >/dev/null 2>&1 || true
 [[ -S "$RPC_IPC" ]] && remove_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$ENODE1" >/dev/null 2>&1 || true
-# Give the P2P layer time to tear down existing TCP connections before sampling
-# peer_count, otherwise we might see a stale count from a connection mid-close.
-sleep 2
-pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
-[[ "$pc" -eq 0 ]] || die "validator-1 still has peers after isolation attempt (peer_count=${pc})"
+# Poll until peer_count reaches 0 (TCP teardown can take a few seconds on CI).
+_iso_deadline=$(( $(date +%s) + 30 ))
+while true; do
+  pc=$(peer_count "$ABCORE_V2_GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
+  [[ "$pc" -eq 0 ]] && break
+  (( $(date +%s) < _iso_deadline )) || die "validator-1 still has peers after isolation attempt (peer_count=${pc})"
+  sleep 1
+done
 log "validator-1 isolated (peer_count=0)"
 
 # Record the fork base height AFTER isolation is confirmed.  Sampling before
@@ -136,17 +139,16 @@ fi
 #
 # Clear the set on all affected nodes using the magic enode defined in
 # p2p/server.go: admin.removePeer(magicEnode) resets disconnectEnodeSet to {}.
-MAGIC_ENODE="enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@127.0.0.1:30303"
 log "Clearing disconnectEnodeSet on all nodes before reconnect"
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
-remove_peer "$ABCORE_V2_GETH" "$(val_ipc 3)" "$MAGIC_ENODE" >/dev/null 2>&1 || true
-[[ -S "$RPC_IPC" ]] && remove_peer "$ABCORE_V2_GETH" "$RPC_IPC" "$MAGIC_ENODE" >/dev/null 2>&1 || true
+reset_disconnect_enode_set "$ABCORE_V2_GETH" "$(val_ipc 1)" >/dev/null 2>&1 || true
+reset_disconnect_enode_set "$ABCORE_V2_GETH" "$(val_ipc 2)" >/dev/null 2>&1 || true
+reset_disconnect_enode_set "$ABCORE_V2_GETH" "$(val_ipc 3)" >/dev/null 2>&1 || true
+[[ -S "$RPC_IPC" ]] && reset_disconnect_enode_set "$ABCORE_V2_GETH" "$RPC_IPC" >/dev/null 2>&1 || true
 
 log "Reconnecting validator-1 to validator-2"
 add_peer "$ABCORE_V2_GETH" "$(val_ipc 1)" "$ENODE2" >/dev/null || true
 add_peer "$ABCORE_V2_GETH" "$(val_ipc 2)" "$ENODE1" >/dev/null || true
-wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 1)" 1 10
+wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc 1)" 1 60
 
 # ── Assert convergence ────────────────────────────────────────────────────────
 
