@@ -36,7 +36,7 @@ This will:
 - clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 6 scenarios in sequence, then stop all nodes
+- run the 7 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -81,6 +81,16 @@ submit a transfer directly from a v1 validator's IPC and wait for the receipt to
 v2 validator's IPC. Exercises the full transaction-gossip path in both directions across the
 version boundary — the most likely place for a silent incompatibility to manifest during a
 partial rollout.
+
+**Scenario 7** (`60-scn7-rollback-v1-sync.sh`): v1 syncing from a v2-majority network. Runs
+after Scenario 5, when all three validators are v2 and the network is live. Starts a fresh v1
+node (new datadir, same genesis, no mining) and peers it to all three v2 validators; asserts it
+syncs to the canonical chain and agrees on the block hash at the v2 head height. Note: in-place
+downgrade (reusing a v2-written datadir with the v1 binary) is not possible because v2 upgrades
+the freezer table metadata to a format v1 cannot decode — in a real rollback an operator would
+provision a fresh node, which is what this scenario tests. Confirms that v1 can fully sync a
+chain produced entirely by v2 validators via standard P2P block propagation — the critical
+property for safe partial rollback.
 
 ## Environment variables
 
@@ -136,15 +146,24 @@ conditionals for BSC extensions, and miner timing (nil-delay handling).
 Transaction **propagation** across the version boundary (not execution) is covered by
 Scenario 6.
 
+## Database compatibility
+
+**v2 can read v1 datadirs** (confirmed by Scenario 1: v2 starts against a v1-written datadir
+and produces blocks). v2's DB layer is backwards-compatible for the chain data formats it
+inherits from go-ethereum v1.13.
+
+**v1 cannot read v2 datadirs.** v2 upgrades the freezer table metadata from a 2-field RLP
+struct (`Version`, `VirtualTail`) to a richer v2 format with additional fields. v1 decodes
+this as "input list has too many elements" and fails to start. In-place binary rollback is
+therefore not possible after v2 has written blocks to a node's datadir.
+
+The practical rollback path is to provision a fresh v1 node (new datadir) and let it sync from
+the v2 majority — which is exactly what Scenario 7 tests and confirms works correctly.
+
 ## Suggested future scenarios
 
 These are not yet implemented but cover additional compatibility surface, ordered by priority
 for the rolling v1→v2 upgrade:
-
-**Scenario 7 — v1 syncing from a v2-majority network**: After Scenario 4 (all-v2 network),
-stop a v2 validator and start it again using the v1 binary. Verify it reconnects and syncs to
-the v2 canonical head without diverging or stalling. Tests rollback capability: whether an
-operator can safely revert a single node to v1 if an issue is found post-upgrade.
 
 **Scenario 8 — Epoch boundary with short epoch**: Run the full upgrade sequence (Scenarios
 1–4) with `CLIQUE_EPOCH=10` so an epoch boundary is crossed during the mixed-version phase.
