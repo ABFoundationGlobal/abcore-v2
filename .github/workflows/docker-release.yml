@@ -76,6 +76,19 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Save image to tar
+        run: |
+          docker save \
+            "${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}@${{ steps.build.outputs.digest }}" \
+            -o /tmp/image-${{ matrix.platform_pair }}.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.platform_pair }}
+          path: /tmp/image-${{ matrix.platform_pair }}.tar
+          retention-days: 7
+
       - name: Export digest
         if: github.event_name != 'workflow_dispatch' || inputs.push-docker
         run: |
