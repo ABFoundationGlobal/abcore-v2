@@ -83,15 +83,11 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'workflow_dispatch' || inputs.push-docker }}
+          outputs: |
+            type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'workflow_dispatch' || inputs.push-docker }}
+            type=docker,dest=/tmp/image-${{ matrix.platform_pair }}.tar
           tags: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Save image to tar
-        run: |
-          docker save \
-            "${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}@${{ steps.build.outputs.digest }}" \
-            -o /tmp/image-${{ matrix.platform_pair }}.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
