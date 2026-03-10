@@ -134,15 +134,16 @@ wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 120 \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V2_GETH" "$(val_ipc 3)"
 
-# Confirm each newly upgraded validator sealed at least one block (parallel).
+# Confirm each newly upgraded validator sealed at least one block.
 # Use wait_for_block_miner rather than wait_for_recent_signer: with 3 signers the
 # Clique recents window is only 2 slots, so a validator's recent entry can roll over
 # before we check it. Scanning block headers via clique.getSigner() is more reliable.
+# Run sequentially so that a timeout failure is not silently swallowed — bash `wait`
+# with no arguments always returns 0 regardless of child exit codes.
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
-  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120 &
+  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120
 done
-wait
 
 log "Scenario 4 OK: all validators running v2, network healthy"
