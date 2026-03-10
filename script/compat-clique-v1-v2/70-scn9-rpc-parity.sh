@@ -90,6 +90,8 @@ if echo "$_clique_err" | grep -qi "method not found\|no handler"; then
     add_peer "$ABCORE_V2_GETH" "$V2_RPC_IPC" "$_en" >/dev/null || true
   done
   wait_for_min_peers "$ABCORE_V2_GETH" "$V2_RPC_IPC" 1 30
+  _ref_head_v2=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 1)")
+  wait_for_head_at_least "$ABCORE_V2_GETH" "$V2_RPC_IPC" "$_ref_head_v2" 60
 fi
 
 # ── Start the v1 HTTP node ────────────────────────────────────────────────────
@@ -192,7 +194,11 @@ def strip(obj):
         return [strip(i) for i in obj]
     return obj
 d = json.load(sys.stdin)
-print(json.dumps(strip(d.get('result')), sort_keys=True))
+result = d.get('result')
+if result is None:
+    print('ERROR: result is null', file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(strip(result), sort_keys=True))
 "
 
   local v1_norm v2_norm

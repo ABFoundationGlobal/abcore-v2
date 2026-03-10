@@ -28,6 +28,12 @@ if [[ -f "${DATADIR_ROOT}/v1-rollback/geth.pid" ]]; then
   stop_pidfile "${DATADIR_ROOT}/v1-rollback/geth.pid"
 fi
 
+# v1 RPC node pidfile (if started by scn9)
+if [[ -f "${DATADIR_ROOT}/rpc-v1-1/geth.pid" ]]; then
+  log "Stopping rpc-v1-1"
+  stop_pidfile "${DATADIR_ROOT}/rpc-v1-1/geth.pid"
+fi
+
 log "Stopped."
 
 # Release the port-base reservation created by find_free_port_base (if any).
