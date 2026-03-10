@@ -61,7 +61,7 @@ Requires a keystore and a plaintext password file on the host. The keystore file
 
 The password file is mounted read-only into the container. The keystore is picked up from `<datadir>/keystore/` which is already inside the mounted data volume.
 
-> **Note:** Signing blocks requires your address to be in the Clique authorized signer set. Run as a syncing-only RPC node first, then have an existing validator call `clique_propose("0xYourAddress", true)` on their node. See the [becoming a validator](#becoming-a-validator) section below.
+> **Note:** Signing blocks requires your address to be in the Clique authorized signer set. Run as a syncing-only RPC node first, then have an existing validator call `clique.propose("0xYourAddress", true)` in their node's JS console. See the [becoming a validator](#becoming-a-validator) section below.
 
 ### Advertising a public IP for P2P
 
@@ -90,6 +90,7 @@ Options:
   -a, --address ADDR      Validator address        (required for --mode validator)
   -p, --password FILE     Password file path       (required for --mode validator)
   -e, --external-ip IP    Advertise IP for P2P     (sets NAT=extip:IP)
+      --public-rpc        Bind RPC/WS to 0.0.0.0  (default: 127.0.0.1 only)
   -h, --help
 ```
 

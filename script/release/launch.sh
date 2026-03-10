@@ -19,6 +19,7 @@ Options:
   -a, --address ADDR      Validator address        (required for --mode validator)
   -p, --password FILE     Password file path       (required for --mode validator)
   -e, --external-ip IP    Advertise IP for P2P     (sets NAT=extip:IP)
+      --public-rpc        Bind RPC/WS to 0.0.0.0  (default: 127.0.0.1 only)
   -h, --help              Show this help
 EOF
 }
@@ -31,18 +32,34 @@ IMAGE=""
 MINER_ADDR=""
 PASSWORD_FILE=""
 EXTERNAL_IP=""
+PUBLIC_RPC=false
 
 # Parse long options manually (bash getopts doesn't support --)
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -i|--image)        IMAGE="$2";        shift 2 ;;
-    -n|--network)      NETWORK="$2";      shift 2 ;;
-    -m|--mode)         MODE="$2";         shift 2 ;;
-    -d|--datadir)      DATADIR="$2";      shift 2 ;;
-    -a|--address)      MINER_ADDR="$2";   shift 2 ;;
-    -p|--password)     PASSWORD_FILE="$2"; shift 2 ;;
-    -e|--external-ip)  EXTERNAL_IP="$2";  shift 2 ;;
-    -h|--help)         usage; exit 0 ;;
+    -i|--image)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      IMAGE="$2"; shift 2 ;;
+    -n|--network)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      NETWORK="$2"; shift 2 ;;
+    -m|--mode)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      MODE="$2"; shift 2 ;;
+    -d|--datadir)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      DATADIR="$2"; shift 2 ;;
+    -a|--address)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      MINER_ADDR="$2"; shift 2 ;;
+    -p|--password)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      PASSWORD_FILE="$2"; shift 2 ;;
+    -e|--external-ip)
+      [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      EXTERNAL_IP="$2"; shift 2 ;;
+    --public-rpc)    PUBLIC_RPC=true; shift ;;
+    -h|--help)       usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
@@ -89,6 +106,12 @@ mkdir -p "$DATADIR"
 
 CONTAINER_NAME="abcore-${NETWORK}-${MODE}"
 
+# RPC/WS bind address: localhost by default, 0.0.0.0 only with --public-rpc
+RPC_BIND="127.0.0.1"
+if [[ "$PUBLIC_RPC" == "true" ]]; then
+  RPC_BIND="0.0.0.0"
+fi
+
 # Build docker run args
 DOCKER_ARGS=(
   run -d
@@ -96,8 +119,8 @@ DOCKER_ARGS=(
   -v "${DATADIR}:/data"
   -v "${CONFIG_DIR}/node.toml:/bsc/config/config.toml:ro"
   -v "${CONFIG_DIR}/genesis.json:/bsc/config/genesis.json:ro"
-  -p "8545:8545"
-  -p "8546:8546"
+  -p "${RPC_BIND}:8545:8545"
+  -p "${RPC_BIND}:8546:8546"
   -p "33333:33333/tcp"
   -p "33333:33333/udp"
 )
