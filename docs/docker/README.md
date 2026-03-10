@@ -5,6 +5,10 @@ This document covers two usage scenarios:
 - **Single validator node** — build the image and run one ABCore node (block-producing or sync-only).
 - **Local Parlia devnet** — spin up a three-validator devnet in Docker Compose, mirroring the bare-metal workflow in `script/local/`.
 
+> **Running a production node (testnet / mainnet)?**
+> Use the operator release scripts in [`script/release/`](../../script/release/README.md).
+> They provide pre-built configs and a `launch.sh` wrapper for connecting to the live networks without building from source.
+
 ---
 
 ## Prerequisites
