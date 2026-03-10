@@ -48,9 +48,23 @@ log "Initializing fresh v1 rollback datadir"
 
 # ── Record canonical head on v2 network before starting v1 node ──────────────
 
-# Use validator-1 as the reference (any of 1–3 would do; all are v2 post-scn5).
+# Ensure all v2 validators agree on the same canonical chain before we sample it.
+# With fast polling between scenarios, Clique out-of-turn blocks can leave a node
+# on a transient fork; waiting for convergence here prevents a false hash mismatch.
+log "Waiting for all v2 validators to agree on canonical head"
+wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 60 \
+  "$ABCORE_V2_GETH" "$(val_ipc 2)" \
+  "$ABCORE_V2_GETH" "$(val_ipc 3)"
+
+# Use the minimum head across all validators: guaranteed to be on the canonical chain
+# and present on every node, preventing a race where one node is 1 block ahead.
 REF=1
-TARGET=$(head_number "$ABCORE_V2_GETH" "$(val_ipc "$REF")")
+T1=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 1)")
+T2=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 2)")
+T3=$(head_number "$ABCORE_V2_GETH" "$(val_ipc 3)")
+TARGET=$T1
+[[ "$T2" -lt "$TARGET" ]] && TARGET=$T2
+[[ "$T3" -lt "$TARGET" ]] && TARGET=$T3
 log "Current v2 canonical head: block ${TARGET}"
 
 CANONICAL_HASH=$(block_hash_at "$ABCORE_V2_GETH" "$(val_ipc "$REF")" "$TARGET")
