@@ -50,6 +50,7 @@ done
 export DATADIR_ROOT
 export CLIQUE_CHAIN_ID
 export CLIQUE_PERIOD
+export CLIQUE_EPOCH
 export SCRIPT_DIR
 export GENESIS_JSON
 
@@ -82,6 +83,7 @@ extra = '0x' + vanity + ''.join(addrs) + sig
 
 chain_id = int(os.environ.get('CLIQUE_CHAIN_ID', '7141'))
 period = int(os.environ.get('CLIQUE_PERIOD', '3'))
+epoch = int(os.environ.get('CLIQUE_EPOCH', '30000'))
 
 alloc = {a: {"balance": "1000000000000000000000000"} for a in addrs}
 
@@ -99,7 +101,7 @@ genesis = {
     # Required by abcore-v2: set a high value so the network stays pre-merge
     # (Clique) during these compatibility tests.
     "terminalTotalDifficulty": 1000000000000,
-    "clique": {"period": period, "epoch": 30000},
+    "clique": {"period": period, "epoch": epoch},
   },
   "difficulty": "1",
   "gasLimit": "8000000",

@@ -36,7 +36,7 @@ This will:
 - clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 7 scenarios in sequence, then stop all nodes
+- run the 8 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -92,6 +92,16 @@ provision a fresh node, which is what this scenario tests. Confirms that v1 can 
 chain produced entirely by v2 validators via standard P2P block propagation — the critical
 property for safe partial rollback.
 
+**Scenario 8** (`80-scn8-epoch-boundary.sh`): Clique epoch checkpoint `extraData` encoding
+consistency across mixed v1/v2 networks. Runs the full upgrade sequence (Scenarios 1–4) in a
+fully isolated environment (own `PORT_BASE`, `DATADIR_ROOT`, `GENESIS_JSON`) with
+`CLIQUE_EPOCH=10` so that epoch boundaries are crossed during the mixed-version phase.
+Checkpoint A (block 10): mixed v1/v2 network — `assert_epoch_extradata()` verifies all nodes
+agree byte-for-byte on the epoch checkpoint block's `extraData` encoding (vanity + signer list
++ signature). Checkpoint B (block 20): all-v2 network — same assertion after full migration.
+Catches any divergence in how v1 and v2 encode or decode the epoch `extraData` field, which
+would cause a permanent chain split at the first epoch boundary in production.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -100,6 +110,7 @@ property for safe partial rollback.
 | `ABCORE_V2_GETH` | `./build/bin/geth` | Path to v2 binary |
 | `KEEP_RUNNING` | `0` | Set to `1` to leave nodes running after pass |
 | `UPGRADE_VALIDATOR_N` | `2` | Which validator to upgrade in scenario 1 (1–3) |
+| `CLIQUE_EPOCH` | `30000` | Clique epoch length in blocks. Set to a small value (e.g. `10`) by Scenario 8 to force epoch boundaries during tests. |
 | `CLIQUE_CHAIN_ID` | `7141` | Chain ID for the test network |
 | `CLIQUE_PERIOD` | `3` | Block period in seconds |
 | `PORT_BASE` | auto-selected | Offset added to all port numbers. Auto-selected by `99-run-all.sh` using the first free 100-unit slot, so multiple users can run the suite concurrently on the same host without port conflicts. Override with e.g. `PORT_BASE=200` to pin a specific offset. |
@@ -164,11 +175,6 @@ the v2 majority — which is exactly what Scenario 7 tests and confirms works co
 
 These are not yet implemented but cover additional compatibility surface, ordered by priority
 for the rolling v1→v2 upgrade:
-
-**Scenario 8 — Epoch boundary with short epoch**: Run the full upgrade sequence (Scenarios
-1–4) with `CLIQUE_EPOCH=10` so an epoch boundary is crossed during the mixed-version phase.
-Verify all nodes agree on the signer set after the epoch transition. Catches divergence in how
-v1 and v2 encode or decode the epoch checkpoint `extraData` field.
 
 **Scenario 9 — JSON-RPC response parity** *(lower priority)*: Query the v2 RPC node (from
 Scenario 2) and a v1 validator with the same set of calls (`eth_getBlockByNumber`,
