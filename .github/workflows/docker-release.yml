@@ -19,7 +19,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  REGISTRY_IMAGE: abcore-v2
+  REGISTRY_IMAGE: abfoundationglobal/abcore-v2
 
 jobs:
   build:
