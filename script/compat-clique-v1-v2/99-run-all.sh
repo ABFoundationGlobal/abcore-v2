@@ -58,6 +58,8 @@ run "${SCRIPT_DIR}/35-scn6-tx-propagation.sh"
 run "${SCRIPT_DIR}/40-scn4-all-validators-v2.sh"
 run "${SCRIPT_DIR}/50-scn5-reorg-resilience.sh"
 run "${SCRIPT_DIR}/60-scn7-rollback-v1-sync.sh"
+run "${SCRIPT_DIR}/80-scn8-epoch-boundary.sh"
+run "${SCRIPT_DIR}/70-scn9-rpc-parity.sh"
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo

@@ -11,6 +11,7 @@ GENESIS_JSON=${GENESIS_JSON:-"${SCRIPT_DIR}/genesis.json"}
 CLIQUE_CHAIN_ID=${CLIQUE_CHAIN_ID:-7141}
 CLIQUE_NETWORK_ID=${CLIQUE_NETWORK_ID:-$CLIQUE_CHAIN_ID}
 CLIQUE_PERIOD=${CLIQUE_PERIOD:-3}
+CLIQUE_EPOCH=${CLIQUE_EPOCH:-30000}
 
 V1_DEFAULT="${SCRIPT_DIR}/bin/geth-v1"
 V2_DEFAULT="${REPO_ROOT}/build/bin/geth"
@@ -109,6 +110,9 @@ rpc_http_port()       { echo $((8555  + PORT_BASE)); }
 val4_p2p_port()       { echo $((30326 + PORT_BASE)); }
 rollback_p2p_port()   { echo $((30327 + PORT_BASE)); }
 rollback_auth_port()  { echo $((8556  + PORT_BASE)); }
+rpc_v1_http_port()    { echo $((8557  + PORT_BASE)); }
+rpc_v1_p2p_port()     { echo $((30328 + PORT_BASE)); }
+rpc_v1_auth_port()    { echo $((8558  + PORT_BASE)); }
 
 # find_free_port_base — walk offsets in steps of 100 until all suite ports are free.
 # Prints the chosen PORT_BASE to stdout. Used by 99-run-all.sh when PORT_BASE is unset.
@@ -120,7 +124,7 @@ rollback_auth_port()  { echo $((8556  + PORT_BASE)); }
 # in /tmp, not in DATADIR_ROOT, so 05-clean.sh removing the data directory does not
 # free the reservation mid-run.  04-stop.sh removes the sentinel when the run finishes.
 find_free_port_base() {
-  local candidates=(30311 30312 30313 30325 30326 30327 8541 8542 8543 8555 8556 8551 8552 8553)
+  local candidates=(30311 30312 30313 30325 30326 30327 30328 8541 8542 8543 8555 8556 8557 8558 8551 8552 8553)
   local base
   for base in $(seq 0 100 9900); do
     local ok=1
@@ -257,6 +261,44 @@ wait_for_head_at_least() {
     sleep 1
   done
   die "head did not reach height ${target} (ipc=${ipc_path})"
+}
+
+# assert_epoch_extradata — verify that the epoch checkpoint block's extraData is:
+#   1. Well-formed: 0x + 64 hex vanity + (N * 40) hex signer bytes + 130 hex sig,
+#      where N >= 1 and the signer portion is divisible by 40.
+#   2. Identical across all supplied nodes.
+# Usage: assert_epoch_extradata <block_num> <geth1> <ipc1> [<geth2> <ipc2> ...]
+assert_epoch_extradata() {
+  local block_num="$1"
+  shift
+  local ref_geth="$1" ref_ipc="$2"
+  shift 2
+
+  local ref_ed
+  ref_ed=$(attach_exec "$ref_geth" "$ref_ipc" "eth.getBlock(${block_num}) ? eth.getBlock(${block_num}).extraData : 'null'")
+  log "epoch block ${block_num} extraData (ref): ${ref_ed}"
+
+  [[ "$ref_ed" != "null" ]] \
+    || die "block ${block_num} not found on ref node (${ref_ipc}) — has it synced past the epoch?"
+  [[ "$ref_ed" =~ ^0x[0-9a-fA-F]+$ ]] \
+    || die "extraData at block ${block_num} is not valid hex: ${ref_ed}"
+
+  local raw="${ref_ed#0x}"
+  local inner=$(( ${#raw} - 64 - 130 ))
+  [[ "$inner" -gt 0 && $(( inner % 40 )) -eq 0 ]] \
+    || die "extraData at block ${block_num} has malformed signer section: raw_hex_len=${#raw}"
+  log "epoch block ${block_num}: $(( inner / 40 )) signer(s) in extraData"
+
+  while [[ $# -ge 2 ]]; do
+    local geth_bin="$1" ipc_path="$2"; shift 2
+    local ed
+    ed=$(attach_exec "$geth_bin" "$ipc_path" "eth.getBlock(${block_num}) ? eth.getBlock(${block_num}).extraData : 'null'")
+    [[ "$ed" != "null" ]] \
+      || die "block ${block_num} not found on node ${ipc_path} — has it synced past the epoch?"
+    [[ "$ed" == "$ref_ed" ]] \
+      || die "extraData mismatch at epoch block ${block_num}: ref=${ref_ed} other=${ed} (ipc=${ipc_path})"
+  done
+  log "epoch block ${block_num}: extraData OK, all nodes agree"
 }
 
 assert_same_hash_at() {
