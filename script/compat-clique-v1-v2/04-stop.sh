@@ -7,25 +7,44 @@ source "${SCRIPT_DIR}/lib.sh"
 
 resolve_binaries
 
+# Collect all candidate pidfiles.
+_all_pidfiles=()
 for n in 1 2 3 4; do
-  pidfile="$(val_dir "$n")/geth.pid"
-  if [[ -f "$pidfile" ]]; then
-    log "Stopping node ${n} (pidfile=${pidfile})"
-    stop_pidfile "$pidfile"
-  fi
+  _all_pidfiles+=("$(val_dir "$n")/geth.pid")
+done
+_all_pidfiles+=(
+  "${DATADIR_ROOT}/rpc-v2-1/geth.pid"
+  "${DATADIR_ROOT}/v1-rollback/geth.pid"
+)
 
+# 1. Send SIGTERM to all running processes simultaneously.
+_live_pids=()
+_live_pidfiles=()
+for pidfile in "${_all_pidfiles[@]}"; do
+  [[ -f "$pidfile" ]] || continue
+  pid=$(cat "$pidfile" 2>/dev/null || true)
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    log "Stopping pid ${pid} (${pidfile})"
+    kill "$pid" 2>/dev/null || true
+    _live_pids+=("$pid")
+    _live_pidfiles+=("$pidfile")
+  else
+    rm -f "$pidfile"
+  fi
 done
 
-# rpc node pidfile (if started)
-if [[ -f "${DATADIR_ROOT}/rpc-v2-1/geth.pid" ]]; then
-  log "Stopping rpc-v2-1"
-  stop_pidfile "${DATADIR_ROOT}/rpc-v2-1/geth.pid"
-fi
-
-# v1 rollback node pidfile (if started by scn7)
-if [[ -f "${DATADIR_ROOT}/v1-rollback/geth.pid" ]]; then
-  log "Stopping v1-rollback"
-  stop_pidfile "${DATADIR_ROOT}/v1-rollback/geth.pid"
+# 2. Wait for all processes to exit with a shared 30-second deadline, then SIGKILL stragglers.
+if [[ ${#_live_pids[@]} -gt 0 ]]; then
+  deadline=$(( $(date +%s) + 30 ))
+  for pid in "${_live_pids[@]}"; do
+    while kill -0 "$pid" 2>/dev/null && [[ $(date +%s) -lt $deadline ]]; do
+      sleep 0.3
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  for pidfile in "${_live_pidfiles[@]}"; do
+    rm -f "$pidfile"
+  done
 fi
 
 # v1 RPC node pidfile (if started by scn9)

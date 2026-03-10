@@ -85,13 +85,14 @@ attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "clique.propose('${V4_ADDR}', true)
 attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "clique.propose('${V4_ADDR}', true)" >/dev/null
 
 log "Waiting for validator-4 to appear in clique.getSigners()"
-for ((i=0; i<120; i++)); do
+_deadline=$(( $(date +%s) + 120 ))
+while [[ $(date +%s) -lt $_deadline ]]; do
   signers=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "JSON.stringify(clique.getSigners())" || true)
   if echo "$signers" | grep -qi "$V4_ADDR"; then
     log "validator-4 is now an authorized signer"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
 
 signers=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "JSON.stringify(clique.getSigners())" || true)
@@ -151,15 +152,30 @@ attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "clique.propose('${V4_ADDR}', false
 attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 
-log "Waiting for validator-4 to be removed from clique.getSigners()"
-for ((i=0; i<120; i++)); do
-  signers=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "JSON.stringify(clique.getSigners())" || true)
-  if ! echo "$signers" | grep -qi "$V4_ADDR"; then
+log "Waiting for validator-4 to be removed from clique.getSigners() on all nodes"
+_deadline=$(( $(date +%s) + 120 ))
+while [[ $(date +%s) -lt $_deadline ]]; do
+  # Check all three nodes that will be asserted on; only break when all agree.
+  # Polling only one node and asserting others immediately after can race: one
+  # node's snapshot updates before the others process the same tally block.
+  s1=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "JSON.stringify(clique.getSigners())" || true)
+  s3=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "JSON.stringify(clique.getSigners())" || true)
+  s2=$(attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "JSON.stringify(clique.getSigners())" || true)
+  if ! echo "$s1" | grep -qi "$V4_ADDR" && \
+     ! echo "$s3" | grep -qi "$V4_ADDR" && \
+     ! echo "$s2" | grep -qi "$V4_ADDR"; then
     log "validator-4 has been removed from the signer set"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
+
+# Propagation guard: wait for all validators to converge on the same head before
+# asserting the signer set.  The loop above already checks all three nodes, but
+# a final convergence check guards against any transient fork between them.
+wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 30 \
+  "$ABCORE_V2_GETH" "$(val_ipc 2)" \
+  "$ABCORE_V1_GETH" "$(val_ipc 3)"
 
 # Assert absence on both a v1 node and a v2 node independently.
 signers_v1=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "JSON.stringify(clique.getSigners())" || true)

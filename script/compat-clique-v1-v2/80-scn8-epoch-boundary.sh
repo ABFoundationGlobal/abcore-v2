@@ -34,19 +34,52 @@ export DATADIR_ROOT="${SCRIPT_DIR}/data-scn8-${SCN8_BASE}"
 export GENESIS_JSON="${DATADIR_ROOT}/genesis.json"
 export CLIQUE_EPOCH=10
 
+# Ensure DATADIR_ROOT exists so that 05-clean.sh and 01-setup.sh can write into it.
+mkdir -p "${DATADIR_ROOT}"
+
 # ---------------------------------------------------------------------------
 # Cleanup: stop all nodes and release the port sentinel on exit.
 # ---------------------------------------------------------------------------
 scn8_cleanup() {
   local code=$?
   log "scn8: cleanup (exit=${code})"
-  # Stop any running validators by walking pidfiles in our isolated datadir.
-  for pidfile in "${DATADIR_ROOT}"/validator-*/geth.pid \
-                 "${DATADIR_ROOT}"/rpc-node/geth.pid \
-                 "${DATADIR_ROOT}"/rpc-v2-1/geth.pid \
-                 "${DATADIR_ROOT}"/validator-4/geth.pid; do
-    [[ -f "$pidfile" ]] && stop_pidfile "$pidfile" || true
+
+  # Collect all candidate pidfiles in scn8's isolated datadir.
+  local _live_pids=()
+  local _live_pidfiles=()
+  for pidfile in \
+      "${DATADIR_ROOT}/validator-1/geth.pid" \
+      "${DATADIR_ROOT}/validator-2/geth.pid" \
+      "${DATADIR_ROOT}/validator-3/geth.pid" \
+      "${DATADIR_ROOT}/validator-4/geth.pid" \
+      "${DATADIR_ROOT}/rpc-node/geth.pid" \
+      "${DATADIR_ROOT}/rpc-v2-1/geth.pid"; do
+    [[ -f "$pidfile" ]] || continue
+    local pid
+    pid=$(cat "$pidfile" 2>/dev/null || true)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      _live_pids+=("$pid")
+      _live_pidfiles+=("$pidfile")
+    else
+      rm -f "$pidfile"
+    fi
   done
+
+  # Wait for all processes to exit with a shared 30-second deadline, then SIGKILL stragglers.
+  if [[ ${#_live_pids[@]} -gt 0 ]]; then
+    local deadline=$(( $(date +%s) + 30 ))
+    for pid in "${_live_pids[@]}"; do
+      while kill -0 "$pid" 2>/dev/null && [[ $(date +%s) -lt $deadline ]]; do
+        sleep 0.3
+      done
+      kill -9 "$pid" 2>/dev/null || true
+    done
+    for pidfile in "${_live_pidfiles[@]}"; do
+      rm -f "$pidfile"
+    done
+  fi
+
   # Release the sentinel so parallel runs can reuse this port base.
   rmdir "/tmp/compat-clique-reserved-${SCN8_BASE}" 2>/dev/null || true
   exit "$code"

@@ -10,7 +10,7 @@ source "${SCRIPT_DIR}/lib.sh"
 resolve_binaries
 require_file "${GENESIS_JSON}"
 
-start_validator_v1() {
+launch_validator_v1() {
   local n="$1"
   local dir
   dir=$(val_dir "$n")
@@ -54,13 +54,18 @@ start_validator_v1() {
       >>"$logfile" 2>&1 &
     echo $! >"$pidfile"
   )
-
-  wait_for_ipc "$ABCORE_V1_GETH" "$(val_ipc "$n")"
 }
 
+# Launch all validators without waiting, then wait for IPC in parallel.
 for n in 1 2 3; do
-  start_validator_v1 "$n"
+  launch_validator_v1 "$n"
 done
+_ipc_pids=()
+for n in 1 2 3; do
+  wait_for_ipc "$ABCORE_V1_GETH" "$(val_ipc "$n")" &
+  _ipc_pids+=($!)
+done
+for _pid in "${_ipc_pids[@]}"; do wait "$_pid"; done
 
 # Force a full mesh using admin.addPeer.
 ENODE1=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 1)")
@@ -73,22 +78,22 @@ for src in 1 2 3; do
   add_peer "$ABCORE_V1_GETH" "$ipc" "$ENODE1" >/dev/null || true
   add_peer "$ABCORE_V1_GETH" "$ipc" "$ENODE2" >/dev/null || true
   add_peer "$ABCORE_V1_GETH" "$ipc" "$ENODE3" >/dev/null || true
-  # Wait for at least 2 peers (best-effort on first few seconds).
-  for ((i=0; i<30; i++)); do
-    pc=$(peer_count "$ABCORE_V1_GETH" "$ipc" || echo 0)
-    if [[ "$pc" -ge 2 ]]; then
-      break
-    fi
-    sleep 1
-  done
-  log "validator-${src}: peers=$(peer_count "$ABCORE_V1_GETH" "$ipc" || echo 0)"
-
+done
+# Wait for all nodes to reach at least 2 peers in parallel.
+_peer_pids=()
+for src in 1 2 3; do
+  wait_for_min_peers "$ABCORE_V1_GETH" "$(val_ipc "$src")" 2 30 &
+  _peer_pids+=($!)
+done
+for _pid in "${_peer_pids[@]}"; do wait "$_pid"; done
+for src in 1 2 3; do
+  log "validator-${src}: peers=$(peer_count "$ABCORE_V1_GETH" "$(val_ipc "$src")" || echo 0)"
 done
 
 log "Waiting for blocks to advance"
 wait_for_blocks "$ABCORE_V1_GETH" "$(val_ipc 1)" 2 60
 
-assert_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" \
+wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 60 \
   "$ABCORE_V1_GETH" "$(val_ipc 2)" \
   "$ABCORE_V1_GETH" "$(val_ipc 3)"
 

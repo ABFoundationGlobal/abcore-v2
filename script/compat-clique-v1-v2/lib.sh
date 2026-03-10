@@ -155,9 +155,10 @@ find_free_port_base() {
 wait_for_ipc() {
   local geth_bin="$1"
   local ipc_path="$2"
-  local tries=${3:-60}
+  local timeout_sec=${3:-60}
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     if [[ -e "$ipc_path" ]] && "$geth_bin" attach --exec "web3.clientVersion" "$ipc_path" >/dev/null 2>&1; then
       return 0
     fi
@@ -233,9 +234,10 @@ wait_for_min_peers() {
   local geth_bin="$1"
   local ipc_path="$2"
   local min_peers=${3:-1}
-  local tries=${4:-60}
+  local timeout_sec=${4:-60}
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     local pc
     pc=$(peer_count "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
     if [[ "$pc" -ge "$min_peers" ]]; then
@@ -250,9 +252,10 @@ wait_for_head_at_least() {
   local geth_bin="$1"
   local ipc_path="$2"
   local target="$3"
-  local tries=${4:-60}
+  local timeout_sec=${4:-60}
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     local n
     n=$(head_number "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
     if [[ "$n" -ge "$target" ]]; then
@@ -347,11 +350,12 @@ wait_for_blocks() {
   local geth_bin="$1"
   local ipc_path="$2"
   local min_delta=${3:-2}
-  local tries=${4:-60}
+  local timeout_sec=${4:-60}
 
   local start
   start=$(head_number "$geth_bin" "$ipc_path")
-  for ((i=0; i<tries; i++)); do
+  local deadline=$(( $(date +%s) + timeout_sec ))
+  while [[ $(date +%s) -lt $deadline ]]; do
     local cur
     cur=$(head_number "$geth_bin" "$ipc_path")
     if [[ $((cur - start)) -ge "$min_delta" ]]; then
@@ -441,12 +445,13 @@ check_same_head() {
 wait_for_same_head() {
   local ref_geth="$1"
   local ref_ipc="$2"
-  local tries="$3"
+  local timeout_sec="$3"
   shift 3
 
-  [[ "$tries" =~ ^[0-9]+$ ]] || die "wait_for_same_head: tries must be a number"
+  [[ "$timeout_sec" =~ ^[0-9]+$ ]] || die "wait_for_same_head: timeout_sec must be a number (got: ${timeout_sec})"
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     if check_same_head "$ref_geth" "$ref_ipc" "$@"; then
       return 0
     fi
@@ -486,9 +491,10 @@ wait_for_recent_signer() {
   local geth_bin="$1"
   local ipc_path="$2"
   local signer_addr="$3"
-  local tries=${4:-60}
+  local timeout_sec=${4:-60}
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     local recents
     recents=$(snapshot_recents_json "$geth_bin" "$ipc_path" || true)
     if echo "$recents" | grep -qi "$signer_addr"; then
@@ -511,12 +517,13 @@ wait_for_block_miner() {
   local ipc_path="$2"
   local signer_addr="$3"
   local lookback_n=${4:-12}  # how many recent blocks to scan
-  local tries=${5:-90}
+  local timeout_sec=${5:-90}
 
   local addr_lower
   addr_lower=$(echo "$signer_addr" | tr '[:upper:]' '[:lower:]')
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     local tip
     tip=$(head_number "$geth_bin" "$ipc_path" 2>/dev/null || echo 0)
     local start=$(( tip > lookback_n ? tip - lookback_n : 0 ))
