@@ -34,9 +34,6 @@ export DATADIR_ROOT="${SCRIPT_DIR}/data-scn8-${SCN8_BASE}"
 export GENESIS_JSON="${DATADIR_ROOT}/genesis.json"
 export CLIQUE_EPOCH=10
 
-# Ensure DATADIR_ROOT exists so that 05-clean.sh and 01-setup.sh can write into it.
-mkdir -p "${DATADIR_ROOT}"
-
 # ---------------------------------------------------------------------------
 # Cleanup: stop all nodes and release the port sentinel on exit.
 # ---------------------------------------------------------------------------
@@ -69,6 +66,9 @@ run() {
 # Phase 1: setup and start v1 validators, then upgrade one to v2 (scn1).
 # ---------------------------------------------------------------------------
 run "${SCRIPT_DIR}/05-clean.sh"
+# 05-clean.sh calls 04-stop.sh which releases the sentinel; re-acquire it so
+# the reservation holds for the rest of this run.
+mkdir "/tmp/compat-clique-reserved-${SCN8_BASE}" 2>/dev/null || true
 run "${SCRIPT_DIR}/01-setup.sh"
 run "${SCRIPT_DIR}/02-start-v1-validators.sh"
 run "${SCRIPT_DIR}/10-scn1-upgrade-validator.sh"
@@ -83,6 +83,8 @@ run "${SCRIPT_DIR}/10-scn1-upgrade-validator.sh"
 # ---------------------------------------------------------------------------
 log "scn8: waiting for block 11 (epoch boundary at block 10)"
 wait_for_head_at_least "$ABCORE_V2_GETH" "$(val_ipc 2)" 11 120
+wait_for_head_at_least "$ABCORE_V1_GETH" "$(val_ipc 1)" 11 120
+wait_for_head_at_least "$ABCORE_V1_GETH" "$(val_ipc 3)" 11 120
 
 log "scn8: asserting extraData at epoch block 10 (mixed v1/v2)"
 assert_epoch_extradata 10 \

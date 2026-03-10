@@ -272,9 +272,11 @@ assert_epoch_extradata() {
   shift 2
 
   local ref_ed
-  ref_ed=$(attach_exec "$ref_geth" "$ref_ipc" "eth.getBlock(${block_num}).extraData")
+  ref_ed=$(attach_exec "$ref_geth" "$ref_ipc" "eth.getBlock(${block_num}) ? eth.getBlock(${block_num}).extraData : 'null'")
   log "epoch block ${block_num} extraData (ref): ${ref_ed}"
 
+  [[ "$ref_ed" != "null" ]] \
+    || die "block ${block_num} not found on ref node (${ref_ipc}) — has it synced past the epoch?"
   [[ "$ref_ed" =~ ^0x[0-9a-fA-F]+$ ]] \
     || die "extraData at block ${block_num} is not valid hex: ${ref_ed}"
 
@@ -287,7 +289,9 @@ assert_epoch_extradata() {
   while [[ $# -ge 2 ]]; do
     local geth_bin="$1" ipc_path="$2"; shift 2
     local ed
-    ed=$(attach_exec "$geth_bin" "$ipc_path" "eth.getBlock(${block_num}).extraData")
+    ed=$(attach_exec "$geth_bin" "$ipc_path" "eth.getBlock(${block_num}) ? eth.getBlock(${block_num}).extraData : 'null'")
+    [[ "$ed" != "null" ]] \
+      || die "block ${block_num} not found on node ${ipc_path} — has it synced past the epoch?"
     [[ "$ed" == "$ref_ed" ]] \
       || die "extraData mismatch at epoch block ${block_num}: ref=${ref_ed} other=${ed} (ipc=${ipc_path})"
   done
