@@ -29,10 +29,23 @@ run() {
   echo
   echo "==> $*"
   "$@"
+  # After each step, check whether scn8 has already exited and failed.
+  if [[ -n "${SCN8_PID:-}" ]] && ! kill -0 "${SCN8_PID}" 2>/dev/null; then
+    if ! wait "${SCN8_PID}"; then
+      echo "scn8 FAILED" >&2
+      exit 1
+    fi
+    SCN8_PID=  # scn8 succeeded early; already reaped
+  fi
 }
 
 cleanup_on_exit() {
   local code=$?
+  # Kill scn8 background process if still running; its own trap handles node cleanup.
+  if [[ -n "${SCN8_PID:-}" ]]; then
+    kill "${SCN8_PID}" 2>/dev/null || true
+    wait "${SCN8_PID}" 2>/dev/null || true
+  fi
   if [[ "$code" -ne 0 ]]; then
     echo
     if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
@@ -48,7 +61,13 @@ trap cleanup_on_exit EXIT
 
 run "${SCRIPT_DIR}/05-clean.sh"
 run "${SCRIPT_DIR}/01-setup.sh"
-run "${SCRIPT_DIR}/02-start-v1-validators.sh"
+run "${SCRIPT_DIR}/02-start-v1-validators.sh"   # binaries confirmed available after this
+
+# scn8 is fully isolated (own PORT_BASE, DATADIR_ROOT, GENESIS_JSON) — start it
+# in the background so it overlaps with the main-chain scn1–scn7 sequence.
+"${SCRIPT_DIR}/80-scn8-epoch-boundary.sh" &
+SCN8_PID=$!
+
 run "${SCRIPT_DIR}/10-scn1-upgrade-validator.sh"
 run "${SCRIPT_DIR}/20-scn2-add-v2-rpc-node.sh"
 run "${SCRIPT_DIR}/30-scn3-add-v2-validator-vote.sh"
@@ -60,6 +79,19 @@ run "${SCRIPT_DIR}/50-scn5-reorg-resilience.sh"
 run "${SCRIPT_DIR}/60-scn7-rollback-v1-sync.sh"
 run "${SCRIPT_DIR}/80-scn8-epoch-boundary.sh"
 run "${SCRIPT_DIR}/70-scn9-rpc-parity.sh"
+
+# Collect scn8 result (runs in parallel with scn1–scn7 above).
+# SCN8_PID may already be empty if run() reaped an early-exit scn8 (success path
+# sets SCN8_PID=""; failure path exits immediately, so empty always means success).
+if [[ -n "${SCN8_PID:-}" ]]; then
+  if ! wait "${SCN8_PID}"; then
+    echo "scn8 FAILED" >&2
+    exit 1
+  fi
+fi
+echo
+echo "==> [scn8] PASS"
+SCN8_PID=  # already reaped
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo

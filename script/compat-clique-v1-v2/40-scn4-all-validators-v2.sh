@@ -44,14 +44,28 @@ for N in 1 2 3; do
 done
 
 # Phase 1: stop all remaining v1 validators before starting any v2 replacements.
-# This temporarily drops the network to 1 active signer (the already-upgraded v2
-# from Scenario 1), pausing block production briefly until the new v2 nodes start.
+# Batch SIGTERM first, then wait with a shared 30-second deadline.
+_stop_pids=()
 for N in "${REMAINING_V1[@]}"; do
   pidfile=$(val_pid "$N")
   [[ -f "$pidfile" ]] || die "validator-${N} not running (missing pidfile ${pidfile})"
-  log "Stopping v1 validator-${N}"
-  stop_pidfile "$pidfile"
+  pid=$(cat "$pidfile" 2>/dev/null || true)
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    log "Stopping v1 validator-${N} (pid=${pid})"
+    kill "$pid" 2>/dev/null || true
+    _stop_pids+=("$pid")
+  fi
+  rm -f "$pidfile"
 done
+if [[ ${#_stop_pids[@]} -gt 0 ]]; then
+  _stop_deadline=$(( $(date +%s) + 30 ))
+  for pid in "${_stop_pids[@]}"; do
+    while kill -0 "$pid" 2>/dev/null && [[ $(date +%s) -lt $_stop_deadline ]]; do
+      sleep 0.3
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  done
+fi
 
 # Phase 2: start all v2 replacements.
 for N in "${REMAINING_V1[@]}"; do
@@ -84,11 +98,14 @@ for N in "${REMAINING_V1[@]}"; do
   )
 done
 
-# Phase 3: wait for IPC and peer each new v2 node.
+# Phase 3: wait for IPC on all new v2 nodes in parallel, then peer.
 for N in "${REMAINING_V1[@]}"; do
-  wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")"
+  wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")" &
+done
+wait
 
-  # Peer to all other running validators (skip self). validator-4 is stopped.
+# Peer each new node to all other running validators (skip self). validator-4 is stopped.
+for N in "${REMAINING_V1[@]}"; do
   for peer in 1 2 3; do
     [[ "$peer" -eq "$N" ]] && continue
     peer_ipc=$(val_ipc "$peer")
@@ -97,8 +114,15 @@ for N in "${REMAINING_V1[@]}"; do
     [[ -n "$enode" ]] || continue
     add_peer "$ABCORE_V2_GETH" "$(val_ipc "$N")" "$enode" >/dev/null || true
   done
-  wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$N")" 1 60
+done
 
+# Wait for min peers on all new nodes in parallel.
+for N in "${REMAINING_V1[@]}"; do
+  wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$N")" 1 60 &
+done
+wait
+
+for N in "${REMAINING_V1[@]}"; do
   log "validator-${N} upgraded to v2 and peered"
 done
 
@@ -110,14 +134,15 @@ wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 120 \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V2_GETH" "$(val_ipc 3)"
 
-# Confirm each newly upgraded validator sealed at least one block.
+# Confirm each newly upgraded validator sealed at least one block (parallel).
 # Use wait_for_block_miner rather than wait_for_recent_signer: with 3 signers the
 # Clique recents window is only 2 slots, so a validator's recent entry can roll over
 # before we check it. Scanning block headers via clique.getSigner() is more reliable.
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
-  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120
+  wait_for_block_miner "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" "$addr" 16 120 &
 done
+wait
 
 log "Scenario 4 OK: all validators running v2, network healthy"

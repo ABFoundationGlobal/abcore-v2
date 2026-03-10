@@ -66,9 +66,10 @@ wait_for_receipt() {
   local geth_bin="$1"
   local ipc_path="$2"
   local txhash="$3"
-  local tries=${4:-90}
+  local timeout_sec=${4:-90}
+  local deadline=$(( $(date +%s) + timeout_sec ))
 
-  for ((i=0; i<tries; i++)); do
+  while [[ $(date +%s) -lt $deadline ]]; do
     local status
     status=$(attach_exec "$geth_bin" "$ipc_path" \
       "(function(){var r=eth.getTransactionReceipt('${txhash}');return r?r.status:'null';})()" \
