@@ -10,8 +10,8 @@ This folder contains scripts to:
 - v1 binary: downloaded automatically on first run via `00-get-v1-geth.sh` (requires `gh` CLI
   authenticated to GitHub). Saved to `script/compat-clique-v1-v2/bin/geth-v1` and reused on
   subsequent runs. Override with `ABCORE_V1_GETH=/path/to/geth` if you have it locally.
-- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json` and by `35-scn6-tx-propagation.sh` to parse HTTP responses)
-- `curl` in PATH (used by `35-scn6-tx-propagation.sh` to submit transactions via the RPC HTTP endpoint)
+- `python3` in PATH (used by `01-setup.sh` to generate `genesis.json`, by `35-scn6-tx-propagation.sh` to parse HTTP responses, and by `70-scn9-rpc-parity.sh` to normalise JSON for comparison)
+- `curl` in PATH (used by `35-scn6-tx-propagation.sh` and `70-scn9-rpc-parity.sh` for HTTP RPC calls)
 
 ## Configure binaries
 
@@ -36,7 +36,7 @@ This will:
 - clean any prior state (`data-*/`, `genesis.json`)
 - generate a fresh Clique `genesis.json` (chain ID 7141, 3-second blocks)
 - start 3 v1 validators
-- run the 8 scenarios in sequence, then stop all nodes
+- run the 9 scenarios in sequence, then stop all nodes
 
 ## Scenarios
 
@@ -101,6 +101,18 @@ agree byte-for-byte on the epoch checkpoint block's `extraData` encoding (vanity
 + signature). Checkpoint B (block 20): all-v2 network — same assertion after full migration.
 Catches any divergence in how v1 and v2 encode or decode the epoch `extraData` field, which
 would cause a permanent chain split at the first epoch boundary in production.
+
+**Scenario 9** (`70-scn9-rpc-parity.sh`): JSON-RPC response parity between v1 and v2. Runs
+after Scenario 7. Starts a dedicated non-mining v1 HTTP node (`rpc-v1-1`), peers it to the
+fully-v2 network, and waits for sync. Then queries both that v1 node and the v2 RPC node
+(`rpc-v2-1` from Scenario 2) with identical JSON-RPC calls — `eth_getBlockByNumber`,
+`eth_getLogs`, and `clique_getSnapshot` — against a stable block several heights below the
+head. Responses are canonicalised via `json.dumps(sort_keys=True)` to tolerate Go map-iteration
+ordering before comparing. Known v2-only additive fields (`milliTimestamp`, a BSC extension
+not present in v1) are stripped from both sides before diffing so the assertion focuses on
+shared fields. Catches any JSON encoding or field-ordering regressions that would not be
+visible from block-hash convergence checks alone. The v1 node is stopped at the end of the
+script.
 
 ## Environment variables
 
@@ -171,13 +183,3 @@ therefore not possible after v2 has written blocks to a node's datadir.
 The practical rollback path is to provision a fresh v1 node (new datadir) and let it sync from
 the v2 majority — which is exactly what Scenario 7 tests and confirms works correctly.
 
-## Suggested future scenarios
-
-These are not yet implemented but cover additional compatibility surface, ordered by priority
-for the rolling v1→v2 upgrade:
-
-**Scenario 9 — JSON-RPC response parity** *(lower priority)*: Query the v2 RPC node (from
-Scenario 2) and a v1 validator with the same set of calls (`eth_getBlockByNumber`,
-`eth_getLogs`, `clique_getSnapshot`) and assert the responses are byte-identical. Catches any
-JSON encoding or field-ordering regressions. Requires adding `--http` to a v1 validator at
-startup (not currently done) or accepting IPC-only comparison.
