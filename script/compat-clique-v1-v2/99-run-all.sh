@@ -93,10 +93,12 @@ SCN9_PID=$!
 
 run "${SCRIPT_DIR}/60-scn7-rollback-v1-sync.sh"
 
-# Collect scn9 result.
-if ! wait "${SCN9_PID}"; then
-  echo "scn9 FAILED" >&2
-  exit 1
+# Collect scn9 result (may already be empty if run() reaped an early-exit scn9).
+if [[ -n "${SCN9_PID:-}" ]]; then
+  if ! wait "${SCN9_PID}"; then
+    echo "scn9 FAILED" >&2
+    exit 1
+  fi
 fi
 echo
 echo "==> scn9 PASS"
