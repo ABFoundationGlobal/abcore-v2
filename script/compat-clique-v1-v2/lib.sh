@@ -110,6 +110,9 @@ rpc_http_port()       { echo $((8555  + PORT_BASE)); }
 val4_p2p_port()       { echo $((30326 + PORT_BASE)); }
 rollback_p2p_port()   { echo $((30327 + PORT_BASE)); }
 rollback_auth_port()  { echo $((8556  + PORT_BASE)); }
+rpc_v1_http_port()    { echo $((8557  + PORT_BASE)); }
+rpc_v1_p2p_port()     { echo $((30328 + PORT_BASE)); }
+rpc_v1_auth_port()    { echo $((8558  + PORT_BASE)); }
 
 # find_free_port_base — walk offsets in steps of 100 until all suite ports are free.
 # Prints the chosen PORT_BASE to stdout. Used by 99-run-all.sh when PORT_BASE is unset.
@@ -121,7 +124,7 @@ rollback_auth_port()  { echo $((8556  + PORT_BASE)); }
 # in /tmp, not in DATADIR_ROOT, so 05-clean.sh removing the data directory does not
 # free the reservation mid-run.  04-stop.sh removes the sentinel when the run finishes.
 find_free_port_base() {
-  local candidates=(30311 30312 30313 30325 30326 30327 8541 8542 8543 8555 8556 8551 8552 8553)
+  local candidates=(30311 30312 30313 30325 30326 30327 30328 8541 8542 8543 8555 8556 8557 8558 8551 8552 8553)
   local base
   for base in $(seq 0 100 9900); do
     local ok=1

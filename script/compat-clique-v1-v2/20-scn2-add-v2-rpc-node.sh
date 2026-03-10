@@ -40,7 +40,7 @@ else
       --ipcpath geth.ipc \
       --syncmode full \
       --http --http.addr 127.0.0.1 --http.port "$(rpc_http_port)" \
-      --http.api eth,net,web3 \
+      --http.api eth,net,web3,clique \
       --nousb \
       >>"$RPC_LOG" 2>&1 &
     echo $! >"$RPC_PID"
