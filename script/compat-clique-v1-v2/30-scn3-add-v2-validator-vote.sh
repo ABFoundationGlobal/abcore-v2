@@ -92,7 +92,7 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     log "validator-4 is now an authorized signer"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
 
 signers=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 1)" "JSON.stringify(clique.getSigners())" || true)
@@ -167,13 +167,12 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     log "validator-4 has been removed from the signer set"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
 
-# Propagation guard: wait for all remaining validators to converge on the same
-# head before asserting the signer set.  The wait loop above only polls
-# validator-1; validator-3 (and validator-2) may still be processing the block
-# that crossed the removal threshold, causing a spurious mismatch.
+# Propagation guard: wait for all validators to converge on the same head before
+# asserting the signer set.  The loop above already checks all three nodes, but
+# a final convergence check guards against any transient fork between them.
 wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 30 \
   "$ABCORE_V2_GETH" "$(val_ipc 2)" \
   "$ABCORE_V1_GETH" "$(val_ipc 3)"

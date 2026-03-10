@@ -55,7 +55,7 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     log "val-2 reports direct peer val-3"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
 [[ "$connected" == true ]] || die "val-2 does not list val-3 as a direct peer after 30s"
 
@@ -69,7 +69,7 @@ while [[ $(date +%s) -lt $_deadline ]]; do
     log "val-3 reports direct peer val-2"
     break
   fi
-  sleep 1
+  sleep 0.3
 done
 [[ "$connected" == true ]] || die "val-3 does not list val-2 as a direct peer after 30s"
 

@@ -448,7 +448,7 @@ wait_for_same_head() {
   local timeout_sec="$3"
   shift 3
 
-  [[ "$timeout_sec" =~ ^[0-9]+$ ]] || die "wait_for_same_head: tries must be a number"
+  [[ "$timeout_sec" =~ ^[0-9]+$ ]] || die "wait_for_same_head: timeout_sec must be a number (got: ${timeout_sec})"
   local deadline=$(( $(date +%s) + timeout_sec ))
 
   while [[ $(date +%s) -lt $deadline ]]; do

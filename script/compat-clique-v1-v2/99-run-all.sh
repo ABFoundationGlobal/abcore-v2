@@ -29,23 +29,32 @@ run() {
   echo
   echo "==> $*"
   "$@"
-  # After each step, check whether scn8 has already exited and failed.
-  if [[ -n "${SCN8_PID:-}" ]] && ! kill -0 "${SCN8_PID}" 2>/dev/null; then
-    if ! wait "${SCN8_PID}"; then
-      echo "scn8 FAILED" >&2
-      exit 1
+  # After each step, check whether any background scenario has already exited and failed.
+  for _check in "scn8:${SCN8_PID:-}" "scn9:${SCN9_PID:-}"; do
+    _name="${_check%%:*}"
+    _pid="${_check##*:}"
+    [[ -n "$_pid" ]] || continue
+    if ! kill -0 "$_pid" 2>/dev/null; then
+      if ! wait "$_pid"; then
+        echo "${_name} FAILED" >&2
+        exit 1
+      fi
+      # Mark as reaped.
+      [[ "$_name" == "scn8" ]] && SCN8_PID= || SCN9_PID=
     fi
-    SCN8_PID=  # scn8 succeeded early; already reaped
-  fi
+  done
 }
 
 cleanup_on_exit() {
   local code=$?
-  # Kill scn8 background process if still running; its own trap handles node cleanup.
-  if [[ -n "${SCN8_PID:-}" ]]; then
-    kill "${SCN8_PID}" 2>/dev/null || true
-    wait "${SCN8_PID}" 2>/dev/null || true
-  fi
+  # Kill background processes if still running.
+  # scn8 has its own EXIT trap for node cleanup; scn9 shares DATADIR_ROOT and
+  # its node (rpc-v1-1) is stopped by 04-stop.sh below.
+  for _bg_pid in "${SCN8_PID:-}" "${SCN9_PID:-}"; do
+    [[ -n "$_bg_pid" ]] || continue
+    kill "$_bg_pid" 2>/dev/null || true
+    wait "$_bg_pid" 2>/dev/null || true
+  done
   if [[ "$code" -ne 0 ]]; then
     echo
     if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
@@ -76,8 +85,22 @@ run "${SCRIPT_DIR}/30-scn3-add-v2-validator-vote.sh"
 run "${SCRIPT_DIR}/35-scn6-tx-propagation.sh"
 run "${SCRIPT_DIR}/40-scn4-all-validators-v2.sh"
 run "${SCRIPT_DIR}/50-scn5-reorg-resilience.sh"
+
+# scn9 only needs the fully-v2 network and reads it non-destructively; start it
+# in the background so it overlaps with scn7 (fresh v1 rollback node, separate ports).
+"${SCRIPT_DIR}/70-scn9-rpc-parity.sh" &
+SCN9_PID=$!
+
 run "${SCRIPT_DIR}/60-scn7-rollback-v1-sync.sh"
-run "${SCRIPT_DIR}/70-scn9-rpc-parity.sh"
+
+# Collect scn9 result.
+if ! wait "${SCN9_PID}"; then
+  echo "scn9 FAILED" >&2
+  exit 1
+fi
+echo
+echo "==> scn9 PASS"
+SCN9_PID=
 
 # Collect scn8 result (runs in parallel with scn1–scn7 above).
 # SCN8_PID may already be empty if run() reaped an early-exit scn8 (success path

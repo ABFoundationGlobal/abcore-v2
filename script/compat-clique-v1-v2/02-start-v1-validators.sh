@@ -60,10 +60,12 @@ launch_validator_v1() {
 for n in 1 2 3; do
   launch_validator_v1 "$n"
 done
+_ipc_pids=()
 for n in 1 2 3; do
   wait_for_ipc "$ABCORE_V1_GETH" "$(val_ipc "$n")" &
+  _ipc_pids+=($!)
 done
-wait
+for _pid in "${_ipc_pids[@]}"; do wait "$_pid"; done
 
 # Force a full mesh using admin.addPeer.
 ENODE1=$(get_enode "$ABCORE_V1_GETH" "$(val_ipc 1)")
@@ -78,10 +80,12 @@ for src in 1 2 3; do
   add_peer "$ABCORE_V1_GETH" "$ipc" "$ENODE3" >/dev/null || true
 done
 # Wait for all nodes to reach at least 2 peers in parallel.
+_peer_pids=()
 for src in 1 2 3; do
   wait_for_min_peers "$ABCORE_V1_GETH" "$(val_ipc "$src")" 2 30 &
+  _peer_pids+=($!)
 done
-wait
+for _pid in "${_peer_pids[@]}"; do wait "$_pid"; done
 for src in 1 2 3; do
   log "validator-${src}: peers=$(peer_count "$ABCORE_V1_GETH" "$(val_ipc "$src")" || echo 0)"
 done

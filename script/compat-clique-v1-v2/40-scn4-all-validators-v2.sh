@@ -99,10 +99,12 @@ for N in "${REMAINING_V1[@]}"; do
 done
 
 # Phase 3: wait for IPC on all new v2 nodes in parallel, then peer.
+_ipc_pids=()
 for N in "${REMAINING_V1[@]}"; do
   wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$N")" &
+  _ipc_pids+=($!)
 done
-wait
+for _pid in "${_ipc_pids[@]}"; do wait "$_pid"; done
 
 # Peer each new node to all other running validators (skip self). validator-4 is stopped.
 for N in "${REMAINING_V1[@]}"; do
@@ -117,10 +119,12 @@ for N in "${REMAINING_V1[@]}"; do
 done
 
 # Wait for min peers on all new nodes in parallel.
+_peer_pids=()
 for N in "${REMAINING_V1[@]}"; do
   wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$N")" 1 60 &
+  _peer_pids+=($!)
 done
-wait
+for _pid in "${_peer_pids[@]}"; do wait "$_pid"; done
 
 for N in "${REMAINING_V1[@]}"; do
   log "validator-${N} upgraded to v2 and peered"
@@ -138,8 +142,9 @@ wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 120 \
 # Use wait_for_block_miner rather than wait_for_recent_signer: with 3 signers the
 # Clique recents window is only 2 slots, so a validator's recent entry can roll over
 # before we check it. Scanning block headers via clique.getSigner() is more reliable.
-# Run sequentially so that a timeout failure is not silently swallowed — bash `wait`
-# with no arguments always returns 0 regardless of child exit codes.
+# Run sequentially: backgrounding these calls and using a bare `wait` would not
+# reliably propagate failures, since bare `wait` only returns the status of the
+# last-reaped job and ignores failures from other background jobs.
 for N in "${REMAINING_V1[@]}"; do
   addr=$(val_addr "$N")
   log "Checking that validator-${N} has sealed a block"
