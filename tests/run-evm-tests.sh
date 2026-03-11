@@ -22,11 +22,11 @@ if [ ! -f "$FIXTURE_SENTINEL" ]; then
     cd ..
 fi
 go test -run . -v -short >test.log
-PASS=`cat test.log |grep "PASS:" |wc -l`
-cat test.log|grep FAIL > fail.log
-FAIL=`cat fail.log |grep "FAIL:" |wc -l`
+PASS=$(grep -c "PASS:" test.log || true)
+grep "FAIL" test.log > fail.log || true
+FAIL=$(grep -c "FAIL:" fail.log || true)
 echo "PASS",$PASS,"FAIL",$FAIL
-if [ $FAIL -ne 0 ]
+if [ "$FAIL" -ne 0 ]
 then
     cat fail.log
     exit 1
