@@ -46,13 +46,15 @@ truffle-test:
 	docker compose -f ./tests/truffle/docker-compose.yml up genesis
 	docker compose -f ./tests/truffle/docker-compose.yml up -d bsc-rpc bsc-validator1
 	for attempt in $$(seq 1 24); do \
-		block_number=$$(docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=eth.blockNumber; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
-		if [ -n "$$block_number" ] && [ "$$block_number" -gt 0 ] 2>/dev/null; then \
-			echo "RPC chain advanced to block $$block_number"; \
+		rpc_ready=$$(docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "web3.clientVersion" 2>/dev/null | tr -d '\r\n[:space:]'); \
+		peer_count=$$(docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=net.peerCount; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
+		if [ -n "$$rpc_ready" ] && [ -n "$$peer_count" ] && [ "$$peer_count" -ge 1 ] 2>/dev/null; then \
+			block_number=$$(docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=eth.blockNumber; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
+			echo "RPC ready with $$peer_count peer(s), current block $${block_number:-unknown}"; \
 			break; \
 		fi; \
 		if [ "$$attempt" -eq 24 ]; then \
-			echo "RPC node did not advance beyond block 0 in time" >&2; \
+			echo "RPC node did not become ready with an active peer in time" >&2; \
 			docker compose -f ./tests/truffle/docker-compose.yml logs bsc-rpc bsc-validator1; \
 			exit 1; \
 		fi; \
