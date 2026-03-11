@@ -33,19 +33,31 @@ all:
 	$(GORUN) build/ci.go install
 
 #? test: Run the tests.
-test: all
+test:
 	$(GORUN) build/ci.go test -timeout 1h
 
 #? truffle-test: Run the integration test.
 truffle-test:
 	rm -rf ./tests/truffle/storage/bsc-validator1
 	rm -rf ./tests/truffle/storage/bsc-rpc
-	docker build . -f ./docker/Dockerfile --target bsc -t bsc
-	docker build . -f ./docker/Dockerfile --target bsc-genesis -t bsc-genesis
-	docker build . -f ./docker/Dockerfile.truffle -t truffle-test
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile --target bsc -t bsc; fi
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile --target bsc-genesis -t bsc-genesis; fi
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile.truffle -t truffle-test; fi
 	docker compose -f ./tests/truffle/docker-compose.yml up genesis
 	docker compose -f ./tests/truffle/docker-compose.yml up -d bsc-rpc bsc-validator1
-	sleep 60
+	for attempt in $$(seq 1 24); do \
+		block_number=$$(docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=eth.blockNumber; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
+		if [ -n "$$block_number" ] && [ "$$block_number" -gt 0 ] 2>/dev/null; then \
+			echo "RPC chain advanced to block $$block_number"; \
+			break; \
+		fi; \
+		if [ "$$attempt" -eq 24 ]; then \
+			echo "RPC node did not advance beyond block 0 in time" >&2; \
+			docker compose -f ./tests/truffle/docker-compose.yml logs bsc-rpc bsc-validator1; \
+			exit 1; \
+		fi; \
+		sleep 5; \
+	done
 	docker compose -f ./tests/truffle/docker-compose.yml up --exit-code-from truffle-test truffle-test
 	docker compose -f ./tests/truffle/docker-compose.yml down
 
