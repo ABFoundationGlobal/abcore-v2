@@ -128,12 +128,12 @@ $NODE_DIR/bin/geth attach --exec \
 ```bash
 # 方式 A：在验证机上直接构建（约 10 分钟）
 cd /opt/abcore-v2-repo
-docker build -t abcore:<tag> .
+docker build -t abcore-v2:<tag> .
 
 # 方式 B：导出镜像，传输后导入（推荐用于多台验证机）
 # 构建机执行：
-docker build -t abcore:<tag> .
-docker save abcore:<tag> | gzip > abcore-v2.tar.gz
+docker build -t abcore-v2:<tag> .
+docker save abcore-v2:<tag> | gzip > abcore-v2.tar.gz
 
 # 验证机执行：
 scp builder:/path/abcore-v2.tar.gz /tmp/
@@ -144,7 +144,7 @@ docker images | grep abcore
 验证镜像：
 
 ```bash
-docker run --rm abcore:<tag> geth version
+docker run --rm abcore-v2:<tag> geth version
 # 应输出 v2.x.x 版本信息
 ```
 
@@ -176,8 +176,8 @@ cp $NODE_DIR/conf/abcore-testnet-genesis.json $DOCKER_DIR/conf/genesis.json
 cp $NODE_DIR/password.txt $DOCKER_DIR/conf/password.txt
 chmod 600 $DOCKER_DIR/conf/password.txt
 
-# 修复目录权限（容器内 bsc 用户 uid=1000 需要读写权限）
-chown -R 1000:1000 $DOCKER_DIR/conf $DOCKER_DIR/nodedata
+# 修复 conf 目录权限（容器内 bsc 用户 uid=1000 需要读取权限）
+chown -R 1000:1000 $DOCKER_DIR/conf
 ```
 
 ### 3.3 准备 config.toml
@@ -194,9 +194,9 @@ InsecureUnlockAllowed = true
 NoUSB = true
 HTTPHost = "0.0.0.0"
 HTTPVirtualHosts = ["127.0.0.1", "localhost"]   # 生产环境限制访问
-HTTPModules = ["eth", "net", "web3", "debug", "clique", "parlia", "admin","txpool"]
+HTTPModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 WSHost = "0.0.0.0"
-WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "admin","txpool"]
+WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 
 [Node.P2P]
 ListenAddr = ":33333"
@@ -249,13 +249,24 @@ EOF
 
 ### 3.5 准备 .env 文件
 
-将实际的验证节点地址和公网 IP 替换后执行：
+从 keystore 文件名自动提取验证者地址和公网 IP，确认输出正确后写入：
 
 ```bash
-VALIDATOR_ADDR=0x<你的验证节点地址>
-PUBLIC_IP=<宿主机公网IP>
+# 自动获取验证者地址（从 keystore 文件名提取）和公网 IP
+VALIDATOR_ADDR=0x$(ls $DOCKER_DIR/nodedata/keystore/ | head -1 | grep -oP '[0-9a-fA-F]{40}$')
+PUBLIC_IP=$(curl -s ifconfig.me)
+
+echo "VALIDATOR_ADDR=${VALIDATOR_ADDR}"
+echo "PUBLIC_IP=${PUBLIC_IP}"
+
+# 确认上面输出正确后执行写入
+cat > $DOCKER_DIR/.env << EOF
+VALIDATOR_ADDR=${VALIDATOR_ADDR}
+PUBLIC_IP=${PUBLIC_IP}
+EOF
 
 chmod 600 $DOCKER_DIR/.env
+cat $DOCKER_DIR/.env   # 验证内容
 ```
 
 ---
@@ -291,11 +302,12 @@ cd $DOCKER_DIR
 
 # 创建数据目录（如尚未创建）
 mkdir -p ./nodedata
-# 赋予 docker用户权限
-chown -R 1000:1000 $DOCKER_DIR/nodedata
 
 # 将 v1 datadir 完整同步过来（含 keystore 和链数据）
 rsync -av --progress $NODE_DIR/nodedata/ ./nodedata/
+
+# rsync 完成后修复权限（容器内 bsc 用户 uid=1000 需要读写权限）
+chown -R 1000:1000 $DOCKER_DIR/nodedata
 ```
 
 ### 步骤 3：启动 Docker 容器
@@ -494,7 +506,7 @@ docker compose -f $DOCKER_DIR/docker-compose.yml restart validator
 docker compose -f $DOCKER_DIR/docker-compose.yml down
 
 # 强制重建镜像并重启
-docker build -t abcore:<tag> /opt/abcore-v2-repo
+docker build -t abcore-v2:<tag> /opt/abcore-v2-repo
 docker compose -f $DOCKER_DIR/docker-compose.yml up -d
 
 # 查看容器资源使用
