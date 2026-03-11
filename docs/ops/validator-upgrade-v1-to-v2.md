@@ -3,7 +3,7 @@
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
 **文档版本**: 1.0
-**适用网络**: ABCore 主网（Chain ID 36888）
+**适用网络**: ABCore 测试网（Chain ID 36888）
 **共识机制**: Clique PoA
 
 > **快速设置环境变量**：执行以下命令设置本文档中使用的路径变量，根据实际部署环境修改默认值。
@@ -126,13 +126,15 @@ $NODE_DIR/bin/geth attach --exec \
 在部署机（或 CI）上执行一次，产出的镜像分发到各验证机：
 
 ```bash
+# REPO_DIR 为 abcore-v2 代码仓库路径，根据实际情况修改
+export REPO_DIR=/opt/abcore-v2-repo
+
 # 方式 A：在验证机上直接构建（约 10 分钟）
-cd /opt/abcore-v2-repo
-docker build -t abcore-v2:<tag> .
+docker build -t abcore-v2:<tag> $REPO_DIR
 
 # 方式 B：导出镜像，传输后导入（推荐用于多台验证机）
 # 构建机执行：
-docker build -t abcore-v2:<tag> .
+docker build -t abcore-v2:<tag> $REPO_DIR
 docker save abcore-v2:<tag> | gzip > abcore-v2.tar.gz
 
 # 验证机执行：
@@ -177,7 +179,7 @@ cp $NODE_DIR/password.txt $DOCKER_DIR/conf/password.txt
 chmod 600 $DOCKER_DIR/conf/password.txt
 
 # 修复 conf 目录权限（容器内 bsc 用户 uid=1000 需要读取权限）
-chown -R 1000:1000 $DOCKER_DIR/conf
+docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
 ```
 
 ### 3.3 准备 config.toml
@@ -307,7 +309,7 @@ mkdir -p ./nodedata
 rsync -av --progress $NODE_DIR/nodedata/ ./nodedata/
 
 # rsync 完成后修复权限（容器内 bsc 用户 uid=1000 需要读写权限）
-chown -R 1000:1000 $DOCKER_DIR/nodedata
+docker run --rm -v "$DOCKER_DIR/nodedata:/nodedata" busybox chown -R 1000:1000 /nodedata
 ```
 
 ### 步骤 3：启动 Docker 容器
@@ -506,7 +508,7 @@ docker compose -f $DOCKER_DIR/docker-compose.yml restart validator
 docker compose -f $DOCKER_DIR/docker-compose.yml down
 
 # 强制重建镜像并重启
-docker build -t abcore-v2:<tag> /opt/abcore-v2-repo
+docker build -t abcore-v2:<tag> $REPO_DIR
 docker compose -f $DOCKER_DIR/docker-compose.yml up -d
 
 # 查看容器资源使用
