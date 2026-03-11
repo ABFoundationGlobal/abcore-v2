@@ -56,6 +56,7 @@ truffle-test:
 		if [ "$$attempt" -eq 24 ]; then \
 			echo "RPC node did not become ready with an active peer in time" >&2; \
 			docker compose -f ./tests/truffle/docker-compose.yml logs bsc-rpc bsc-validator1; \
+			docker compose -f ./tests/truffle/docker-compose.yml down; \
 			exit 1; \
 		fi; \
 		sleep 5; \

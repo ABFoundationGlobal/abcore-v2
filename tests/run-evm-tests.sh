@@ -21,12 +21,13 @@ if [ ! -f "$FIXTURE_SENTINEL" ]; then
     touch ".fixture-version-${FIXTURE_VERSION}"
     cd ..
 fi
-go test -run . -v -short >test.log
+TEST_STATUS=0
+go test -run . -v -short >test.log || TEST_STATUS=$?
 PASS=$(grep -c "PASS:" test.log || true)
 grep "FAIL" test.log > fail.log || true
 FAIL=$(grep -c "FAIL:" fail.log || true)
 echo "PASS",$PASS,"FAIL",$FAIL
-if [ "$FAIL" -ne 0 ]
+if [ "$FAIL" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]
 then
     cat fail.log
     exit 1
