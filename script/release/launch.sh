@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"; shift 2 ;;
     -d|--datadir)
       [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
-      DATADIR="$2"; shift 2 ;;
+      DATADIR="$(realpath -m "$2")"; shift 2 ;;
     -a|--address)
       [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
       MINER_ADDR="$2"; shift 2 ;;
@@ -114,6 +114,14 @@ if [[ ! -f "$GENESIS_CONFIG" ]]; then
 fi
 
 mkdir -p "$DATADIR"
+
+# Ensure nodedata is owned by the container user (uid 1000) so geth can write to it.
+# Uses a root-privileged one-shot container so no host sudo is needed.
+NODEDATA_DIR="$DATADIR/nodedata"
+if [[ ! -d "$NODEDATA_DIR" ]]; then
+  mkdir -p "$NODEDATA_DIR"
+  docker run --rm -v "${NODEDATA_DIR}:/nodedata" --user root busybox chown 1000:1000 /nodedata
+fi
 
 # Stage configs into a real host directory and mount that directory into the
 # container. This avoids binding individual files into /bsc/config when the
