@@ -184,15 +184,18 @@ docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
 
 ### 3.3 准备 config.toml
 
-从现有节点配置迁移，关键修改项：
+> **重要**：以下仅展示**需要修改或新增的字段**，不是完整配置文件。必须以第 3.2 节中 `cp $NODE_DIR/conf/node.toml $DOCKER_DIR/conf/config.toml` 迁移过来的完整配置为基础进行修改，保留其中的 `[Eth]`（含 `NetworkId = 26888`、`SyncMode` 等）、`[Node.P2P]`（含 `StaticNodes`）等原有字段，否则节点将连错网络或丢失对等节点配置。
+
+关键修改项如下：
 
 ```toml
-# $DOCKER_DIR/conf/config.toml
+# $DOCKER_DIR/conf/config.toml（在现有配置基础上修改下列字段）
+
 [Node]
+# ⚠️  DataDir 必须是 [Node] 段落下的第一个字段（不可在它之前插入注释或空行）。
+# 容器 entrypoint 通过 grep -A1 '[Node]' 解析此值，若 DataDir 不是第一行则解析失败，
+# 导致 genesis 在错误路径初始化。
 DataDir = "/data"              # 容器内固定路径，与 Dockerfile 一致（已 chown bsc 用户）
-# 生产验证节点需要 InsecureUnlockAllowed 以支持 --mine 账户解锁
-# 仅在隔离网络或防火墙保护下使用
-InsecureUnlockAllowed = true
 NoUSB = true
 HTTPHost = "0.0.0.0"
 HTTPVirtualHosts = ["127.0.0.1", "localhost"]   # 生产环境限制访问
@@ -204,7 +207,9 @@ WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 ListenAddr = ":33333"
 ```
 
-> **与本地开发配置的差异**：`NetworkId = 36888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
+> **说明**：`--allow-insecure-unlock` 标志由容器 entrypoint 在 `MINE=true` 时自动追加，无需在 config.toml 中重复设置 `InsecureUnlockAllowed`。
+
+> **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
 
 ### 3.4 准备 docker-compose.yml
 
