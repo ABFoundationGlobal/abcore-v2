@@ -1,0 +1,45 @@
+name: Docker Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      docker-tag:
+        description: 'Image tag (e.g. v1.0.0) — defaults to short commit SHA'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.docker-tag }}" ]]; then
+            echo "value=${{ inputs.docker-tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image
+        run: |
+          docker build \
+            -f docker/Dockerfile \
+            --target bsc \
+            -t abcore-v2:${{ steps.tag.outputs.value }} \
+            .
+
+      - name: Save image tar
+        run: |
+          docker save abcore-v2:${{ steps.tag.outputs.value }} \
+            -o /tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: abcore-v2-${{ steps.tag.outputs.value }}-docker
+          path: /tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
+          retention-days: 7
