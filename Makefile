@@ -45,22 +45,7 @@ truffle-test:
 	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile.truffle -t truffle-test; fi
 	docker compose -f ./tests/truffle/docker-compose.yml up genesis
 	docker compose -f ./tests/truffle/docker-compose.yml up -d bsc-rpc bsc-validator1
-	for attempt in $$(seq 1 36); do \
-		rpc_ready=$$(timeout 3 docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "web3.clientVersion" 2>/dev/null | tr -d '\r\n[:space:]'); \
-		if [ -n "$$rpc_ready" ]; then \
-			block_number=$$(timeout 3 docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=eth.blockNumber; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
-			peer_count=$$(timeout 3 docker compose -f ./tests/truffle/docker-compose.yml exec -T bsc-rpc geth attach /root/.ethereum/geth.ipc --exec "(function(){var n=net.peerCount; return typeof n === 'number' ? n : parseInt(n, 16);})()" 2>/dev/null | tr -d '\r\n[:space:]'); \
-			echo "RPC ready, peers=$${peer_count:-?}, block=$${block_number:-?}"; \
-			break; \
-		fi; \
-		if [ "$$attempt" -eq 36 ]; then \
-			echo "RPC node did not become ready in time" >&2; \
-			docker compose -f ./tests/truffle/docker-compose.yml logs bsc-rpc bsc-validator1; \
-			docker compose -f ./tests/truffle/docker-compose.yml down; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
+	sleep 60
 	docker compose -f ./tests/truffle/docker-compose.yml up --exit-code-from truffle-test truffle-test
 	docker compose -f ./tests/truffle/docker-compose.yml down
 
