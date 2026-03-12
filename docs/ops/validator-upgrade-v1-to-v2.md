@@ -3,14 +3,17 @@
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
 **文档版本**: 1.0
-**适用网络**: ABCore 测试网（Chain ID 36888）
+**适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
-> **快速设置环境变量**：执行以下命令设置本文档中使用的路径变量，根据实际部署环境修改默认值。
+> **快速设置环境变量**：执行以下命令将路径变量写入 `~/.bashrc`，重新登录后仍然有效。根据实际部署环境修改路径后执行：
 >
 > ```bash
+> cat >> ~/.bashrc << 'EOF'
 > export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 > export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
+> EOF
+> source ~/.bashrc
 > ```
 
 ---
@@ -204,7 +207,7 @@ WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 ListenAddr = ":33333"
 ```
 
-> **与本地开发配置的差异**：`NetworkId = 36888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
+> **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
 
 ### 3.4 准备 docker-compose.yml
 
@@ -488,7 +491,7 @@ docker exec -it abcore-validator geth attach /data/geth.ipc
 
 ### genesis.json 不匹配
 
-若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 36888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
+若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 26888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
 
 ---
 
