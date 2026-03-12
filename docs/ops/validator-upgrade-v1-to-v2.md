@@ -3,7 +3,7 @@
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
 **文档版本**: 1.0
-**适用网络**: ABCore 测试网（Chain ID 36888）
+**适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
 > **快速设置环境变量**：执行以下命令设置本文档中使用的路径变量，根据实际部署环境修改默认值。
@@ -191,10 +191,10 @@ docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
 ```toml
 # $DOCKER_DIR/conf/config.toml（在现有配置基础上修改下列字段）
 
-[Node]
 # ⚠️  DataDir 必须是 [Node] 段落下的第一个字段（不可在它之前插入注释或空行）。
-# 容器 entrypoint 通过 grep -A1 '[Node]' 解析此值，若 DataDir 不是第一行则解析失败，
+# 容器 entrypoint 通过 grep -A1 '\[Node\' 解析此值，若 DataDir 不是第一行则解析失败，
 # 导致 genesis 在错误路径初始化。
+[Node]
 DataDir = "/data"              # 容器内固定路径，与 Dockerfile 一致（已 chown bsc 用户）
 NoUSB = true
 HTTPHost = "0.0.0.0"
@@ -208,6 +208,8 @@ ListenAddr = ":33333"
 ```
 
 > **说明**：`--allow-insecure-unlock` 标志由容器 entrypoint 在 `MINE=true` 时自动追加，无需在 config.toml 中重复设置 `InsecureUnlockAllowed`。
+>
+> **注意**：若 v1 配置中存在 `NewPayloadTimeout = 2000000000`，必须将其注释掉或删除。v2 的 `minerConfig` 中未定义该字段，保留会导致启动时 fatal error。
 
 > **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
 
@@ -493,7 +495,7 @@ docker exec -it abcore-validator geth attach /data/geth.ipc
 
 ### genesis.json 不匹配
 
-若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 36888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
+若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 26888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
 
 ---
 
