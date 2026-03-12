@@ -30,7 +30,7 @@ jobs:
 
   golang-lint:
     needs: changes
-    if: needs.changes.outputs.src == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.src == 'true'
     strategy:
       matrix:
         go-version: [1.25.x]

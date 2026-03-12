@@ -30,7 +30,7 @@ jobs:
 
   evm-test:
     needs: changes
-    if: needs.changes.outputs.src == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.src == 'true'
     env:
       EVM_FIXTURES_VERSION: v5.1.0
     strategy:

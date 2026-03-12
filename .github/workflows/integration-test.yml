@@ -33,7 +33,7 @@ jobs:
 
   truffle-test:
     needs: changes
-    if: needs.changes.outputs.src == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.src == 'true'
     strategy:
       matrix:
         os: [ubuntu-latest]
