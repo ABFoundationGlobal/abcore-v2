@@ -8,6 +8,13 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - '**/*.go'
+      - 'go.sum'
+      - 'go.mod'
+      - 'docker/**'
+      - 'Dockerfile*'
+      - 'Makefile'
 
   workflow_dispatch:
 
@@ -47,4 +54,4 @@ jobs:
       run: |
         go run build/ci.go check_generate
         go run build/ci.go check_baddeps
-        go mod download && make geth
+        make geth

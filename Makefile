@@ -33,16 +33,16 @@ all:
 	$(GORUN) build/ci.go install
 
 #? test: Run the tests.
-test: all
+test:
 	$(GORUN) build/ci.go test -timeout 1h
 
 #? truffle-test: Run the integration test.
 truffle-test:
 	rm -rf ./tests/truffle/storage/bsc-validator1
 	rm -rf ./tests/truffle/storage/bsc-rpc
-	docker build . -f ./docker/Dockerfile --target bsc -t bsc
-	docker build . -f ./docker/Dockerfile --target bsc-genesis -t bsc-genesis
-	docker build . -f ./docker/Dockerfile.truffle -t truffle-test
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile --target bsc -t bsc; fi
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile --target bsc-genesis -t bsc-genesis; fi
+	if [ -z "$(SKIP_DOCKER_BUILD)" ]; then docker build . -f ./docker/Dockerfile.truffle -t truffle-test; fi
 	docker compose -f ./tests/truffle/docker-compose.yml up genesis
 	docker compose -f ./tests/truffle/docker-compose.yml up -d bsc-rpc bsc-validator1
 	sleep 60

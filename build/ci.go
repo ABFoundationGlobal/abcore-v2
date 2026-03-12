@@ -366,6 +366,7 @@ func doTest(cmdline []string) {
 		timeout  = flag.String("timeout", "10m", `Timeout of running tests`)
 		race     = flag.Bool("race", false, "Execute the race detector")
 		short    = flag.Bool("short", false, "Pass the 'short'-flag to go test")
+		skip     = flag.String("skip", "", "Pass the '-skip' flag to go test (regexp of tests to skip)")
 		// cachedir = flag.String("cachedir", "./build/cache", "directory for caching downloads")
 		threads = flag.Int("p", 1, "Number of CPU threads to use for testing")
 	)
@@ -413,6 +414,9 @@ func doTest(cmdline []string) {
 	}
 	if *short {
 		gotest.Args = append(gotest.Args, "-short")
+	}
+	if *skip != "" {
+		gotest.Args = append(gotest.Args, "-skip", *skip)
 	}
 
 	packages := flag.CommandLine.Args()
