@@ -8,16 +8,29 @@ on:
   pull_request:
     branches:
       - master
-    paths:
-      - '**/*.go'
-      - 'go.sum'
-      - 'go.mod'
-      - 'build/ci.go'
 
   workflow_dispatch:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - '**/*.go'
+              - 'go.sum'
+              - 'go.mod'
+              - 'build/ci.go'
+
   unit-test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true' || github.event_name != 'pull_request'
     strategy:
       matrix:
         go-version: [1.25.x]
