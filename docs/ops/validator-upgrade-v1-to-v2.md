@@ -3,15 +3,18 @@
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
 **文档版本**: 1.0
-**适用网络**: ABCore 测试网（Chain ID 36888）
+**适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
-> **快速设置环境变量**：执行以下命令设置本文档中使用的路径变量，根据实际部署环境修改默认值。
->
-> ```bash
-> export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
-> export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
-> ```
+> **快速设置环境变量**：执行以下命令将路径变量写入 `~/.bashrc`，重新登录后仍然有效。根据实际部署环境修改路径后执行：
+
+```bash
+cat >> ~/.bashrc << 'EOF'
+export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
+export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
+EOF
+source ~/.bashrc
+```
 
 ---
 
@@ -184,15 +187,15 @@ docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
 
 ### 3.3 准备 config.toml
 
-从现有节点配置迁移，关键修改项：
+> **重要**：以下仅展示**需要修改或新增的字段**，不是完整配置文件。必须以第 3.2 节中 `cp $NODE_DIR/conf/node.toml $DOCKER_DIR/conf/config.toml` 迁移过来的完整配置为基础进行修改，保留其中的 `[Eth]`（含 `NetworkId = 26888`、`SyncMode` 等）、`[Node.P2P]`（含 `StaticNodes`）等原有字段，否则节点将连错网络或丢失对等节点配置。
+
+关键修改项如下：
 
 ```toml
-# $DOCKER_DIR/conf/config.toml
+# $DOCKER_DIR/conf/config.toml（在现有配置基础上修改下列字段）
+
 [Node]
 DataDir = "/data"              # 容器内固定路径，与 Dockerfile 一致（已 chown bsc 用户）
-# 生产验证节点需要 InsecureUnlockAllowed 以支持 --mine 账户解锁
-# 仅在隔离网络或防火墙保护下使用
-InsecureUnlockAllowed = true
 NoUSB = true
 HTTPHost = "0.0.0.0"
 HTTPVirtualHosts = ["127.0.0.1", "localhost"]   # 生产环境限制访问
@@ -204,7 +207,11 @@ WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 ListenAddr = ":33333"
 ```
 
-> **与本地开发配置的差异**：`NetworkId = 36888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
+> **说明**：`--allow-insecure-unlock` 标志由容器 entrypoint 在 `MINE=true` 时自动追加，无需在 config.toml 中重复设置 `InsecureUnlockAllowed`。
+>
+> **注意**：若 v1 配置中存在 `NewPayloadTimeout = 2000000000`，必须将其注释掉或删除。v2 的 `minerConfig` 中未定义该字段，保留会导致启动时 fatal error。
+
+> **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
 
 ### 3.4 准备 docker-compose.yml
 
@@ -488,7 +495,7 @@ docker exec -it abcore-validator geth attach /data/geth.ipc
 
 ### genesis.json 不匹配
 
-若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 36888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
+若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 26888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
 
 ---
 
