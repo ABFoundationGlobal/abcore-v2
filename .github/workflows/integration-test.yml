@@ -2,25 +2,42 @@ name: Integration Test
 
 on:
   push:
-    branches: 
+    branches:
       - master
 
   pull_request:
     branches:
       - master
-    paths:
-      - '**/*.go'
-      - 'go.sum'
-      - 'go.mod'
-      - 'docker/**'
-      - 'Dockerfile*'
-      - 'tests/truffle/**'
-      - 'Makefile'
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - '**/*.go'
+              - 'go.sum'
+              - 'go.mod'
+              - 'docker/**'
+              - 'Dockerfile*'
+              - 'tests/truffle/**'
+              - 'Makefile'
+
   truffle-test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     strategy:
       matrix:
         os: [ubuntu-latest]
