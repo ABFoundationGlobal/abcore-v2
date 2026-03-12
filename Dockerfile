@@ -50,6 +50,7 @@ COPY --from=builder /go-ethereum/build/bin/geth /usr/local/bin/
 COPY docker-entrypoint.sh ./
 
 RUN chmod +x docker-entrypoint.sh \
+  && mkdir -p ${BSC_HOME}/config \
     && mkdir -p ${DATA_DIR} \
     && chown -R ${BSC_USER_UID}:${BSC_USER_GID} ${BSC_HOME} ${DATA_DIR}
 
