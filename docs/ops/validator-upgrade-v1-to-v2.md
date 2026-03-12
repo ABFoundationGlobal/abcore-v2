@@ -194,9 +194,6 @@ docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
 ```toml
 # $DOCKER_DIR/conf/config.toml（在现有配置基础上修改下列字段）
 
-# ⚠️  DataDir 必须是 [Node] 段落下的第一个字段（不可在它之前插入注释或空行）。
-# 容器 entrypoint 通过 grep -A1 '\[Node\' 解析此值，若 DataDir 不是第一行则解析失败，
-# 导致 genesis 在错误路径初始化。
 [Node]
 DataDir = "/data"              # 容器内固定路径，与 Dockerfile 一致（已 chown bsc 用户）
 NoUSB = true
