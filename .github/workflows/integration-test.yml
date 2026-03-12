@@ -11,11 +11,13 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
     outputs:
       src: ${{ steps.filter.outputs.src }}
     steps:
