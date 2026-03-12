@@ -21,41 +21,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build bsc image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./docker/Dockerfile
-        target: bsc
-        tags: bsc
-        load: true
-        cache-from: type=gha,scope=integration-bsc
-        cache-to: type=gha,mode=max,scope=integration-bsc
-
-    - name: Build bsc-genesis image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./docker/Dockerfile
-        target: bsc-genesis
-        tags: bsc-genesis
-        load: true
-        cache-from: type=gha,scope=integration-bsc-genesis
-        cache-to: type=gha,mode=max,scope=integration-bsc-genesis
-
-    - name: Build truffle-test image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./docker/Dockerfile.truffle
-        tags: truffle-test
-        load: true
-        cache-from: type=gha,scope=integration-truffle
-        cache-to: type=gha,mode=max,scope=integration-truffle
-
     - name: Truffle test
       run: |
-        make truffle-test SKIP_DOCKER_BUILD=1
+        make truffle-test
