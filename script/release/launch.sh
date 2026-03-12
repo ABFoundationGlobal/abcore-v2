@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"; shift 2 ;;
     -d|--datadir)
       [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
-      DATADIR="$2"; shift 2 ;;
+      DATADIR="$(realpath -m "$2")"; shift 2 ;;
     -a|--address)
       [[ $# -ge 2 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
       MINER_ADDR="$2"; shift 2 ;;
@@ -102,7 +102,34 @@ if [[ ! -d "$CONFIG_DIR" ]]; then
   exit 1
 fi
 
+NODE_CONFIG="$CONFIG_DIR/node.toml"
+GENESIS_CONFIG="$CONFIG_DIR/genesis.json"
+if [[ ! -f "$NODE_CONFIG" ]]; then
+  echo "ERROR: node config not found: $NODE_CONFIG" >&2
+  exit 1
+fi
+if [[ ! -f "$GENESIS_CONFIG" ]]; then
+  echo "ERROR: genesis config not found: $GENESIS_CONFIG" >&2
+  exit 1
+fi
+
 mkdir -p "$DATADIR"
+
+# Ensure nodedata is owned by the container user (uid 1000) so geth can write to it.
+# Uses a root-privileged one-shot container so no host sudo is needed.
+NODEDATA_DIR="$DATADIR/nodedata"
+if [[ ! -d "$NODEDATA_DIR" ]]; then
+  mkdir -p "$NODEDATA_DIR"
+  docker run --rm -v "${NODEDATA_DIR}:/nodedata" --user root busybox chown 1000:1000 /nodedata
+fi
+
+# Stage configs into a real host directory and mount that directory into the
+# container. This avoids binding individual files into /bsc/config when the
+# image does not already contain that parent directory.
+HOST_CONFIG_DIR="$DATADIR/.docker-config"
+mkdir -p "$HOST_CONFIG_DIR"
+cp "$NODE_CONFIG" "$HOST_CONFIG_DIR/config.toml"
+cp "$GENESIS_CONFIG" "$HOST_CONFIG_DIR/genesis.json"
 
 CONTAINER_NAME="abcore-${NETWORK}-${MODE}"
 
@@ -117,8 +144,6 @@ DOCKER_ARGS=(
   run -d
   --name "$CONTAINER_NAME"
   -v "${DATADIR}:/data"
-  -v "${CONFIG_DIR}/node.toml:/bsc/config/config.toml:ro"
-  -v "${CONFIG_DIR}/genesis.json:/bsc/config/genesis.json:ro"
   -p "${RPC_BIND}:8545:8545"
   -p "${RPC_BIND}:8546:8546"
   -p "33333:33333/tcp"
@@ -126,8 +151,8 @@ DOCKER_ARGS=(
 )
 
 if [[ "$MODE" == "validator" ]]; then
+  cp "$(realpath "$PASSWORD_FILE")" "$HOST_CONFIG_DIR/password.txt"
   DOCKER_ARGS+=(
-    -v "$(realpath "$PASSWORD_FILE"):/bsc/config/password.txt:ro"
     -e "MINE=true"
     -e "MINER_ADDR=${MINER_ADDR}"
   )
