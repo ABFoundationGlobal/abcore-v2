@@ -25,7 +25,7 @@ fi
 [ -f "$BSC_GENESIS" ] || { echo "ERROR: genesis.json not found (looked for $DEFAULT_BSC_GENESIS and $FALLBACK_GENESIS)" >&2; exit 1; }
 
 # Init genesis state if geth not exist
-DATA_DIR=$(cat ${BSC_CONFIG} | grep -A1 '\[Node\]' | grep -oP '\"\K.*?(?=\")')
+DATA_DIR=$(grep -E '^\s*DataDir\s*=' "${BSC_CONFIG}" | head -1 | grep -oP '"\K[^"]+')
 
 GETH_DIR=${DATA_DIR}/geth
 if [ ! -d "$GETH_DIR" ]; then
