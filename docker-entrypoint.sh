@@ -1,8 +1,28 @@
 #!/bin/bash
 set -e
 
-BSC_CONFIG=${BSC_HOME}/config/config.toml
-BSC_GENESIS=${BSC_HOME}/config/genesis.json
+DEFAULT_BSC_CONFIG=${BSC_HOME}/config/config.toml
+DEFAULT_BSC_GENESIS=${BSC_HOME}/config/genesis.json
+FALLBACK_CONFIG=${DATA_DIR}/.docker-config/config.toml
+FALLBACK_GENESIS=${DATA_DIR}/.docker-config/genesis.json
+FALLBACK_PASSWORD=${DATA_DIR}/.docker-config/password.txt
+
+BSC_CONFIG=${BSC_CONFIG:-$DEFAULT_BSC_CONFIG}
+BSC_GENESIS=${BSC_GENESIS:-$DEFAULT_BSC_GENESIS}
+PASSWORD_FILE=${PASSWORD_FILE:-${BSC_HOME}/config/password.txt}
+
+if [ ! -f "$BSC_CONFIG" ] && [ -f "$FALLBACK_CONFIG" ]; then
+  BSC_CONFIG="$FALLBACK_CONFIG"
+fi
+if [ ! -f "$BSC_GENESIS" ] && [ -f "$FALLBACK_GENESIS" ]; then
+  BSC_GENESIS="$FALLBACK_GENESIS"
+fi
+if [ ! -f "$PASSWORD_FILE" ] && [ -f "$FALLBACK_PASSWORD" ]; then
+  PASSWORD_FILE="$FALLBACK_PASSWORD"
+fi
+
+[ -f "$BSC_CONFIG" ] || { echo "ERROR: config.toml not found (looked for $DEFAULT_BSC_CONFIG and $FALLBACK_CONFIG)" >&2; exit 1; }
+[ -f "$BSC_GENESIS" ] || { echo "ERROR: genesis.json not found (looked for $DEFAULT_BSC_GENESIS and $FALLBACK_GENESIS)" >&2; exit 1; }
 
 # Init genesis state if geth not exist
 DATA_DIR=$(cat ${BSC_CONFIG} | grep -A1 '\[Node\]' | grep -oP '\"\K.*?(?=\")')
@@ -30,7 +50,7 @@ if [ "${MINE:-false}" = "true" ]; then
     # interface. Only enabled when MINE=true (i.e. this is a signing validator).
     # Do NOT set MINE=true on internet-facing or production nodes.
     --allow-insecure-unlock
-    --password /bsc/config/password.txt
+    --password "${PASSWORD_FILE}"
   )
 fi
 
