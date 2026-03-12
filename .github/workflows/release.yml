@@ -124,26 +124,29 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Build image
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          docker build \
-            -f docker/Dockerfile \
-            --target bsc \
-            -t "abfoundationglobal/abcore-v2:$TAG" \
-            .
+      - name: Set tag
+        id: tag
+        run: echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      - name: Save image tar
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          docker save "abfoundationglobal/abcore-v2:$TAG" \
-            -o "/tmp/abcore-v2-$TAG-linux-amd64.tar"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: abfoundationglobal/abcore-v2:${{ steps.tag.outputs.value }}
+          outputs: type=docker,dest=/tmp/abcore-v2-${{ steps.tag.outputs.value }}-linux-amd64.tar
+
+      - name: Compress image tar
+        run: gzip /tmp/abcore-v2-${{ steps.tag.outputs.value }}-linux-amd64.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
-          path: /tmp/abcore-v2-*-linux-amd64.tar
+          path: /tmp/abcore-v2-${{ steps.tag.outputs.value }}-linux-amd64.tar.gz
           retention-days: 1
 
   release:
@@ -225,4 +228,4 @@ jobs:
             ./macos/geth_macos
             ./windows/geth_windows.exe
             ./arm64/geth-linux-arm64
-            ./docker-image/abcore-v2-${{ env.RELEASE_VERSION }}-linux-amd64.tar
+            ./docker-image/abcore-v2-${{ env.RELEASE_VERSION }}-linux-amd64.tar.gz
