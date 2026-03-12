@@ -6,11 +6,14 @@
 **适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
-> **快速设置环境变量**：执行以下命令设置本文档中使用的路径变量，根据实际部署环境修改默认值。
+> **快速设置环境变量**：执行以下命令将路径变量写入 `~/.bashrc`，重新登录后仍然有效。根据实际部署环境修改路径后执行：
 >
 > ```bash
+> cat >> ~/.bashrc << 'EOF'
 > export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 > export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
+> EOF
+> source ~/.bashrc
 > ```
 
 ---
