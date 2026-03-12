@@ -127,14 +127,14 @@ jobs:
           docker build \
             -f docker/Dockerfile \
             --target bsc \
-            -t abfoundationglobal/abcore-v2:$TAG \
+            -t "abfoundationglobal/abcore-v2:$TAG" \
             .
 
       - name: Save image tar
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          docker save abfoundationglobal/abcore-v2:$TAG \
-            -o /tmp/abcore-v2-$TAG-linux-amd64.tar
+          docker save "abfoundationglobal/abcore-v2:$TAG" \
+            -o "/tmp/abcore-v2-$TAG-linux-amd64.tar"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
