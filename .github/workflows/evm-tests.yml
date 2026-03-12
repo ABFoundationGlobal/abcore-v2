@@ -6,8 +6,13 @@ on:
       - master
 
   pull_request:
-    branches: 
+    branches:
       - master
+    paths:
+      - '**/*.go'
+      - 'go.sum'
+      - 'go.mod'
+      - 'tests/run-evm-tests.sh'
 
   workflow_dispatch:
 

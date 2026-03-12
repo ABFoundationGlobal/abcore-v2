@@ -8,6 +8,14 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - '**/*.go'
+      - 'go.sum'
+      - 'go.mod'
+      - 'docker/**'
+      - 'Dockerfile*'
+      - 'tests/truffle/**'
+      - 'Makefile'
 
   workflow_dispatch:
 
