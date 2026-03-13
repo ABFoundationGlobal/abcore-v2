@@ -12,6 +12,7 @@
 cat >> ~/.bashrc << 'EOF'
 export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
+export TAG="v0.1.0"                           # abcore-v2 镜像版本号
 EOF
 source ~/.bashrc
 ```
@@ -118,7 +119,19 @@ $NODE_DIR/bin/geth attach --exec \
 $NODE_DIR/bin/geth attach --exec \
   'console.log(eth.blockNumber)' \
   $NODE_DIR/nodedata/geth.ipc
+
+# 记录当前 peers（含 enode 地址，升级后 peers 减少时可手动添加）
+$NODE_DIR/bin/geth attach --exec \
+  'admin.peers.forEach(function(p){ console.log(p.enode) })' \
+  $NODE_DIR/nodedata/geth.ipc
 ```
+
+> **注意**：v2 容器首次启动时 peers 缓存为空，连接数可能短暂低于 v1。这是正常现象——节点发现需要一段时间。若长时间（>10 分钟）peers 仍为 0，可通过以下命令手动添加上面记录的 enode：
+>
+> ```bash
+> docker exec -it abcore-validator geth attach /data/geth.ipc
+> > admin.addPeer("enode://...")
+> ```
 
 ---
 
@@ -133,23 +146,31 @@ $NODE_DIR/bin/geth attach --exec \
 export REPO_DIR=/opt/abcore-v2-repo
 
 # 方式 A：在验证机上直接构建（约 10 分钟）
-docker build -t abcore-v2:<tag> $REPO_DIR
+docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
 
-# 方式 B：导出镜像，传输后导入（推荐用于多台验证机）
+# 方式 B：导出镜像，传输后导入（适用于多台验证机且无法访问 GitHub 的环境）
 # 构建机执行：
-docker build -t abcore-v2:<tag> $REPO_DIR
-docker save abcore-v2:<tag> | gzip > abcore-v2.tar.gz
+docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
+docker save abfoundationglobal/abcore-v2:$TAG | gzip > abcore-v2.tar.gz
 
 # 验证机执行：
 scp builder:/path/abcore-v2.tar.gz /tmp/
 docker load < /tmp/abcore-v2.tar.gz
-docker images | grep abcore
+docker images | grep abfoundationglobal
+
+# 方式 C：从 GitHub Release 下载预构建镜像（推荐，无需本地构建环境）
+# 需安装 GitHub CLI（gh）；$TAG 来自顶部环境变量（如 v0.1.0）
+gh release download $TAG -R ABFoundationGlobal/abcore-v2 \
+  --pattern "abcore-v2-${TAG}-linux-amd64.tar.gz" -D /tmp/
+
+docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
+docker images | grep abfoundationglobal
 ```
 
 验证镜像：
 
 ```bash
-docker run --rm abcore-v2:<tag> geth version
+docker run --rm abfoundationglobal/abcore-v2:$TAG geth version
 # 应输出 v2.x.x 版本信息
 ```
 
@@ -205,11 +226,13 @@ WSModules = ["eth", "net", "web3", "debug", "clique", "parlia", "txpool"]
 
 [Node.P2P]
 ListenAddr = ":33333"
+
+[Eth.Miner]
+#**注意**：若 v1 配置中存在 `NewPayloadTimeout = 2000000000`，必须将其注释掉或删除。v2 的 `minerConfig` 中未定义该字段，保留会导致启动时 fatal error。
+#NewPayloadTimeout = 2000000000
 ```
 
 > **说明**：`--allow-insecure-unlock` 标志由容器 entrypoint 在 `MINE=true` 时自动追加，无需在 config.toml 中重复设置 `InsecureUnlockAllowed`。
->
-> **注意**：若 v1 配置中存在 `NewPayloadTimeout = 2000000000`，必须将其注释掉或删除。v2 的 `minerConfig` 中未定义该字段，保留会导致启动时 fatal error。
 
 > **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
 
@@ -221,7 +244,7 @@ services:
   validator:
     # 无需指定 command：镜像 ENTRYPOINT（docker-entrypoint.sh）会自动读取
     # /bsc/config/config.toml，初始化 genesis（首次），然后启动 geth。
-    image: abcore-v2:<tag>
+    image: abfoundationglobal/abcore-v2:${TAG}
     container_name: abcore-validator
     restart: unless-stopped
     environment:
@@ -262,14 +285,12 @@ EOF
 
 ```bash
 # 自动获取验证者地址（从 keystore 文件名提取）和公网 IP
-VALIDATOR_ADDR=0x$(ls $DOCKER_DIR/nodedata/keystore/ | head -1 | grep -oP '[0-9a-fA-F]{40}$')
+VALIDATOR_ADDR=0x$(ls $NODE_DIR/nodedata/keystore/ | head -1 | grep -oP '[0-9a-fA-F]{40}$')
 PUBLIC_IP=$(curl -s ifconfig.me)
-
-echo "VALIDATOR_ADDR=${VALIDATOR_ADDR}"
-echo "PUBLIC_IP=${PUBLIC_IP}"
 
 # 确认上面输出正确后执行写入
 cat > $DOCKER_DIR/.env << EOF
+TAG=${TAG}
 VALIDATOR_ADDR=${VALIDATOR_ADDR}
 PUBLIC_IP=${PUBLIC_IP}
 EOF
@@ -515,7 +536,7 @@ docker compose -f $DOCKER_DIR/docker-compose.yml restart validator
 docker compose -f $DOCKER_DIR/docker-compose.yml down
 
 # 强制重建镜像并重启
-docker build -t abcore-v2:<tag> $REPO_DIR
+docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
 docker compose -f $DOCKER_DIR/docker-compose.yml up -d
 
 # 查看容器资源使用
