@@ -12,7 +12,7 @@
 cat >> ~/.bashrc << 'EOF'
 export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
-export TAG="v0.1.0"                           # abcore-v2 镜像版本号
+export TAG="vX.Y.Z"                           # abcore-v2 目标 Release tag（例如最新稳定版）
 EOF
 source ~/.bashrc
 ```
