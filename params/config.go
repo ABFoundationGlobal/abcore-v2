@@ -807,7 +807,7 @@ type ChainConfig struct {
 
 	// PosaForkBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
 	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
-	// Only meaningful for ABCore chains (chain ID 36888).
+	// Only meaningful for ABCore chains (chain IDs 26888 and 36888).
 	PosaForkBlock *big.Int `json:"posaForkBlock,omitempty"`
 
 	// Various consensus engines
