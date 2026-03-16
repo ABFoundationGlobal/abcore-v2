@@ -34,7 +34,9 @@ var (
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
 
-	// ABCoreGenesisHash is filled in at runtime once the genesis file is finalized.
+	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes are not registered
+	// in the built-in genesis-hash→config map; chain config is loaded from genesis.json
+	// via `geth init` and is not looked up by hash at startup.
 	ABCoreGenesisHash = common.Hash{}
 )
 
@@ -314,7 +316,9 @@ var (
 		},
 	}
 
-	// ABCoreChainConfig is the chain config for ABCore (chain ID 36888).
+	// ABCoreChainConfig is the chain config for ABCore testnet (chain ID 26888).
+	// The same binary also supports mainnet (chain ID 36888): use a genesis.json
+	// with "chainId": 36888 and appropriate fork blocks for mainnet — no recompilation needed.
 	//
 	// EVM forks: Homestead through London are active from block 0 (matching ABCore v1 production state).
 	// Post-London EVM forks (Shanghai, Cancun, Prague): activated together with the corresponding
@@ -1845,6 +1849,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
+	}
+	if (c.IsInABCore() && newcfg.IsInABCore()) && isForkBlockIncompatible(c.PosaForkBlock, newcfg.PosaForkBlock, headNumber) {
+		return newBlockCompatError("posaForkBlock", c.PosaForkBlock, newcfg.PosaForkBlock)
 	}
 	return nil
 }
