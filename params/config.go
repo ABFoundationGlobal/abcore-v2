@@ -33,6 +33,9 @@ var (
 	BSCGenesisHash    = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
+
+	// ABCoreGenesisHash is filled in at runtime once the genesis file is finalized.
+	ABCoreGenesisHash = common.Hash{}
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -309,6 +312,54 @@ var (
 			Prague: DefaultPragueBlobConfigBSC,
 			Osaka:  DefaultOsakaBlobConfigBSC,
 		},
+	}
+
+	// ABCoreChainConfig is the chain config for ABCore (chain ID 36888).
+	//
+	// EVM forks: Homestead through London are active from block 0 (matching ABCore v1 production state).
+	// Post-London EVM forks (Shanghai, Cancun, Prague): activated together with the corresponding
+	// BSC forks once the DualConsensus switch to Parlia is complete.
+	// BSC-specific forks: all set to 0 for testnet (fresh chain); tune to actual block heights for mainnet.
+	//
+	// PosaForkBlock = nil means the chain runs pure Clique; set to a specific block number to enable
+	// DualConsensus (Clique → Parlia transition at that block).
+	ABCoreChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(36888),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		// Post-London EVM forks: not yet activated; enable together with BSC fork timestamps
+		// when the Parlia switch is ready.
+		ShanghaiTime: nil,
+		CancunTime:   nil,
+		PragueTime:   nil,
+		// BSC-specific forks: all active from block 0 for testnet.
+		// For mainnet upgrade, set these to the actual fork blocks on the live chain.
+		RamanujanBlock:  big.NewInt(0),
+		NielsBlock:      big.NewInt(0),
+		MirrorSyncBlock: big.NewInt(0),
+		BrunoBlock:      big.NewInt(0),
+		EulerBlock:      big.NewInt(0),
+		GibbsBlock:      big.NewInt(0),
+		NanoBlock:       big.NewInt(0),
+		MoranBlock:      big.NewInt(0),
+		PlanckBlock:     big.NewInt(0),
+		LubanBlock:      big.NewInt(0),
+		PlatoBlock:      big.NewInt(0),
+		HertzBlock:      big.NewInt(0),
+		HertzfixBlock:   big.NewInt(0),
+		// PosaForkBlock: nil = pure Clique mode; set to enable DualConsensus transition.
+		PosaForkBlock: nil,
+		Clique:        &CliqueConfig{Period: 3, Epoch: 200},
+		Parlia:        &ParliaConfig{},
 	}
 
 	// used to test hard fork upgrade, following https://github.com/bnb-chain/bsc-genesis-contract/blob/master/genesis.json
@@ -753,6 +804,11 @@ type ChainConfig struct {
 	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
 	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
 	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
+
+	// PosaForkBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
+	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
+	// Only meaningful for ABCore chains (chain ID 36888).
+	PosaForkBlock *big.Int `json:"posaForkBlock,omitempty"`
 
 	// Various consensus engines
 	Ethash             *EthashConfig       `json:"ethash,omitempty"`
@@ -1337,6 +1393,13 @@ func (c *ChainConfig) IsOnPrague(currentBlockNumber *big.Int, lastBlockTime uint
 
 func (c *ChainConfig) IsInBSC() bool {
 	return c.Parlia != nil
+}
+
+// IsABCore returns whether this config is for the ABCore chain (chain ID 36888).
+// ABCore has both Clique and Parlia set; it must be detected before the generic
+// IsInBSC() check to get the correct engine selection.
+func (c *ChainConfig) IsABCore() bool {
+	return c.ChainID != nil && c.ChainID.Cmp(big.NewInt(36888)) == 0
 }
 
 func (c *ChainConfig) IsNotInBSC() bool {
