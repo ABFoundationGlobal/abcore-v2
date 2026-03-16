@@ -259,11 +259,12 @@ type Config struct {
 // Clique is allowed for now to live standalone, but ethash is forbidden and can
 // only exist on already merged networks.
 func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, ee *ethapi.BlockChainAPI, genesisHash common.Hash) (consensus.Engine, error) {
-	// ABCore chain (chain ID 36888): has both Clique and Parlia configs set.
+	// ABCore chain (testnet 26888, mainnet 36888): has both Clique and Parlia configs set.
+	// Must be detected before IsInBSC() which would otherwise return pure Parlia.
 	// Select engine based on PosaForkBlock:
 	//   - nil  → pure Clique (Phase 1: binary upgrade only, no consensus change yet)
 	//   - set  → DualConsensus (Phase 2: Clique pre-fork, Parlia post-fork)
-	if config.IsABCore() {
+	if config.IsInABCore() {
 		if config.PosaForkBlock != nil {
 			// DualConsensus: implemented in task I-2 (consensus/dual).
 			// Placeholder: fall through to Clique until dual package exists.

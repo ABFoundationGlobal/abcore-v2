@@ -324,7 +324,7 @@ var (
 	// PosaForkBlock = nil means the chain runs pure Clique; set to a specific block number to enable
 	// DualConsensus (Clique → Parlia transition at that block).
 	ABCoreChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(36888),
+		ChainID:             big.NewInt(26888),
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -1395,11 +1395,15 @@ func (c *ChainConfig) IsInBSC() bool {
 	return c.Parlia != nil
 }
 
-// IsABCore returns whether this config is for the ABCore chain (chain ID 36888).
-// ABCore has both Clique and Parlia set; it must be detected before the generic
-// IsInBSC() check to get the correct engine selection.
-func (c *ChainConfig) IsABCore() bool {
-	return c.ChainID != nil && c.ChainID.Cmp(big.NewInt(36888)) == 0
+// IsInABCore returns whether this config is for an ABCore chain (testnet 26888 or mainnet 36888).
+// ABCore has both Clique and Parlia set; it must be detected before the generic IsInBSC() check
+// to route engine selection correctly (Clique pre-fork, DualConsensus post-fork).
+func (c *ChainConfig) IsInABCore() bool {
+	if c.ChainID == nil {
+		return false
+	}
+	id := c.ChainID.Uint64()
+	return id == 26888 || id == 36888
 }
 
 func (c *ChainConfig) IsNotInBSC() bool {
