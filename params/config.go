@@ -325,7 +325,7 @@ var (
 	// BSC forks once the DualConsensus switch to Parlia is complete.
 	// BSC-specific forks: all set to 0 for testnet (fresh chain); tune to actual block heights for mainnet.
 	//
-	// PosaForkBlock = nil means the chain runs pure Clique; set to a specific block number to enable
+	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to enable
 	// DualConsensus (Clique → Parlia transition at that block).
 	ABCoreChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(26888),
@@ -360,8 +360,8 @@ var (
 		PlatoBlock:      big.NewInt(0),
 		HertzBlock:      big.NewInt(0),
 		HertzfixBlock:   big.NewInt(0),
-		// PosaForkBlock: nil = pure Clique mode; set to enable DualConsensus transition.
-		PosaForkBlock: nil,
+		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
+		ParliaGenesisBlock: nil,
 		Clique:        &CliqueConfig{Period: 3, Epoch: 200},
 		Parlia:        &ParliaConfig{},
 	}
@@ -808,12 +808,12 @@ type ChainConfig struct {
 	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
 	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
 	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
-	// PosaForkBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
+	// ParliaGenesisBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
 	// At this block: Parlia system contract bytecodes are injected into state, and the consensus
 	// engine switches from Clique to Parlia.
 	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
 	// Only meaningful for ABCore chains (chain IDs 26888 and 36888).
-	PosaForkBlock *big.Int `json:"posaForkBlock,omitempty"`
+	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"`
 
 	// Various consensus engines
 	Ethash             *EthashConfig       `json:"ethash,omitempty"`
@@ -1096,7 +1096,7 @@ func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
 // IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
 // the block at which system contracts are injected and consensus switches.
 func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
-	return configBlockEqual(c.PosaForkBlock, num)
+	return configBlockEqual(c.ParliaGenesisBlock, num)
 }
 
 // IsNiels returns whether num is either equal to the Niels fork block or greater.
@@ -1424,11 +1424,11 @@ func (c *ChainConfig) IsNotInBSC() bool {
 }
 
 // IsParliaActive returns true if Parlia consensus is active at the given block number.
-// For ABCore chains (26888/36888), Parlia only becomes active at PosaForkBlock.
+// For ABCore chains (26888/36888), Parlia only becomes active at ParliaGenesisBlock.
 // For pure BSC chains, Parlia is always active when IsInBSC() is true.
 func (c *ChainConfig) IsParliaActive(num *big.Int) bool {
 	if c.IsInABCore() {
-		return c.PosaForkBlock != nil && isBlockForked(c.PosaForkBlock, num)
+		return c.ParliaGenesisBlock != nil && isBlockForked(c.ParliaGenesisBlock, num)
 	}
 	return c.IsInBSC()
 }
@@ -1869,8 +1869,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
 	}
-	if (c.IsInABCore() && newcfg.IsInABCore()) && isForkBlockIncompatible(c.PosaForkBlock, newcfg.PosaForkBlock, headNumber) {
-		return newBlockCompatError("posaForkBlock", c.PosaForkBlock, newcfg.PosaForkBlock)
+	if (c.IsInABCore() && newcfg.IsInABCore()) && isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
+		return newBlockCompatError("parliaGenesisBlock", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	return nil
 }

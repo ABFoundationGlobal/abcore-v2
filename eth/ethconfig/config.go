@@ -262,17 +262,17 @@ type Config struct {
 func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, ee *ethapi.BlockChainAPI, genesisHash common.Hash) (consensus.Engine, error) {
 	// ABCore chain (testnet 26888, mainnet 36888): has both Clique and Parlia configs set.
 	// Must be detected before IsInBSC() which would otherwise return pure Parlia.
-	// Select engine based on PosaForkBlock:
+	// Select engine based on ParliaGenesisBlock:
 	//   - nil  → pure Clique (Phase 1: binary upgrade only, no consensus change yet)
 	//   - set  → DualConsensus (Phase 2: Clique pre-fork, Parlia post-fork)
 	if config.IsInABCore() {
 		if config.Clique == nil {
 			return nil, fmt.Errorf("ABCore chain config (chainID=%v) is missing clique section", config.ChainID)
 		}
-		if config.PosaForkBlock != nil {
+		if config.ParliaGenesisBlock != nil {
 			// DualConsensus is not yet implemented (task I-2).
 			// TODO(I-2): return dual.New(config, db, ee, genesisHash), nil
-			return nil, fmt.Errorf("ABCore DualConsensus (posaForkBlock=%v) is not yet implemented", config.PosaForkBlock)
+			return nil, fmt.Errorf("ABCore DualConsensus (parliaGenesisBlock=%v) is not yet implemented", config.ParliaGenesisBlock)
 		}
 		return clique.New(config.Clique, db), nil
 	}

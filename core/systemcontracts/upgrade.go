@@ -1150,10 +1150,10 @@ func TryUpdateBuildInSystemContract(config *params.ChainConfig, blockNumber *big
 			statedb.SetNonce(params.HistoryStorageAddress, 1, tracing.NonceChangeNewContract)
 			log.Info("Set code for HistoryStorageAddress", "blockNumber", blockNumber.Int64(), "blockTime", blockTime)
 		}
-		// PosaFork is block-number-based and must fire regardless of the Feynman gate,
+		// ParliaGenesis is block-number-based and must fire regardless of the Feynman gate,
 		// triggered on atBlockBegin so it runs even when Clique is still the active engine.
 		if config.IsOnParliaGenesis(blockNumber) {
-			applyPosaForkUpgrade(config, blockNumber, statedb)
+			applyParliaGenesisUpgrade(config, blockNumber, statedb)
 		}
 	} else {
 		if config.IsFeynman(blockNumber, lastBlockTime) {
@@ -1162,7 +1162,7 @@ func TryUpdateBuildInSystemContract(config *params.ChainConfig, blockNumber *big
 	}
 }
 
-func applyPosaForkUpgrade(config *params.ChainConfig, blockNumber *big.Int, statedb vm.StateDB) {
+func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int, statedb vm.StateDB) {
 	var network string
 	switch GenesisHash {
 	case params.BSCGenesisHash:
@@ -1182,7 +1182,7 @@ func applyPosaForkUpgrade(config *params.ChainConfig, blockNumber *big.Int, stat
 			// accepts both "0x..." and raw hex formats.
 			cfg.Code = strings.TrimPrefix(strings.TrimSpace(cfg.Code), "0x")
 			if cfg.Code == "" {
-				panic(fmt.Errorf("posaFork: bytecode for contract %s is empty, fill core/systemcontracts/parliagenesis/ before use", cfg.ContractAddr.String()))
+				panic(fmt.Errorf("parliaGenesis: bytecode for contract %s is empty, fill core/systemcontracts/parliagenesis/ before use", cfg.ContractAddr.String()))
 			}
 		}
 	}
