@@ -254,6 +254,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainConfig.FermiTime = config.OverrideFermi
 		overrides.OverrideFermi = config.OverrideFermi
 	}
+	if config.OverrideParliaGenesisBlock != nil {
+		chainConfig.ParliaGenesisBlock = new(big.Int).SetUint64(*config.OverrideParliaGenesisBlock)
+	}
 	if config.OverrideOsaka != nil {
 		chainConfig.OsakaTime = config.OverrideOsaka
 		overrides.OverrideOsaka = config.OverrideOsaka
