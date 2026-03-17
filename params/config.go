@@ -362,8 +362,8 @@ var (
 		HertzfixBlock:   big.NewInt(0),
 		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
 		ParliaGenesisBlock: nil,
-		Clique:        &CliqueConfig{Period: 3, Epoch: 200},
-		Parlia:        &ParliaConfig{},
+		Clique:             &CliqueConfig{Period: 3, Epoch: 200},
+		Parlia:             &ParliaConfig{},
 	}
 
 	// used to test hard fork upgrade, following https://github.com/bnb-chain/bsc-genesis-contract/blob/master/genesis.json
@@ -1093,12 +1093,6 @@ func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
 	return configBlockEqual(c.RamanujanBlock, num)
 }
 
-// IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
-// the block at which system contracts are injected and consensus switches.
-func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
-	return configBlockEqual(c.ParliaGenesisBlock, num)
-}
-
 // IsNiels returns whether num is either equal to the Niels fork block or greater.
 func (c *ChainConfig) IsNiels(num *big.Int) bool {
 	return isBlockForked(c.NielsBlock, num)
@@ -1408,6 +1402,10 @@ func (c *ChainConfig) IsInBSC() bool {
 	return c.Parlia != nil
 }
 
+func (c *ChainConfig) IsNotInBSC() bool {
+	return c.Parlia == nil
+}
+
 // IsInABCore returns whether this config is for an ABCore chain (testnet 26888 or mainnet 36888).
 // ABCore has both Clique and Parlia set; it must be detected before the generic IsInBSC() check
 // to route engine selection correctly (Clique pre-fork, DualConsensus post-fork).
@@ -1419,10 +1417,6 @@ func (c *ChainConfig) IsInABCore() bool {
 	return id == 26888 || id == 36888
 }
 
-func (c *ChainConfig) IsNotInBSC() bool {
-	return c.Parlia == nil
-}
-
 // IsParliaActive returns true if Parlia consensus is active at the given block number.
 // For ABCore chains (26888/36888), Parlia only becomes active at ParliaGenesisBlock.
 // For pure BSC chains, Parlia is always active when IsInBSC() is true.
@@ -1431,6 +1425,12 @@ func (c *ChainConfig) IsParliaActive(num *big.Int) bool {
 		return c.ParliaGenesisBlock != nil && isBlockForked(c.ParliaGenesisBlock, num)
 	}
 	return c.IsInBSC()
+}
+
+// IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
+// the block at which system contracts are injected and consensus switches.
+func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
+	return configBlockEqual(c.ParliaGenesisBlock, num)
 }
 
 // IsLorentz returns whether time is either equal to the Lorentz fork time or greater.
