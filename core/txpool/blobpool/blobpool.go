@@ -1673,8 +1673,10 @@ func (p *BlobPool) preCheck(tx *types.Transaction) error {
 	if err := p.ValidateTxBasics(tx); err != nil {
 		return err
 	}
-	// Before the Osaka fork, reject the blob txs with cell proofs
-	if !isOsaka || p.chain.Config().IsInBSC() {
+	// Before the Osaka fork, reject the blob txs with cell proofs.
+	// For ABCore: use IsParliaActive so the Clique phase (pre-ParliaGenesisBlock) is
+	// treated like a non-BSC chain and does not reject v1 sidecars prematurely.
+	if !isOsaka || p.chain.Config().IsParliaActive(head.Number) {
 		if tx.BlobTxSidecar().Version == types.BlobSidecarVersion0 {
 			return nil
 		} else {

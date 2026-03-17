@@ -107,6 +107,105 @@ func config() *params.ChainConfig {
 // 	}
 // }
 
+// abcoreConfig returns a ChainConfig for an ABCore chain (chain ID 26888).
+// If parliaGenesisBlock is nil the config represents Phase 1 (pure Clique, no fork scheduled).
+// If parliaGenesisBlock is set the config represents Phase 2 (DualConsensus).
+func abcoreConfig(parliaGenesisBlock *big.Int) *params.ChainConfig {
+	cfg := copyConfig(params.ABCoreChainConfig)
+	cfg.LondonBlock = big.NewInt(0)
+	cfg.ParliaGenesisBlock = parliaGenesisBlock
+	return cfg
+}
+
+// TestCalcBaseFeeABCore verifies that ABCore chains use dynamic EIP-1559 baseFee
+// before ParliaGenesisBlock and the fixed BSC baseFee at/after it.
+func TestCalcBaseFeeABCore(t *testing.T) {
+	forkBlock := big.NewInt(100)
+
+	tests := []struct {
+		name            string
+		cfg             *params.ChainConfig
+		parentNumber    int64
+		parentBaseFee   int64
+		parentGasLimit  uint64
+		parentGasUsed   uint64
+		wantFixed       bool // true = expect InitialBaseFeeForBSC
+	}{
+		// Phase 1: no fork scheduled — always dynamic
+		{
+			name:           "phase1 usage==target",
+			cfg:            abcoreConfig(nil),
+			parentNumber:   10,
+			parentBaseFee:  params.InitialBaseFee,
+			parentGasLimit: 20_000_000,
+			parentGasUsed:  10_000_000, // == target
+			wantFixed:      false,
+		},
+		{
+			name:           "phase1 usage>target",
+			cfg:            abcoreConfig(nil),
+			parentNumber:   10,
+			parentBaseFee:  params.InitialBaseFee,
+			parentGasLimit: 20_000_000,
+			parentGasUsed:  15_000_000,
+			wantFixed:      false,
+		},
+		// Phase 2: before fork block — still dynamic
+		{
+			name:           "pre-fork dynamic",
+			cfg:            abcoreConfig(forkBlock),
+			parentNumber:   50, // currentBlock = 51 < 100
+			parentBaseFee:  params.InitialBaseFee,
+			parentGasLimit: 20_000_000,
+			parentGasUsed:  10_000_000,
+			wantFixed:      false,
+		},
+		// Phase 2: at fork block — switches to fixed
+		{
+			name:           "at fork block fixed",
+			cfg:            abcoreConfig(forkBlock),
+			parentNumber:   99, // currentBlock = 100 == forkBlock
+			parentBaseFee:  params.InitialBaseFee,
+			parentGasLimit: 20_000_000,
+			parentGasUsed:  10_000_000,
+			wantFixed:      true,
+		},
+		// Phase 2: after fork block — fixed
+		{
+			name:           "post-fork fixed",
+			cfg:            abcoreConfig(forkBlock),
+			parentNumber:   200,
+			parentBaseFee:  params.InitialBaseFee,
+			parentGasLimit: 20_000_000,
+			parentGasUsed:  10_000_000,
+			wantFixed:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := &types.Header{
+				Number:   big.NewInt(tt.parentNumber),
+				GasLimit: tt.parentGasLimit,
+				GasUsed:  tt.parentGasUsed,
+				BaseFee:  big.NewInt(tt.parentBaseFee),
+			}
+			got := CalcBaseFee(tt.cfg, parent)
+			if tt.wantFixed {
+				want := big.NewInt(params.InitialBaseFeeForBSC)
+				if got.Cmp(want) != 0 {
+					t.Errorf("want fixed baseFee %d, got %d", want, got)
+				}
+			} else {
+				fixed := big.NewInt(params.InitialBaseFeeForBSC)
+				if got.Cmp(fixed) == 0 {
+					t.Errorf("want dynamic baseFee (not %d), got %d", fixed, got)
+				}
+			}
+		})
+	}
+}
+
 // TestCalcBaseFee assumes all blocks are 1559-blocks
 func TestCalcBaseFee(t *testing.T) {
 	tests := []struct {
