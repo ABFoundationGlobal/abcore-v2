@@ -538,7 +538,7 @@ func (g *Genesis) toBlockWithRoot(root common.Hash) *types.Block {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
-			if g.Config.IsInBSC() {
+			if g.Config.IsParliaActive(big.NewInt(int64(g.Number))) {
 				head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFeeForBSC)
 			} else {
 				head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)

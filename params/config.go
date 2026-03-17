@@ -808,11 +808,13 @@ type ChainConfig struct {
 	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
 	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
 	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
-	// ParliaGenesisBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
-	// At this block: Parlia system contract bytecodes are injected into state, and the consensus
-	// engine switches from Clique to Parlia.
+	// ParliaGenesisBlock is the block number at which ABCore schedules the Clique→Parlia transition.
+	// At this block: Parlia system contract bytecodes are injected into state.
+	// Note: actual consensus-engine switching (DualConsensus) is not yet implemented;
+	// setting this field causes CreateConsensusEngine to return an error until it is.
 	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
-	// Only meaningful for ABCore chains (chain IDs 26888 and 36888).
+	// Only meaningful for ABCore chains (chain IDs 26888 and 36888), but ParliaGenesisBlock
+	// can also be set via ChainOverrides on any chain to trigger system-contract injection.
 	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"`
 
 	// Various consensus engines
@@ -861,7 +863,7 @@ func (c *ChainConfig) Description() string {
 	banner += fmt.Sprintf("Chain ID:  %v (%s)\n", c.ChainID, network)
 	switch {
 	case c.IsInABCore() && c.ParliaGenesisBlock != nil:
-		banner += fmt.Sprintf("Consensus: DualConsensus (Clique → Parlia at block %v)\n", c.ParliaGenesisBlock)
+		banner += fmt.Sprintf("Consensus: DualConsensus scheduled at block %v (not yet supported — node will not start)\n", c.ParliaGenesisBlock)
 	case c.IsInABCore():
 		banner += "Consensus: Clique (proof-of-authority, Parlia transition not yet scheduled)\n"
 	case c.IsInBSC():
@@ -1871,10 +1873,10 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
 	}
-	// ParliaGenesisBlock is only ever set on ABCore chains; guard with IsInABCore() on both
-	// sides to avoid a false incompatibility error when comparing two non-ABCore configs that
-	// both have ParliaGenesisBlock == nil.
-	if (c.IsInABCore() && newcfg.IsInABCore()) && isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
+	// Check ParliaGenesisBlock incompatibility whenever either side has it set.
+	// isForkBlockIncompatible(nil, nil, head) returns false, so the unconditional
+	// check is safe for chains that never set ParliaGenesisBlock.
+	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
 		return newBlockCompatError("parliaGenesisBlock", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	return nil
