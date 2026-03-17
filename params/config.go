@@ -740,19 +740,20 @@ type ChainConfig struct {
 	// those cases.
 	EnableVerkleAtGenesis bool `json:"enableVerkleAtGenesis,omitempty"`
 
-	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock      *big.Int `json:"nielsBlock,omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
-	BrunoBlock      *big.Int `json:"brunoBlock,omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
-	EulerBlock      *big.Int `json:"eulerBlock,omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
-	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
-	NanoBlock       *big.Int `json:"nanoBlock,omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
-	MoranBlock      *big.Int `json:"moranBlock,omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
-	PlanckBlock     *big.Int `json:"planckBlock,omitempty"`     // planckBlock switch block (nil = no fork, 0 = already activated)
-	LubanBlock      *big.Int `json:"lubanBlock,omitempty"`      // lubanBlock switch block (nil = no fork, 0 = already activated)
-	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
-	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
-	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
+	RamanujanBlock     *big.Int `json:"ramanujanBlock,omitempty"`     // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock         *big.Int `json:"nielsBlock,omitempty"`         // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock    *big.Int `json:"mirrorSyncBlock,omitempty"`    // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	BrunoBlock         *big.Int `json:"brunoBlock,omitempty"`         // brunoBlock switch block (nil = no fork, 0 = already activated)
+	EulerBlock         *big.Int `json:"eulerBlock,omitempty"`         // eulerBlock switch block (nil = no fork, 0 = already activated)
+	GibbsBlock         *big.Int `json:"gibbsBlock,omitempty"`         // gibbsBlock switch block (nil = no fork, 0 = already activated)
+	NanoBlock          *big.Int `json:"nanoBlock,omitempty"`          // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock         *big.Int `json:"moranBlock,omitempty"`         // moranBlock switch block (nil = no fork, 0 = already activated)
+	PlanckBlock        *big.Int `json:"planckBlock,omitempty"`        // planckBlock switch block (nil = no fork, 0 = already activated)
+	LubanBlock         *big.Int `json:"lubanBlock,omitempty"`         // lubanBlock switch block (nil = no fork, 0 = already activated)
+	PlatoBlock         *big.Int `json:"platoBlock,omitempty"`         // platoBlock switch block (nil = no fork, 0 = already activated)
+	HertzBlock         *big.Int `json:"hertzBlock,omitempty"`         // hertzBlock switch block (nil = no fork, 0 = already activated)
+	HertzfixBlock      *big.Int `json:"hertzfixBlock,omitempty"`      // hertzfixBlock switch block (nil = no fork, 0 = already activated)
+	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"` // parliaGenesisBlock switch block: inject Parlia system contracts at this height (nil = no fork)
 
 	// Various consensus engines
 	Ethash             *EthashConfig       `json:"ethash,omitempty"`
@@ -1028,6 +1029,16 @@ func (c *ChainConfig) IsRamanujan(num *big.Int) bool {
 // IsOnRamanujan returns whether num is equal to the Ramanujan fork block
 func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
 	return configBlockEqual(c.RamanujanBlock, num)
+}
+
+// IsParliaGenesis returns whether num is either equal to the ParliaGenesis fork block or greater.
+func (c *ChainConfig) IsParliaGenesis(num *big.Int) bool {
+	return isBlockForked(c.ParliaGenesisBlock, num)
+}
+
+// IsOnParliaGenesis returns whether num is equal to the ParliaGenesis fork block.
+func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
+	return configBlockEqual(c.ParliaGenesisBlock, num)
 }
 
 // IsNiels returns whether num is either equal to the Niels fork block or greater.
@@ -1712,6 +1723,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.HertzfixBlock, newcfg.HertzfixBlock, headNumber) {
 		return newBlockCompatError("hertzfix fork block", c.HertzfixBlock, newcfg.HertzfixBlock)
+	}
+	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
+		return newBlockCompatError("parliaGenesis fork block", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
