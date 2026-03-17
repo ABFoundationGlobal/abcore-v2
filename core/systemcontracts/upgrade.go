@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/systemcontracts/mirror"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/moran"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/niels"
+	"github.com/ethereum/go-ethereum/core/systemcontracts/parliagenesis"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/pascal"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/planck"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/plato"
@@ -95,6 +96,8 @@ var (
 	maxwellUpgrade = make(map[string]*Upgrade)
 
 	fermiUpgrade = make(map[string]*Upgrade)
+
+	parliaGenesisUpgrade = make(map[string]*Upgrade)
 )
 
 func init() {
@@ -1055,6 +1058,85 @@ func init() {
 			},
 		},
 	}
+
+	// ParliaGenesis: inject all Parlia system contracts at the transition block on custom networks
+	// migrating from Clique to Parlia. Only applied to defaultNet (custom chains).
+	// Fill the bytecode files in core/systemcontracts/parliagenesis/ before use.
+	// Contracts not used by this network (e.g. cross-chain bridge) should be filled with
+	// their full BSC bytecode so that extcodesize checks pass and calls do not revert.
+	parliaGenesisUpgrade[defaultNet] = &Upgrade{
+		UpgradeName: "parliaGenesis",
+		Configs: []*UpgradeConfig{
+			{
+				ContractAddr: common.HexToAddress(ValidatorContract),
+				Code:         parliagenesis.ValidatorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SlashContract),
+				Code:         parliagenesis.SlashContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SystemRewardContract),
+				Code:         parliagenesis.SystemRewardContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(LightClientContract),
+				Code:         parliagenesis.LightClientContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenHubContract),
+				Code:         parliagenesis.TokenHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerIncentivizeContract),
+				Code:         parliagenesis.RelayerIncentivizeContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerHubContract),
+				Code:         parliagenesis.RelayerHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovHubContract),
+				Code:         parliagenesis.GovHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenManagerContract),
+				Code:         parliagenesis.TokenManagerContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(CrossChainContract),
+				Code:         parliagenesis.CrossChainContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakingContract),
+				Code:         parliagenesis.StakingContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeHubContract),
+				Code:         parliagenesis.StakeHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeCreditContract),
+				Code:         parliagenesis.StakeCreditContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovernorContract),
+				Code:         parliagenesis.GovernorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovTokenContract),
+				Code:         parliagenesis.GovTokenContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TimelockContract),
+				Code:         parliagenesis.TimelockContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenRecoverPortalContract),
+				Code:         parliagenesis.TokenRecoverPortalContract,
+			},
+		},
+	}
 }
 
 func TryUpdateBuildInSystemContract(config *params.ChainConfig, blockNumber *big.Int, lastBlockTime uint64, blockTime uint64, statedb vm.StateDB, atBlockBegin bool) {
@@ -1068,9 +1150,47 @@ func TryUpdateBuildInSystemContract(config *params.ChainConfig, blockNumber *big
 			statedb.SetNonce(params.HistoryStorageAddress, 1, tracing.NonceChangeNewContract)
 			log.Info("Set code for HistoryStorageAddress", "blockNumber", blockNumber.Int64(), "blockTime", blockTime)
 		}
+		// ParliaGenesis is block-number-based and must fire regardless of the Feynman gate,
+		// triggered on atBlockBegin so it runs even when Clique is still the active engine.
+		if config.IsOnParliaGenesis(blockNumber) {
+			applyParliaGenesisUpgrade(config, blockNumber, statedb)
+		}
 	} else {
 		if config.IsFeynman(blockNumber, lastBlockTime) {
 			upgradeBuildInSystemContract(config, blockNumber, lastBlockTime, blockTime, statedb)
+		}
+	}
+}
+
+func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int, statedb vm.StateDB) {
+	var network string
+	switch GenesisHash {
+	case params.BSCGenesisHash:
+		network = mainNet
+	case params.ChapelGenesisHash:
+		network = chapelNet
+	case params.RialtoGenesisHash:
+		network = rialtoNet
+	default:
+		network = defaultNet
+	}
+	logger := log.New("system-contract-upgrade", network)
+	upgrade := parliaGenesisUpgrade[network]
+	if upgrade != nil {
+		for _, cfg := range upgrade.Configs {
+			// Strip optional 0x prefix so hex.DecodeString in applySystemContractUpgrade
+			// accepts both "0x..." and raw hex formats.
+			cfg.Code = strings.TrimPrefix(strings.TrimSpace(cfg.Code), "0x")
+			if cfg.Code == "" {
+				panic(fmt.Errorf("parliaGenesis: bytecode for contract %s is empty, fill core/systemcontracts/parliagenesis/ before use", cfg.ContractAddr.String()))
+			}
+		}
+	}
+	applySystemContractUpgrade(upgrade, blockNumber, statedb, logger)
+	// Set nonce=1 for every newly deployed contract so state matches BSC mainnet genesis state.
+	if upgrade != nil {
+		for _, cfg := range upgrade.Configs {
+			statedb.SetNonce(cfg.ContractAddr, 1, tracing.NonceChangeNewContract)
 		}
 	}
 }
