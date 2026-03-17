@@ -10,7 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/bohr"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/bruno"
-	"github.com/ethereum/go-ethereum/core/systemcontracts/parliagenesis"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/euler"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/fermi"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/feynman"
@@ -24,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/systemcontracts/mirror"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/moran"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/niels"
+	"github.com/ethereum/go-ethereum/core/systemcontracts/parliagenesis"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/pascal"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/planck"
 	"github.com/ethereum/go-ethereum/core/systemcontracts/plato"
@@ -1150,9 +1150,44 @@ func TryUpdateBuildInSystemContract(config *params.ChainConfig, blockNumber *big
 			statedb.SetNonce(params.HistoryStorageAddress, 1, tracing.NonceChangeNewContract)
 			log.Info("Set code for HistoryStorageAddress", "blockNumber", blockNumber.Int64(), "blockTime", blockTime)
 		}
+		// ParliaGenesis is block-number-based and must fire regardless of the Feynman gate,
+		// triggered on atBlockBegin so it runs even when Clique is still the active engine.
+		if config.IsOnParliaGenesis(blockNumber) {
+			applyParliaGenesisUpgrade(config, blockNumber, statedb)
+		}
 	} else {
 		if config.IsFeynman(blockNumber, lastBlockTime) {
 			upgradeBuildInSystemContract(config, blockNumber, lastBlockTime, blockTime, statedb)
+		}
+	}
+}
+
+func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int, statedb vm.StateDB) {
+	var network string
+	switch GenesisHash {
+	case params.BSCGenesisHash:
+		network = mainNet
+	case params.ChapelGenesisHash:
+		network = chapelNet
+	case params.RialtoGenesisHash:
+		network = rialtoNet
+	default:
+		network = defaultNet
+	}
+	logger := log.New("system-contract-upgrade", network)
+	upgrade := parliaGenesisUpgrade[network]
+	if upgrade != nil {
+		for _, cfg := range upgrade.Configs {
+			if strings.TrimSpace(cfg.Code) == "" {
+				panic(fmt.Errorf("parliaGenesis: bytecode for contract %s is empty, fill core/systemcontracts/parliagenesis/ before use", cfg.ContractAddr.String()))
+			}
+		}
+	}
+	applySystemContractUpgrade(upgrade, blockNumber, statedb, logger)
+	// Set nonce=1 for every newly deployed contract so state matches BSC mainnet genesis state.
+	if upgrade != nil {
+		for _, cfg := range upgrade.Configs {
+			statedb.SetNonce(cfg.ContractAddr, 1, tracing.NonceChangeNewContract)
 		}
 	}
 }
@@ -1254,10 +1289,6 @@ func upgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 
 	if config.IsOnFermi(blockNumber, lastBlockTime, blockTime) {
 		applySystemContractUpgrade(fermiUpgrade[network], blockNumber, statedb, logger)
-	}
-
-	if config.IsOnParliaGenesis(blockNumber) {
-		applySystemContractUpgrade(parliaGenesisUpgrade[network], blockNumber, statedb, logger)
 	}
 
 	/*
