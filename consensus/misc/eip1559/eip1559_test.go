@@ -123,13 +123,13 @@ func TestCalcBaseFeeABCore(t *testing.T) {
 	forkBlock := big.NewInt(100)
 
 	tests := []struct {
-		name            string
-		cfg             *params.ChainConfig
-		parentNumber    int64
-		parentBaseFee   int64
-		parentGasLimit  uint64
-		parentGasUsed   uint64
-		wantFixed       bool // true = expect InitialBaseFeeForBSC
+		name           string
+		cfg            *params.ChainConfig
+		parentNumber   int64
+		parentBaseFee  int64
+		parentGasLimit uint64
+		parentGasUsed  uint64
+		wantFixed      bool // true = expect InitialBaseFeeForBSC
 	}{
 		// Phase 1: no fork scheduled — always dynamic
 		{
