@@ -795,19 +795,19 @@ type ChainConfig struct {
 	// those cases.
 	EnableVerkleAtGenesis bool `json:"enableVerkleAtGenesis,omitempty"`
 
-	RamanujanBlock     *big.Int `json:"ramanujanBlock,omitempty"`     // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock         *big.Int `json:"nielsBlock,omitempty"`         // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock    *big.Int `json:"mirrorSyncBlock,omitempty"`    // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
-	BrunoBlock         *big.Int `json:"brunoBlock,omitempty"`         // brunoBlock switch block (nil = no fork, 0 = already activated)
-	EulerBlock         *big.Int `json:"eulerBlock,omitempty"`         // eulerBlock switch block (nil = no fork, 0 = already activated)
-	GibbsBlock         *big.Int `json:"gibbsBlock,omitempty"`         // gibbsBlock switch block (nil = no fork, 0 = already activated)
-	NanoBlock          *big.Int `json:"nanoBlock,omitempty"`          // nanoBlock switch block (nil = no fork, 0 = already activated)
-	MoranBlock         *big.Int `json:"moranBlock,omitempty"`         // moranBlock switch block (nil = no fork, 0 = already activated)
-	PlanckBlock        *big.Int `json:"planckBlock,omitempty"`        // planckBlock switch block (nil = no fork, 0 = already activated)
-	LubanBlock         *big.Int `json:"lubanBlock,omitempty"`         // lubanBlock switch block (nil = no fork, 0 = already activated)
-	PlatoBlock         *big.Int `json:"platoBlock,omitempty"`         // platoBlock switch block (nil = no fork, 0 = already activated)
-	HertzBlock         *big.Int `json:"hertzBlock,omitempty"`         // hertzBlock switch block (nil = no fork, 0 = already activated)
-	HertzfixBlock      *big.Int `json:"hertzfixBlock,omitempty"`      // hertzfixBlock switch block (nil = no fork, 0 = already activated)
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	BrunoBlock      *big.Int `json:"brunoBlock,omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
+	EulerBlock      *big.Int `json:"eulerBlock,omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
+	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
+	NanoBlock       *big.Int `json:"nanoBlock,omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock      *big.Int `json:"moranBlock,omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
+	PlanckBlock     *big.Int `json:"planckBlock,omitempty"`     // planckBlock switch block (nil = no fork, 0 = already activated)
+	LubanBlock      *big.Int `json:"lubanBlock,omitempty"`      // lubanBlock switch block (nil = no fork, 0 = already activated)
+	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
+	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
+	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
 	// PosaForkBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
 	// At this block: Parlia system contract bytecodes are injected into state, and the consensus
 	// engine switches from Clique to Parlia.
