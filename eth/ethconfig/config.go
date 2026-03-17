@@ -222,6 +222,10 @@ type Config struct {
 	// OverrideFermi (TODO: remove after the fork)
 	OverrideFermi *uint64 `toml:",omitempty"`
 
+	// OverrideParliaGenesisBlock sets the block number at which Parlia system contracts
+	// are injected. Used when migrating an existing Clique network to Parlia.
+	OverrideParliaGenesisBlock *uint64 `toml:",omitempty"`
+
 	// OverrideOsaka (TODO: remove after the fork)
 	OverrideOsaka *uint64 `toml:",omitempty"`
 

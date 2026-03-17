@@ -267,15 +267,16 @@ func (e *GenesisMismatchError) Error() string {
 // ChainOverrides contains the changes to chain config
 // Typically, these modifications involve hardforks that are not enabled on the BSC mainnet, intended for testing purposes.
 type ChainOverrides struct {
-	OverridePassedForkTime *uint64
-	OverrideLorentz        *uint64
-	OverrideMaxwell        *uint64
-	OverrideFermi          *uint64
-	OverrideOsaka          *uint64
-	OverrideMendel         *uint64
-	OverrideBPO1           *uint64
-	OverrideBPO2           *uint64
-	OverrideVerkle         *uint64
+	OverridePassedForkTime     *uint64
+	OverrideLorentz            *uint64
+	OverrideMaxwell            *uint64
+	OverrideFermi              *uint64
+	OverrideOsaka              *uint64
+	OverrideMendel             *uint64
+	OverrideBPO1               *uint64
+	OverrideBPO2               *uint64
+	OverrideVerkle             *uint64
+	OverrideParliaGenesisBlock *big.Int
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -318,6 +319,9 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	}
 	if o.OverrideVerkle != nil {
 		cfg.VerkleTime = o.OverrideVerkle
+	}
+	if o.OverrideParliaGenesisBlock != nil {
+		cfg.ParliaGenesisBlock = o.OverrideParliaGenesisBlock
 	}
 	return cfg.CheckConfigForkOrder()
 }
