@@ -1165,7 +1165,7 @@ func (w *worker) generateWork(genParam *generateParams, witness bool) *newPayloa
 	}
 	// Collect consensus-layer requests if Prague is enabled.
 	var requests [][]byte
-	if w.chainConfig.IsPrague(work.header.Number, work.header.Time) && w.chainConfig.IsNotInBSC() {
+	if w.chainConfig.IsPrague(work.header.Number, work.header.Time) && !w.chainConfig.IsParliaActive(work.header.Number) {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		if err := core.ParseDepositLogs(&requests, allLogs, w.chainConfig); err != nil {

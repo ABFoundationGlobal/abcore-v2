@@ -275,8 +275,7 @@ type ChainOverrides struct {
 	OverrideMendel             *uint64
 	OverrideBPO1               *uint64
 	OverrideBPO2               *uint64
-	OverrideVerkle             *uint64
-	OverrideParliaGenesisBlock *big.Int
+	OverrideVerkle *uint64
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -319,9 +318,6 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	}
 	if o.OverrideVerkle != nil {
 		cfg.VerkleTime = o.OverrideVerkle
-	}
-	if o.OverrideParliaGenesisBlock != nil {
-		cfg.ParliaGenesisBlock = o.OverrideParliaGenesisBlock
 	}
 	return cfg.CheckConfigForkOrder()
 }
@@ -555,7 +551,7 @@ func (g *Genesis) toBlockWithRoot(root common.Hash) *types.Block {
 			withdrawals = make([]*types.Withdrawal, 0)
 		}
 		if conf.IsCancun(num, g.Timestamp) {
-			if conf.IsInBSC() {
+			if conf.IsParliaActive(num) {
 				head.WithdrawalsHash = &types.EmptyWithdrawalsHash
 				withdrawals = make([]*types.Withdrawal, 0)
 			}

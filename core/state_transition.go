@@ -564,8 +564,8 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 
 	fee := new(uint256.Int).SetUint64(st.gasUsed())
 	fee.Mul(fee, effectiveTipU256)
-	// consensus engine is parlia
-	if st.evm.ChainConfig().IsInBSC() {
+	// consensus engine is parlia (for ABCore, only after PosaForkBlock)
+	if st.evm.ChainConfig().IsParliaActive(st.evm.Context.BlockNumber) {
 		st.state.AddBalance(consensus.SystemAddress, fee, tracing.BalanceIncreaseRewardTransactionFee)
 		// add extra blob fee reward
 		if rules.IsCancun {

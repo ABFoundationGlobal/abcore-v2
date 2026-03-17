@@ -808,9 +808,9 @@ type ChainConfig struct {
 	PlatoBlock         *big.Int `json:"platoBlock,omitempty"`         // platoBlock switch block (nil = no fork, 0 = already activated)
 	HertzBlock         *big.Int `json:"hertzBlock,omitempty"`         // hertzBlock switch block (nil = no fork, 0 = already activated)
 	HertzfixBlock      *big.Int `json:"hertzfixBlock,omitempty"`      // hertzfixBlock switch block (nil = no fork, 0 = already activated)
-	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"` // parliaGenesisBlock switch block: inject Parlia system contracts at this height (nil = no fork)
-
 	// PosaForkBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
+	// At this block: Parlia system contract bytecodes are injected into state, and the consensus
+	// engine switches from Clique to Parlia.
 	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
 	// Only meaningful for ABCore chains (chain IDs 26888 and 36888).
 	PosaForkBlock *big.Int `json:"posaForkBlock,omitempty"`
@@ -860,6 +860,8 @@ func (c *ChainConfig) Description() string {
 	}
 	banner += fmt.Sprintf("Chain ID:  %v (%s)\n", c.ChainID, network)
 	switch {
+	case c.IsInABCore():
+		banner += "Consensus: DualConsensus (Clique proof-of-authority → Parlia proof-of-staked-authority)\n"
 	case c.IsInBSC():
 		banner += "Consensus: Parlia (proof-of-staked--authority)\n"
 	case c.Ethash != nil:
@@ -1091,14 +1093,10 @@ func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
 	return configBlockEqual(c.RamanujanBlock, num)
 }
 
-// IsParliaGenesis returns whether num is either equal to the ParliaGenesis fork block or greater.
-func (c *ChainConfig) IsParliaGenesis(num *big.Int) bool {
-	return isBlockForked(c.ParliaGenesisBlock, num)
-}
-
-// IsOnParliaGenesis returns whether num is equal to the ParliaGenesis fork block.
+// IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
+// the block at which system contracts are injected and consensus switches.
 func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
-	return configBlockEqual(c.ParliaGenesisBlock, num)
+	return configBlockEqual(c.PosaForkBlock, num)
 }
 
 // IsNiels returns whether num is either equal to the Niels fork block or greater.
@@ -1423,6 +1421,16 @@ func (c *ChainConfig) IsInABCore() bool {
 
 func (c *ChainConfig) IsNotInBSC() bool {
 	return c.Parlia == nil
+}
+
+// IsParliaActive returns true if Parlia consensus is active at the given block number.
+// For ABCore chains (26888/36888), Parlia only becomes active at PosaForkBlock.
+// For pure BSC chains, Parlia is always active when IsInBSC() is true.
+func (c *ChainConfig) IsParliaActive(num *big.Int) bool {
+	if c.IsInABCore() {
+		return c.PosaForkBlock != nil && isBlockForked(c.PosaForkBlock, num)
+	}
+	return c.IsInBSC()
 }
 
 // IsLorentz returns whether time is either equal to the Lorentz fork time or greater.
@@ -1794,9 +1802,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.HertzfixBlock, newcfg.HertzfixBlock, headNumber) {
 		return newBlockCompatError("hertzfix fork block", c.HertzfixBlock, newcfg.HertzfixBlock)
-	}
-	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
-		return newBlockCompatError("parliaGenesis fork block", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
