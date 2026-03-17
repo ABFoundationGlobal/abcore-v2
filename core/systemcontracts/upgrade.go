@@ -1178,7 +1178,10 @@ func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int,
 	upgrade := parliaGenesisUpgrade[network]
 	if upgrade != nil {
 		for _, cfg := range upgrade.Configs {
-			if strings.TrimSpace(cfg.Code) == "" {
+			// Strip optional 0x prefix so hex.DecodeString in applySystemContractUpgrade
+			// accepts both "0x..." and raw hex formats.
+			cfg.Code = strings.TrimPrefix(strings.TrimSpace(cfg.Code), "0x")
+			if cfg.Code == "" {
 				panic(fmt.Errorf("parliaGenesis: bytecode for contract %s is empty, fill core/systemcontracts/parliagenesis/ before use", cfg.ContractAddr.String()))
 			}
 		}
