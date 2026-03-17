@@ -1871,10 +1871,10 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
 	}
-	// ParliaGenesisBlock is only ever set on ABCore chains; guard with IsInABCore() on both
-	// sides to avoid a false incompatibility error when comparing two non-ABCore configs that
-	// both have ParliaGenesisBlock == nil.
-	if (c.IsInABCore() && newcfg.IsInABCore()) && isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
+	// Check whenever either config has ParliaGenesisBlock set — covers ABCore chains and any
+	// chain that sets the field via OverrideParliaGenesisBlock. isForkBlockIncompatible
+	// already returns false when both are nil, so no false-positive when neither is set.
+	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
 		return newBlockCompatError("parliaGenesisBlock", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	return nil
