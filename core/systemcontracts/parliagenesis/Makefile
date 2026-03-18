@@ -4,15 +4,17 @@ GENESIS_CONTRACT_DIR  := bsc-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
 POETRY                := $(or $(shell which poetry 2>/dev/null),$(HOME)/.local/bin/poetry)
-# Python <= 3.13 required; rpds-py does not support Python 3.14+
+# Python 3.10–3.13 required; rpds-py does not support Python 3.14+
 PYTHON                := $(or \
+	$(shell which python3.13 2>/dev/null), \
 	$(shell which python3.12 2>/dev/null), \
 	$(shell which python3.11 2>/dev/null), \
 	$(shell which python3.10 2>/dev/null))
 
 # ---- Chain parameters ----
-# Edit these values or override on the command line:
-#   make build CHAIN_ID=1234 MAX_ELECTED_VALIDATORS=5
+# Edit these values or override on the command line.
+# Values containing spaces must be quoted:
+#   make build CHAIN_ID=1234 BLOCK_INTERVAL="5 seconds"
 CHAIN_ID                       ?= 714
 MAX_ELECTED_VALIDATORS         ?= 3
 BLOCK_INTERVAL                 ?= 3 seconds
@@ -37,13 +39,18 @@ INIT_MINIMAL_DELAY             ?= 1 minutes
 ## Clone bsc-genesis-contract and install dependencies
 pre:
 	@if [ -z "$(PYTHON)" ]; then \
-		echo "Error: python3.12 / 3.11 / 3.10 not found. Install one of them first (rpds-py does not support Python 3.14+)."; \
+		echo "Error: python3.13 / 3.12 / 3.11 / 3.10 not found. Install one of them first (rpds-py does not support Python 3.14+)."; \
 		exit 1; \
 	fi
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)" ]; then \
 		git clone --branch $(GENESIS_CONTRACT_TAG) $(GENESIS_CONTRACT_REPO) $(GENESIS_CONTRACT_DIR); \
 	else \
-		echo "$(GENESIS_CONTRACT_DIR) already exists, skipping clone"; \
+		actual_tag=$$(cd $(GENESIS_CONTRACT_DIR) && git describe --tags --exact-match 2>/dev/null || echo "unknown"); \
+		if [ "$$actual_tag" != "$(GENESIS_CONTRACT_TAG)" ]; then \
+			echo "Error: $(GENESIS_CONTRACT_DIR) is at tag '$$actual_tag', expected '$(GENESIS_CONTRACT_TAG)'. Remove the directory and re-run 'make pre'."; \
+			exit 1; \
+		fi; \
+		echo "$(GENESIS_CONTRACT_DIR) already at $(GENESIS_CONTRACT_TAG), skipping clone"; \
 	fi
 	cd $(GENESIS_CONTRACT_DIR) && npm install
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)/lib/forge-std" ]; then \
@@ -115,10 +122,17 @@ build:
 	for pair in $$pairs; do \
 		file=$${pair%%:*}; \
 		artifact=$${pair##*:}; \
-		jq -r '.deployedBytecode.object' \
-			"$(GENESIS_CONTRACT_DIR)/out/$${artifact}.json" \
-			| sed 's/^0x//' \
-			> "$(PARLIA_DIR)$${file}"; \
+		bytecode=$$(jq -re '.deployedBytecode.object' \
+			"$(GENESIS_CONTRACT_DIR)/out/$${artifact}.json" 2>/dev/null) || { \
+			echo "Error: failed to extract bytecode for $${file} from $${artifact}.json"; \
+			exit 1; \
+		}; \
+		bytecode=$${bytecode#0x}; \
+		[ -n "$$bytecode" ] || { \
+			echo "Error: empty bytecode for $${file}"; \
+			exit 1; \
+		}; \
+		printf '%s' "$$bytecode" > "$(PARLIA_DIR)$${file}"; \
 		echo "Written $${file}"; \
 	done
 

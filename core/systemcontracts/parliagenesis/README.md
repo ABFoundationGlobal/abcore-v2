@@ -80,6 +80,9 @@ Edit them directly, or override on the command line:
 
 ```bash
 make build CHAIN_ID=1234 MAX_ELECTED_VALIDATORS=5
+
+# Values containing spaces must be quoted:
+make build BLOCK_INTERVAL="5 seconds" BREATHE_BLOCK_INTERVAL="30 minutes"
 ```
 
 All parameters:
