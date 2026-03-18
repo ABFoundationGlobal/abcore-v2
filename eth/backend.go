@@ -880,7 +880,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		protos = append(protos, snap.MakeProtocols((*snapHandler)(s.handler))...)
 	}
 	// BSC extension protocol must only run when Parlia consensus is actually active.
-	// For ABCore chains (Parlia != nil from genesis) IsInBSC() is always true even during
+	// For ABCore chains (Parlia != nil from genesis) HasParlia() is always true even during
 	// the pre-fork Clique phase, so use IsParliaActive with the current head instead.
 	if s.blockchain.Config().IsParliaActive(s.currentBlockNum()) {
 		protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)

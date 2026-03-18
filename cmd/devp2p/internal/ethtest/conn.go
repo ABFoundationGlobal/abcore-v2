@@ -359,7 +359,7 @@ loop:
 			}
 			// UpgradeStatus is a BSC-only extension over eth/68.
 			// Non-BSC nodes skip it, so we exit the loop after Status exchange.
-			if !chain.config.IsInBSC() {
+			if !chain.config.HasParlia() {
 				break loop
 			}
 		case eth.UpgradeStatusMsg + protoOffset(ethProto):

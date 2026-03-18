@@ -860,11 +860,11 @@ func (c *ChainConfig) Description() string {
 	}
 	banner += fmt.Sprintf("Chain ID:  %v (%s)\n", c.ChainID, network)
 	switch {
-	case c.IsInABCore() && c.ParliaGenesisBlock != nil:
+	case c.HasCliqueAndParlia() && c.ParliaGenesisBlock != nil:
 		banner += fmt.Sprintf("Consensus: DualConsensus (Clique → Parlia at block %v)\n", c.ParliaGenesisBlock)
-	case c.IsInABCore():
+	case c.HasCliqueAndParlia():
 		banner += "Consensus: Clique (proof-of-authority, Parlia transition not yet scheduled)\n"
-	case c.IsInBSC():
+	case c.HasParlia():
 		banner += "Consensus: Parlia (proof-of-staked--authority)\n"
 	case c.Ethash != nil:
 		banner += "Consensus: Beacon (proof-of-stake), merged from Ethash (proof-of-work)\n"
@@ -886,7 +886,7 @@ func (c *ChainConfig) String() string {
 		engine = c.Ethash
 	case c.Clique != nil:
 		engine = c.Clique
-	case c.IsInBSC():
+	case c.HasParlia():
 		engine = c.Parlia
 	default:
 		engine = "unknown"
@@ -1400,33 +1400,29 @@ func (c *ChainConfig) IsOnPrague(currentBlockNumber *big.Int, lastBlockTime uint
 	return !c.IsPrague(lastBlockNumber, lastBlockTime) && c.IsPrague(currentBlockNumber, currentBlockTime)
 }
 
-func (c *ChainConfig) IsInBSC() bool {
+func (c *ChainConfig) HasParlia() bool {
 	return c.Parlia != nil
 }
 
-func (c *ChainConfig) IsNotInBSC() bool {
+func (c *ChainConfig) NotHasParlia() bool {
 	return c.Parlia == nil
 }
 
-// IsInABCore returns whether this config is for an ABCore chain (testnet 26888 or mainnet 36888).
-// ABCore has both Clique and Parlia set; it must be detected before the generic IsInBSC() check
-// to route engine selection correctly (Clique pre-fork, DualConsensus post-fork).
-func (c *ChainConfig) IsInABCore() bool {
-	if c.ChainID == nil {
-		return false
-	}
-	id := c.ChainID.Uint64()
-	return id == 26888 || id == 36888
+// HasCliqueAndParlia returns true if this chain has both Clique and Parlia configured —
+// the defining characteristic of an ABCore-style dual-consensus chain.
+// Must be checked before HasParlia() in engine selection to route correctly.
+func (c *ChainConfig) HasCliqueAndParlia() bool {
+	return c.Clique != nil && c.Parlia != nil
 }
 
 // IsParliaActive returns true if Parlia consensus is active at the given block number.
-// For ABCore chains (26888/36888), Parlia only becomes active at ParliaGenesisBlock.
-// For pure BSC chains, Parlia is always active when IsInBSC() is true.
+// For dual-consensus chains (HasCliqueAndParlia), Parlia only becomes active at ParliaGenesisBlock.
+// For pure BSC chains, Parlia is always active when HasParlia() is true.
 func (c *ChainConfig) IsParliaActive(num *big.Int) bool {
-	if c.IsInABCore() {
+	if c.HasCliqueAndParlia() {
 		return c.ParliaGenesisBlock != nil && isBlockForked(c.ParliaGenesisBlock, num)
 	}
-	return c.IsInBSC()
+	return c.HasParlia()
 }
 
 // IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
@@ -1588,7 +1584,7 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time u
 // to guarantee that forks can be implemented in a different order than on official networks
 func (c *ChainConfig) CheckConfigForkOrder() error {
 	// skip checking for non-Parlia egine
-	if c.IsNotInBSC() {
+	if c.NotHasParlia() {
 		return nil
 	}
 	type fork struct {
@@ -1962,7 +1958,7 @@ func (c *ChainConfig) ActiveSystemContracts(time uint64) map[string]common.Addre
 	if fork >= forks.Osaka {
 		// no new system contracts
 	}
-	if c.IsInBSC() {
+	if c.HasParlia() {
 		if fork >= forks.Prague {
 			active["HISTORY_STORAGE_ADDRESS"] = HistoryStorageAddress
 		}
@@ -2198,20 +2194,20 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsPlato:          c.IsPlato(num),
 		IsHertz:          c.IsHertz(num),
 		IsHertzfix:       c.IsHertzfix(num),
-		IsShanghai:       (isMerge || c.IsInBSC()) && c.IsShanghai(num, timestamp),
+		IsShanghai:       (isMerge || c.HasParlia()) && c.IsShanghai(num, timestamp),
 		IsKepler:         c.IsKepler(num, timestamp),
 		IsFeynman:        c.IsFeynman(num, timestamp),
-		IsCancun:         (isMerge || c.IsInBSC()) && c.IsCancun(num, timestamp),
+		IsCancun:         (isMerge || c.HasParlia()) && c.IsCancun(num, timestamp),
 		IsHaber:          c.IsHaber(num, timestamp),
 		IsBohr:           c.IsBohr(num, timestamp),
 		IsPascal:         c.IsPascal(num, timestamp),
-		IsPrague:         (isMerge || c.IsInBSC()) && c.IsPrague(num, timestamp),
+		IsPrague:         (isMerge || c.HasParlia()) && c.IsPrague(num, timestamp),
 		IsLorentz:        c.IsLorentz(num, timestamp),
 		IsMaxwell:        c.IsMaxwell(num, timestamp),
 		IsFermi:          c.IsFermi(num, timestamp),
-		IsOsaka:          (isMerge || c.IsInBSC()) && c.IsOsaka(num, timestamp),
+		IsOsaka:          (isMerge || c.HasParlia()) && c.IsOsaka(num, timestamp),
 		IsMendel:         c.IsMendel(num, timestamp),
-		IsAmsterdam:      (isMerge || c.IsInBSC()) && c.IsAmsterdam(num, timestamp),
+		IsAmsterdam:      (isMerge || c.HasParlia()) && c.IsAmsterdam(num, timestamp),
 		IsVerkle:         c.IsVerkle(num, timestamp),
 		IsEIP4762:        isVerkle,
 	}
