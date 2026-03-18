@@ -291,9 +291,11 @@ func ApplyTransaction(evm *vm.EVM, gp *GasPool, statedb *state.StateDB, header *
 // ProcessBeaconBlockRoot applies the EIP-4788 system call to the beacon block root
 // contract. This method is exported to be used in tests.
 func ProcessBeaconBlockRoot(beaconRoot common.Hash, evm *vm.EVM) {
-	// Return immediately if beaconRoot equals the zero hash when using the Parlia engine.
+	// Return immediately if beaconRoot equals the zero hash when Parlia is active.
+	// Use IsParliaActive so dual-consensus chains (ABCore) only skip the call once
+	// Parlia has actually taken over — not during the pre-fork Clique phase.
 	if beaconRoot == (common.Hash{}) {
-		if chainConfig := evm.ChainConfig(); chainConfig != nil && chainConfig.HasParlia() {
+		if chainConfig := evm.ChainConfig(); chainConfig != nil && chainConfig.IsParliaActive(evm.Context.BlockNumber) {
 			return
 		}
 	}
