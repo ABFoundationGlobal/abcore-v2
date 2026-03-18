@@ -270,9 +270,6 @@ func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, ee *et
 	//   - nil  → pure Clique (Phase 1: binary upgrade only, no consensus change yet)
 	//   - set  → DualConsensus (Phase 2: Clique pre-fork, Parlia post-fork)
 	if config.HasCliqueAndParlia() {
-		if config.Clique == nil {
-			return nil, fmt.Errorf("ABCore chain config (chainID=%v) is missing clique section", config.ChainID)
-		}
 		if config.ParliaGenesisBlock != nil {
 			// DualConsensus is not yet implemented (task I-2).
 			// TODO(I-2): return dual.New(config, db, ee, genesisHash), nil

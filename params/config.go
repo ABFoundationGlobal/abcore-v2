@@ -1871,7 +1871,7 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	// chain that sets the field via OverrideParliaGenesisBlock. isForkBlockIncompatible
 	// already returns false when both are nil, so no false-positive when neither is set.
 	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
-		return newBlockCompatError("parliaGenesisBlock", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
+		return newBlockCompatError("parliaGenesis fork block", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	return nil
 }
