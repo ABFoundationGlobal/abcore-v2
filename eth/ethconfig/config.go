@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -263,7 +264,20 @@ type Config struct {
 // Clique is allowed for now to live standalone, but ethash is forbidden and can
 // only exist on already merged networks.
 func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, ee *ethapi.BlockChainAPI, genesisHash common.Hash) (consensus.Engine, error) {
-	if config.IsInBSC() {
+	// ABCore chain (testnet 26888, mainnet 36888): has both Clique and Parlia configs set.
+	// Must be detected before HasParlia() which would otherwise return pure Parlia.
+	// Select engine based on ParliaGenesisBlock:
+	//   - nil  → pure Clique (Phase 1: binary upgrade only, no consensus change yet)
+	//   - set  → DualConsensus (Phase 2: Clique pre-fork, Parlia post-fork)
+	if config.HasCliqueAndParlia() {
+		if config.ParliaGenesisBlock != nil {
+			// DualConsensus is not yet implemented (task I-2).
+			// TODO(I-2): return dual.New(config, db, ee, genesisHash), nil
+			return nil, fmt.Errorf("ABCore DualConsensus (parliaGenesisBlock=%v) is not yet implemented", config.ParliaGenesisBlock)
+		}
+		return clique.New(config.Clique, db), nil
+	}
+	if config.HasParlia() {
 		return parlia.New(config, db, ee, genesisHash), nil
 	}
 	// if config.TerminalTotalDifficulty == nil {

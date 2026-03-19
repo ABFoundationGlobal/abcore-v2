@@ -863,6 +863,15 @@ func (s *Ethereum) SyncMode() downloader.SyncMode {
 	return mode
 }
 
+// currentBlockNum returns the current chain head number, or zero if the head
+// has not yet been set (early start-up). Used to guard IsParliaActive checks.
+func (s *Ethereum) currentBlockNum() *big.Int {
+	if head := s.blockchain.CurrentBlock(); head != nil {
+		return head.Number
+	}
+	return common.Big0
+}
+
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
@@ -870,8 +879,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	if !s.config.DisableSnapProtocol && s.config.SnapshotCache > 0 {
 		protos = append(protos, snap.MakeProtocols((*snapHandler)(s.handler))...)
 	}
-	// BSC extension protocol should only be enabled on Parlia/BSC chains.
-	if s.blockchain.Config().IsInBSC() {
+	// BSC extension protocol must only run when Parlia consensus is actually active.
+	// For ABCore chains (Parlia != nil from genesis) HasParlia() is always true even during
+	// the pre-fork Clique phase, so use IsParliaActive with the current head instead.
+	if s.blockchain.Config().IsParliaActive(s.currentBlockNum()) {
 		protos = append(protos, bsc.MakeProtocols((*bscHandler)(s.handler))...)
 	}
 	return protos
@@ -989,8 +1000,9 @@ func (s *Ethereum) setupDiscovery() error {
 		s.discmix.AddSource(iter)
 	}
 
-	// Add bsc nodes from DNS.
-	if s.blockchain.Config().IsInBSC() && len(s.config.BscDiscoveryURLs) > 0 {
+	// Add bsc nodes from DNS. Only use BSC discovery when Parlia is actually active;
+	// IsParliaActive guards ABCore chains that have Parlia configured but not yet running.
+	if s.blockchain.Config().IsParliaActive(s.currentBlockNum()) && len(s.config.BscDiscoveryURLs) > 0 {
 		iter, err := dnsclient.NewIterator(s.config.BscDiscoveryURLs...)
 		if err != nil {
 			return err

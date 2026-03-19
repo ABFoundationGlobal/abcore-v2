@@ -157,7 +157,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	// Read requests if Prague is enabled.
 	var requests [][]byte
-	if config.IsPrague(block.Number(), block.Time()) && config.IsNotInBSC() {
+	if config.IsPrague(block.Number(), block.Time()) && config.NotHasParlia() {
 		var allCommonLogs []*types.Log
 		for _, receipt := range receipts {
 			allCommonLogs = append(allCommonLogs, receipt.Logs...)
@@ -291,9 +291,11 @@ func ApplyTransaction(evm *vm.EVM, gp *GasPool, statedb *state.StateDB, header *
 // ProcessBeaconBlockRoot applies the EIP-4788 system call to the beacon block root
 // contract. This method is exported to be used in tests.
 func ProcessBeaconBlockRoot(beaconRoot common.Hash, evm *vm.EVM) {
-	// Return immediately if beaconRoot equals the zero hash when using the Parlia engine.
+	// Return immediately if beaconRoot equals the zero hash when Parlia is active.
+	// Use IsParliaActive so dual-consensus chains (ABCore) only skip the call once
+	// Parlia has actually taken over — not during the pre-fork Clique phase.
 	if beaconRoot == (common.Hash{}) {
-		if chainConfig := evm.ChainConfig(); chainConfig != nil && chainConfig.IsInBSC() {
+		if chainConfig := evm.ChainConfig(); chainConfig != nil && chainConfig.IsParliaActive(evm.Context.BlockNumber) {
 			return
 		}
 	}
