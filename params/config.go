@@ -39,8 +39,8 @@ var (
 	ABCoreMainGenesisHash = common.HexToHash("0xb247d77242ca8e314af087f1b8a3e3b54d45fc76c02458d53fea171059419c0f")
 
 	// ABCoreTestGenesisHash is the genesis block hash for ABCore testnet (chain ID 26888).
-	// Computed from script/release/configs/testnet/genesis.json; verified against the
-	// running testnet node (container 5dcafaae144d, eth_getBlockByNumber("0x0")).
+	// Computed from script/release/configs/testnet/genesis.json; verified against a
+	// running testnet node via eth_getBlockByNumber("0x0").
 	ABCoreTestGenesisHash = common.HexToHash("0x739b6207114baca3ef3cef5df3a43c75498b3865e72934dde37defe002217c1b")
 )
 
