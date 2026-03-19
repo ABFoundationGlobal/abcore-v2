@@ -34,9 +34,10 @@ var (
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
 
-	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes are not registered
-	// in the built-in genesis-hash→config map; chain config is loaded from genesis.json
-	// via `geth init` and is not looked up by hash at startup.
+	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes (mainnet 36888,
+	// testnet 26888) are not registered in the built-in genesis-hash→config map; chain
+	// config is loaded from genesis.json via `geth init` and is not looked up by hash
+	// at startup.
 	ABCoreGenesisHash = common.Hash{}
 )
 
@@ -316,19 +317,18 @@ var (
 		},
 	}
 
-	// ABCoreChainConfig is the chain config for ABCore testnet (chain ID 26888).
-	// The same binary also supports mainnet (chain ID 36888): use a genesis.json
-	// with "chainId": 36888 and appropriate fork blocks for mainnet — no recompilation needed.
+	// ABCoreMainChainConfig is the chain parameters for ABCore mainnet (chain ID 36888).
 	//
 	// EVM forks: Homestead through London are active from block 0 (matching ABCore v1 production state).
 	// Post-London EVM forks (Shanghai, Cancun, Prague): activated together with the corresponding
 	// BSC forks once the DualConsensus switch to Parlia is complete.
-	// BSC-specific forks: all set to 0 for testnet (fresh chain); tune to actual block heights for mainnet.
+	// BSC-specific forks: all set to 0 (fresh-chain baseline); tune to actual block heights once
+	// those forks are scheduled on mainnet.
 	//
-	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to enable
-	// DualConsensus (Clique → Parlia transition at that block).
-	ABCoreChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(26888),
+	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to
+	// enable DualConsensus (Clique → Parlia transition at that block).
+	ABCoreMainChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(36888),
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -345,8 +345,8 @@ var (
 		ShanghaiTime: nil,
 		CancunTime:   nil,
 		PragueTime:   nil,
-		// BSC-specific forks: all active from block 0 for testnet.
-		// For mainnet upgrade, set these to the actual fork blocks on the live chain.
+		// BSC-specific forks: all active from block 0 (fresh-chain baseline).
+		// Tune to actual block heights for each fork once scheduled on mainnet.
 		RamanujanBlock:  big.NewInt(0),
 		NielsBlock:      big.NewInt(0),
 		MirrorSyncBlock: big.NewInt(0),
@@ -362,8 +362,47 @@ var (
 		HertzfixBlock:   big.NewInt(0),
 		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
 		ParliaGenesisBlock: nil,
-		Clique:             &CliqueConfig{Period: 3, Epoch: 200},
+		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		Parlia:             &ParliaConfig{},
+	}
+
+	// ABCoreTestChainConfig is the chain parameters for ABCore testnet (chain ID 26888).
+	//
+	// Mirrors ABCoreMainChainConfig with two differences: chain ID 26888 and Clique period 1
+	// (1-second blocks for faster testnet iteration).
+	// BSC-specific forks and ParliaGenesisBlock follow the same baseline as mainnet.
+	ABCoreTestChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(26888),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ShanghaiTime:        nil,
+		CancunTime:          nil,
+		PragueTime:          nil,
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(0),
+		BrunoBlock:          big.NewInt(0),
+		EulerBlock:          big.NewInt(0),
+		GibbsBlock:          big.NewInt(0),
+		NanoBlock:           big.NewInt(0),
+		MoranBlock:          big.NewInt(0),
+		PlanckBlock:         big.NewInt(0),
+		LubanBlock:          big.NewInt(0),
+		PlatoBlock:          big.NewInt(0),
+		HertzBlock:          big.NewInt(0),
+		HertzfixBlock:       big.NewInt(0),
+		ParliaGenesisBlock:  nil,
+		Clique:              &CliqueConfig{Period: 1, Epoch: 30000},
+		Parlia:              &ParliaConfig{},
 	}
 
 	// used to test hard fork upgrade, following https://github.com/bnb-chain/bsc-genesis-contract/blob/master/genesis.json
