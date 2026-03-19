@@ -34,7 +34,7 @@ jobs:
               - 'Dockerfile*'
               - 'Makefile'
 
-  unit-test:
+  build-test:
     needs: changes
     if: needs.changes.outputs.src == 'true'
     strategy:
@@ -72,3 +72,25 @@ jobs:
         go run build/ci.go check_generate
         go run build/ci.go check_baddeps
         make geth
+
+  build-test-status:
+    name: build-test-status
+    needs:
+      - changes
+      - build-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize Build Test status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "Build Test not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.build-test.result }}" != "success" ]; then
+          echo "Build Test result: ${{ needs.build-test.result }}"
+          exit 1
+        fi
+
+        echo "Build Test passed."

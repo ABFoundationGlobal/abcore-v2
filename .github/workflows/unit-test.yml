@@ -79,3 +79,25 @@ jobs:
         # Re-enable when: (a) upstream tests are fixed to be timing-independent,
         # or (b) we switch to a dedicated/self-hosted runner with consistent scheduling.
         go run build/ci.go test -timeout 1h -p 4 -skip 'TestBroadcastBlock|TestWalletNotifications'
+
+  unit-test-status:
+    name: unit-test-status
+    needs:
+      - changes
+      - unit-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize Unit Test status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "Unit Test not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.unit-test.result }}" != "success" ]; then
+          echo "Unit Test result: ${{ needs.unit-test.result }}"
+          exit 1
+        fi
+
+        echo "Unit Test passed."
