@@ -35,7 +35,7 @@ jobs:
               - 'tests/truffle/**'
               - 'Makefile'
 
-  truffle-test:
+  integration-test:
     needs: changes
     if: needs.changes.outputs.src == 'true'
     strategy:
@@ -49,3 +49,25 @@ jobs:
     - name: Truffle test
       run: |
         make truffle-test
+
+  integration-test-status:
+    name: integration-test-status
+    needs:
+      - changes
+      - integration-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize Integration Test status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "Integration Test not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.integration-test.result }}" != "success" ]; then
+          echo "Integration Test result: ${{ needs.integration-test.result }}"
+          exit 1
+        fi
+
+        echo "Integration Test passed."

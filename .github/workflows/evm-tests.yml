@@ -81,3 +81,25 @@ jobs:
         EVM_FIXTURES_VERSION: ${{ env.EVM_FIXTURES_VERSION }}
       run: |
         cd tests && bash -x run-evm-tests.sh
+
+  evm-test-status:
+    name: evm-test-status
+    needs:
+      - changes
+      - evm-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize EVM Test status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "EVM Test not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.evm-test.result }}" != "success" ]; then
+          echo "EVM Test result: ${{ needs.evm-test.result }}"
+          exit 1
+        fi
+
+        echo "EVM Test passed."

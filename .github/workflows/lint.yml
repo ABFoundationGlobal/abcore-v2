@@ -32,7 +32,7 @@ jobs:
               - 'go.mod'
               - '.golangci.yml'
 
-  golang-lint:
+  lint:
     needs: changes
     if: needs.changes.outputs.src == 'true'
     strategy:
@@ -75,3 +75,25 @@ jobs:
         ANDROID_HOME: "" # Skip android test
       run: |
         make lint
+
+  lint-status:
+    name: lint-status
+    needs:
+      - changes
+      - lint
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize Lint status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "Lint not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.lint.result }}" != "success" ]; then
+          echo "Lint result: ${{ needs.lint.result }}"
+          exit 1
+        fi
+
+        echo "Lint passed."
