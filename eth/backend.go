@@ -858,6 +858,13 @@ func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downlo
 func (s *Ethereum) Synced() bool                       { return s.handler.synced.Load() }
 func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
 func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
+
+func (s *Ethereum) WaitFilterMapsIdle() {
+	if s.filterMaps == nil {
+		return
+	}
+	s.filterMaps.WaitIdle()
+}
 func (s *Ethereum) SyncMode() downloader.SyncMode {
 	mode, _ := s.handler.chainSync.modeAndLocalHead()
 	return mode
