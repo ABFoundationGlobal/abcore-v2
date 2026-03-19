@@ -34,11 +34,14 @@ var (
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
 
-	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes (mainnet 36888,
-	// testnet 26888) are not registered in the built-in genesis-hash→config map; chain
-	// config is loaded from genesis.json via `geth init` and is not looked up by hash
-	// at startup.
-	ABCoreGenesisHash = common.Hash{}
+	// ABCoreMainGenesisHash is the genesis block hash for ABCore mainnet (chain ID 36888).
+	// Computed from script/release/configs/mainnet/genesis.json.
+	ABCoreMainGenesisHash = common.HexToHash("0xb247d77242ca8e314af087f1b8a3e3b54d45fc76c02458d53fea171059419c0f")
+
+	// ABCoreTestGenesisHash is the genesis block hash for ABCore testnet (chain ID 26888).
+	// Computed from script/release/configs/testnet/genesis.json; verified against the
+	// running testnet node (container 5dcafaae144d, eth_getBlockByNumber("0x0")).
+	ABCoreTestGenesisHash = common.HexToHash("0x739b6207114baca3ef3cef5df3a43c75498b3865e72934dde37defe002217c1b")
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -689,6 +692,10 @@ func GetBuiltInChainConfig(ghash common.Hash) *ChainConfig {
 		return ChapelChainConfig
 	case RialtoGenesisHash:
 		return RialtoChainConfig
+	case ABCoreMainGenesisHash:
+		return ABCoreMainChainConfig
+	case ABCoreTestGenesisHash:
+		return ABCoreTestChainConfig
 	default:
 		return nil
 	}
