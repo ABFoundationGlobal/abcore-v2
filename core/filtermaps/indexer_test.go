@@ -166,6 +166,32 @@ func TestIndexerMatcherView(t *testing.T) {
 	testIndexerMatcherView(t, false)
 }
 
+func TestGetBlockLvPointerAfterLastBlock(t *testing.T) {
+	ts := newTestSetup(t)
+	defer ts.close()
+
+	ts.chain.addBlocks(32, 5, 2, 4, true)
+	ts.setHistory(0, false)
+	ts.fm.WaitIdle()
+
+	if !ts.fm.indexedRange.headIndexed {
+		t.Fatal("expected fully indexed head")
+	}
+
+	lastBlock := ts.fm.indexedRange.blocks.Last()
+	got, err := ts.fm.getBlockLvPointer(lastBlock + 1)
+	if err != nil {
+		t.Fatalf("getBlockLvPointer(%d) returned error: %v", lastBlock+1, err)
+	}
+	want := ts.fm.indexedRange.headDelimiter + 1
+	if got != want {
+		t.Fatalf("getBlockLvPointer(%d) = %d, want %d", lastBlock+1, got, want)
+	}
+	if got == 0 {
+		t.Fatal("expected non-zero tail pointer after indexed head")
+	}
+}
+
 func TestIndexerMatcherViewWithConcurrentRead(t *testing.T) {
 	testIndexerMatcherView(t, true)
 }

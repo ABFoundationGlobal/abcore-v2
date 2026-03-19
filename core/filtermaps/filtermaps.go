@@ -740,6 +740,14 @@ func (f *FilterMaps) mapRowIndex(mapIndex, rowIndex uint32) uint64 {
 // Note that this function assumes that the indexer read lock is being held when
 // called from outside the indexerLoop goroutine.
 func (f *FilterMaps) getBlockLvPointer(blockNumber uint64) (uint64, error) {
+	if blockNumber >= f.indexedRange.blocks.AfterLast() {
+		if f.indexedRange.headIndexed {
+			return f.indexedRange.headDelimiter + 1, nil
+		}
+		if f.indexedRange.blocks.Count() > 0 {
+			blockNumber = f.indexedRange.blocks.Last()
+		}
+	}
 	if lvPointer, ok := f.lvPointerCache.Get(blockNumber); ok {
 		return lvPointer, nil
 	}
