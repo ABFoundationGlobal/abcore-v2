@@ -31,7 +31,7 @@ import (
 // - gas limit check
 // - basefee check
 func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Header) error {
-	if config.IsNotInBSC() {
+	if !config.IsParliaActive(header.Number) {
 		// Verify that the gas limit remains within allowed bounds
 		parentGasLimit := parent.GasLimit
 		if !config.IsLondon(parent.Number) {
@@ -57,7 +57,10 @@ func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Heade
 
 // CalcBaseFee calculates the basefee of the header.
 func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
-	if config.IsInBSC() {
+	// BSC and ABCore post-ParliaGenesis both use a fixed baseFee.
+	// ABCore pre-ParliaGenesis uses standard EIP-1559 dynamic baseFee to match ABCore v1 behaviour.
+	currentBlock := new(big.Int).Add(parent.Number, big.NewInt(1))
+	if config.IsParliaActive(currentBlock) {
 		return new(big.Int).SetUint64(params.InitialBaseFeeForBSC)
 	}
 

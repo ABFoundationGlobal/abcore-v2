@@ -358,8 +358,8 @@ loop:
 				return fmt.Errorf("write to connection failed: %v", err)
 			}
 			// UpgradeStatus is a BSC-only extension over eth/68.
-			// Non-BSC nodes skip it, so we exit the loop after Status exchange.
-			if !chain.config.IsInBSC() {
+			// Non-BSC nodes skip it; for ABCore pre-fork (Clique phase) also skip.
+			if !chain.config.IsParliaActive(chain.blocks[chain.Len()-1].Number()) {
 				break loop
 			}
 		case eth.UpgradeStatusMsg + protoOffset(ethProto):

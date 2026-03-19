@@ -450,7 +450,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			// If sealing is running resubmit a new work cycle periodically to pull in
 			// higher priced transactions. Disable this overhead for pending blocks.
 			if w.isRunning() && ((w.chainConfig.Clique != nil &&
-				w.chainConfig.Clique.Period > 0) || (w.chainConfig.IsInBSC())) {
+				w.chainConfig.Clique.Period > 0) || (w.chainConfig.HasParlia())) {
 				// Short circuit if no new transaction arrives.
 				commit(commitInterruptResubmit)
 			}
@@ -980,7 +980,7 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = eip1559.CalcBaseFee(w.chainConfig, parent)
-		if w.chainConfig.IsNotInBSC() && !w.chainConfig.IsLondon(parent.Number) {
+		if w.chainConfig.NotHasParlia() && !w.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
 		}
@@ -999,7 +999,7 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 		}
 		header.BlobGasUsed = new(uint64)
 		header.ExcessBlobGas = &excessBlobGas
-		if w.chainConfig.IsNotInBSC() {
+		if w.chainConfig.NotHasParlia() {
 			header.ParentBeaconRoot = genParams.beaconRoot
 		} else {
 			header.WithdrawalsHash = &types.EmptyWithdrawalsHash
@@ -1165,7 +1165,7 @@ func (w *worker) generateWork(genParam *generateParams, witness bool) *newPayloa
 	}
 	// Collect consensus-layer requests if Prague is enabled.
 	var requests [][]byte
-	if w.chainConfig.IsPrague(work.header.Number, work.header.Time) && w.chainConfig.IsNotInBSC() {
+	if w.chainConfig.IsPrague(work.header.Number, work.header.Time) && !w.chainConfig.IsParliaActive(work.header.Number) {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		if err := core.ParseDepositLogs(&requests, allLogs, w.chainConfig); err != nil {

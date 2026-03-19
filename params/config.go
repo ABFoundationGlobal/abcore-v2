@@ -33,6 +33,11 @@ var (
 	BSCGenesisHash    = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
+
+	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes are not registered
+	// in the built-in genesis-hash→config map; chain config is loaded from genesis.json
+	// via `geth init` and is not looked up by hash at startup.
+	ABCoreGenesisHash = common.Hash{}
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -309,6 +314,56 @@ var (
 			Prague: DefaultPragueBlobConfigBSC,
 			Osaka:  DefaultOsakaBlobConfigBSC,
 		},
+	}
+
+	// ABCoreChainConfig is the chain config for ABCore testnet (chain ID 26888).
+	// The same binary also supports mainnet (chain ID 36888): use a genesis.json
+	// with "chainId": 36888 and appropriate fork blocks for mainnet — no recompilation needed.
+	//
+	// EVM forks: Homestead through London are active from block 0 (matching ABCore v1 production state).
+	// Post-London EVM forks (Shanghai, Cancun, Prague): activated together with the corresponding
+	// BSC forks once the DualConsensus switch to Parlia is complete.
+	// BSC-specific forks: all set to 0 for testnet (fresh chain); tune to actual block heights for mainnet.
+	//
+	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to enable
+	// DualConsensus (Clique → Parlia transition at that block).
+	ABCoreChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(26888),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		// Post-London EVM forks: not yet activated; enable together with BSC fork timestamps
+		// when the Parlia switch is ready.
+		ShanghaiTime: nil,
+		CancunTime:   nil,
+		PragueTime:   nil,
+		// BSC-specific forks: all active from block 0 for testnet.
+		// For mainnet upgrade, set these to the actual fork blocks on the live chain.
+		RamanujanBlock:  big.NewInt(0),
+		NielsBlock:      big.NewInt(0),
+		MirrorSyncBlock: big.NewInt(0),
+		BrunoBlock:      big.NewInt(0),
+		EulerBlock:      big.NewInt(0),
+		GibbsBlock:      big.NewInt(0),
+		NanoBlock:       big.NewInt(0),
+		MoranBlock:      big.NewInt(0),
+		PlanckBlock:     big.NewInt(0),
+		LubanBlock:      big.NewInt(0),
+		PlatoBlock:      big.NewInt(0),
+		HertzBlock:      big.NewInt(0),
+		HertzfixBlock:   big.NewInt(0),
+		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
+		ParliaGenesisBlock: nil,
+		Clique:             &CliqueConfig{Period: 3, Epoch: 200},
+		Parlia:             &ParliaConfig{},
 	}
 
 	// used to test hard fork upgrade, following https://github.com/bnb-chain/bsc-genesis-contract/blob/master/genesis.json
@@ -740,20 +795,25 @@ type ChainConfig struct {
 	// those cases.
 	EnableVerkleAtGenesis bool `json:"enableVerkleAtGenesis,omitempty"`
 
-	RamanujanBlock     *big.Int `json:"ramanujanBlock,omitempty"`     // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock         *big.Int `json:"nielsBlock,omitempty"`         // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock    *big.Int `json:"mirrorSyncBlock,omitempty"`    // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
-	BrunoBlock         *big.Int `json:"brunoBlock,omitempty"`         // brunoBlock switch block (nil = no fork, 0 = already activated)
-	EulerBlock         *big.Int `json:"eulerBlock,omitempty"`         // eulerBlock switch block (nil = no fork, 0 = already activated)
-	GibbsBlock         *big.Int `json:"gibbsBlock,omitempty"`         // gibbsBlock switch block (nil = no fork, 0 = already activated)
-	NanoBlock          *big.Int `json:"nanoBlock,omitempty"`          // nanoBlock switch block (nil = no fork, 0 = already activated)
-	MoranBlock         *big.Int `json:"moranBlock,omitempty"`         // moranBlock switch block (nil = no fork, 0 = already activated)
-	PlanckBlock        *big.Int `json:"planckBlock,omitempty"`        // planckBlock switch block (nil = no fork, 0 = already activated)
-	LubanBlock         *big.Int `json:"lubanBlock,omitempty"`         // lubanBlock switch block (nil = no fork, 0 = already activated)
-	PlatoBlock         *big.Int `json:"platoBlock,omitempty"`         // platoBlock switch block (nil = no fork, 0 = already activated)
-	HertzBlock         *big.Int `json:"hertzBlock,omitempty"`         // hertzBlock switch block (nil = no fork, 0 = already activated)
-	HertzfixBlock      *big.Int `json:"hertzfixBlock,omitempty"`      // hertzfixBlock switch block (nil = no fork, 0 = already activated)
-	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"` // parliaGenesisBlock switch block: inject Parlia system contracts at this height (nil = no fork)
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	BrunoBlock      *big.Int `json:"brunoBlock,omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
+	EulerBlock      *big.Int `json:"eulerBlock,omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
+	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
+	NanoBlock       *big.Int `json:"nanoBlock,omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock      *big.Int `json:"moranBlock,omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
+	PlanckBlock     *big.Int `json:"planckBlock,omitempty"`     // planckBlock switch block (nil = no fork, 0 = already activated)
+	LubanBlock      *big.Int `json:"lubanBlock,omitempty"`      // lubanBlock switch block (nil = no fork, 0 = already activated)
+	PlatoBlock      *big.Int `json:"platoBlock,omitempty"`      // platoBlock switch block (nil = no fork, 0 = already activated)
+	HertzBlock      *big.Int `json:"hertzBlock,omitempty"`      // hertzBlock switch block (nil = no fork, 0 = already activated)
+	HertzfixBlock   *big.Int `json:"hertzfixBlock,omitempty"`   // hertzfixBlock switch block (nil = no fork, 0 = already activated)
+	// ParliaGenesisBlock is the block number at which ABCore transitions from Clique PoA to Parlia PoSA.
+	// At this block: Parlia system contract bytecodes are injected into state, and the consensus
+	// engine switches from Clique to Parlia.
+	// nil = not yet scheduled (pure Clique); set to a specific block number when fork date is known.
+	// Only meaningful for ABCore chains (chain IDs 26888 and 36888).
+	ParliaGenesisBlock *big.Int `json:"parliaGenesisBlock,omitempty"`
 
 	// Various consensus engines
 	Ethash             *EthashConfig       `json:"ethash,omitempty"`
@@ -800,7 +860,11 @@ func (c *ChainConfig) Description() string {
 	}
 	banner += fmt.Sprintf("Chain ID:  %v (%s)\n", c.ChainID, network)
 	switch {
-	case c.IsInBSC():
+	case c.HasCliqueAndParlia() && c.ParliaGenesisBlock != nil:
+		banner += fmt.Sprintf("Consensus: DualConsensus (Clique → Parlia at block %v)\n", c.ParliaGenesisBlock)
+	case c.HasCliqueAndParlia():
+		banner += "Consensus: Clique (proof-of-authority, Parlia transition not yet scheduled)\n"
+	case c.HasParlia():
 		banner += "Consensus: Parlia (proof-of-staked--authority)\n"
 	case c.Ethash != nil:
 		banner += "Consensus: Beacon (proof-of-stake), merged from Ethash (proof-of-work)\n"
@@ -822,7 +886,7 @@ func (c *ChainConfig) String() string {
 		engine = c.Ethash
 	case c.Clique != nil:
 		engine = c.Clique
-	case c.IsInBSC():
+	case c.HasParlia():
 		engine = c.Parlia
 	default:
 		engine = "unknown"
@@ -1029,16 +1093,6 @@ func (c *ChainConfig) IsRamanujan(num *big.Int) bool {
 // IsOnRamanujan returns whether num is equal to the Ramanujan fork block
 func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
 	return configBlockEqual(c.RamanujanBlock, num)
-}
-
-// IsParliaGenesis returns whether num is either equal to the ParliaGenesis fork block or greater.
-func (c *ChainConfig) IsParliaGenesis(num *big.Int) bool {
-	return isBlockForked(c.ParliaGenesisBlock, num)
-}
-
-// IsOnParliaGenesis returns whether num is equal to the ParliaGenesis fork block.
-func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
-	return configBlockEqual(c.ParliaGenesisBlock, num)
 }
 
 // IsNiels returns whether num is either equal to the Niels fork block or greater.
@@ -1346,12 +1400,35 @@ func (c *ChainConfig) IsOnPrague(currentBlockNumber *big.Int, lastBlockTime uint
 	return !c.IsPrague(lastBlockNumber, lastBlockTime) && c.IsPrague(currentBlockNumber, currentBlockTime)
 }
 
-func (c *ChainConfig) IsInBSC() bool {
+func (c *ChainConfig) HasParlia() bool {
 	return c.Parlia != nil
 }
 
-func (c *ChainConfig) IsNotInBSC() bool {
+func (c *ChainConfig) NotHasParlia() bool {
 	return c.Parlia == nil
+}
+
+// HasCliqueAndParlia returns true if this chain has both Clique and Parlia configured —
+// the defining characteristic of an ABCore-style dual-consensus chain.
+// Must be checked before HasParlia() in engine selection to route correctly.
+func (c *ChainConfig) HasCliqueAndParlia() bool {
+	return c.Clique != nil && c.Parlia != nil
+}
+
+// IsParliaActive returns true if Parlia consensus is active at the given block number.
+// For dual-consensus chains (HasCliqueAndParlia), Parlia only becomes active at ParliaGenesisBlock.
+// For pure BSC chains, Parlia is always active when HasParlia() is true.
+func (c *ChainConfig) IsParliaActive(num *big.Int) bool {
+	if c.HasCliqueAndParlia() {
+		return c.ParliaGenesisBlock != nil && isBlockForked(c.ParliaGenesisBlock, num)
+	}
+	return c.HasParlia()
+}
+
+// IsOnParliaGenesis returns whether num is exactly the Parlia activation block —
+// the block at which system contracts are injected and consensus switches.
+func (c *ChainConfig) IsOnParliaGenesis(num *big.Int) bool {
+	return configBlockEqual(c.ParliaGenesisBlock, num)
 }
 
 // IsLorentz returns whether time is either equal to the Lorentz fork time or greater.
@@ -1507,7 +1584,7 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time u
 // to guarantee that forks can be implemented in a different order than on official networks
 func (c *ChainConfig) CheckConfigForkOrder() error {
 	// skip checking for non-Parlia egine
-	if c.IsNotInBSC() {
+	if c.NotHasParlia() {
 		return nil
 	}
 	type fork struct {
@@ -1724,9 +1801,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.HertzfixBlock, newcfg.HertzfixBlock, headNumber) {
 		return newBlockCompatError("hertzfix fork block", c.HertzfixBlock, newcfg.HertzfixBlock)
 	}
-	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
-		return newBlockCompatError("parliaGenesis fork block", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
-	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
 	}
@@ -1792,6 +1866,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
+	}
+	// Check whenever either config has ParliaGenesisBlock set — covers ABCore chains and any
+	// chain that sets the field via OverrideParliaGenesisBlock. isForkBlockIncompatible
+	// already returns false when both are nil, so no false-positive when neither is set.
+	if isForkBlockIncompatible(c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock, headNumber) {
+		return newBlockCompatError("parliaGenesis fork block", c.ParliaGenesisBlock, newcfg.ParliaGenesisBlock)
 	}
 	return nil
 }
@@ -1878,7 +1958,7 @@ func (c *ChainConfig) ActiveSystemContracts(time uint64) map[string]common.Addre
 	if fork >= forks.Osaka {
 		// no new system contracts
 	}
-	if c.IsInBSC() {
+	if c.HasParlia() {
 		if fork >= forks.Prague {
 			active["HISTORY_STORAGE_ADDRESS"] = HistoryStorageAddress
 		}
@@ -2114,20 +2194,20 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsPlato:          c.IsPlato(num),
 		IsHertz:          c.IsHertz(num),
 		IsHertzfix:       c.IsHertzfix(num),
-		IsShanghai:       (isMerge || c.IsInBSC()) && c.IsShanghai(num, timestamp),
+		IsShanghai:       (isMerge || c.HasParlia()) && c.IsShanghai(num, timestamp),
 		IsKepler:         c.IsKepler(num, timestamp),
 		IsFeynman:        c.IsFeynman(num, timestamp),
-		IsCancun:         (isMerge || c.IsInBSC()) && c.IsCancun(num, timestamp),
+		IsCancun:         (isMerge || c.HasParlia()) && c.IsCancun(num, timestamp),
 		IsHaber:          c.IsHaber(num, timestamp),
 		IsBohr:           c.IsBohr(num, timestamp),
 		IsPascal:         c.IsPascal(num, timestamp),
-		IsPrague:         (isMerge || c.IsInBSC()) && c.IsPrague(num, timestamp),
+		IsPrague:         (isMerge || c.HasParlia()) && c.IsPrague(num, timestamp),
 		IsLorentz:        c.IsLorentz(num, timestamp),
 		IsMaxwell:        c.IsMaxwell(num, timestamp),
 		IsFermi:          c.IsFermi(num, timestamp),
-		IsOsaka:          (isMerge || c.IsInBSC()) && c.IsOsaka(num, timestamp),
+		IsOsaka:          (isMerge || c.HasParlia()) && c.IsOsaka(num, timestamp),
 		IsMendel:         c.IsMendel(num, timestamp),
-		IsAmsterdam:      (isMerge || c.IsInBSC()) && c.IsAmsterdam(num, timestamp),
+		IsAmsterdam:      (isMerge || c.HasParlia()) && c.IsAmsterdam(num, timestamp),
 		IsVerkle:         c.IsVerkle(num, timestamp),
 		IsEIP4762:        isVerkle,
 	}
