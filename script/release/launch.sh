@@ -125,6 +125,7 @@ DOCKER_ARGS=(
 if [[ "$MODE" == "validator" ]]; then
   cp "$(realpath "$PASSWORD_FILE")" "$DATADIR/password.txt"
   chmod 600 "$DATADIR/password.txt"
+  docker run --rm -v "${DATADIR}:/data" --user root busybox chown 1000:1000 /data/password.txt
   DOCKER_ARGS+=(
     -e "MINE=true"
     -e "MINER_ADDR=${MINER_ADDR}"

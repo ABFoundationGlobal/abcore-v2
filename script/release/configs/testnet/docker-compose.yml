@@ -5,15 +5,15 @@ services:
     restart: unless-stopped
     environment:
       NETWORK: testnet
-      # 可选：挂载 node.toml 作为高级配置（TxPool、gas 等）
-      # 不设置则使用二进制内置默认值，无需任何配置文件
+      # node.toml 提供 TxPool、gas、RPC 等参数的调优值（见同目录 node.toml）
+      # 如不需要可注释掉本行及下方对应的 volumes 挂载，节点将使用二进制内置默认值
       BSC_CONFIG: /abcore-config/node.toml
       MINE: "${MINE:-false}"
       MINER_ADDR: "${MINER_ADDR:-}"
       NAT: "${NAT:-}"
       # 验证者模式：将 password.txt 放入 $DATADIR，容器内路径为 /data/password.txt
     volumes:
-      # 只读挂载 node.toml（可选高级调优，去掉此行则使用内置默认值）
+      # node.toml 高级调优配置（与上方 BSC_CONFIG 配合使用，可整体注释掉）
       - ./node.toml:/abcore-config/node.toml:ro
       # 数据目录（链数据 + keystore）
       - ${DATADIR:-/data/abcore/testnet}:/data

@@ -33,7 +33,7 @@ On Apple Silicon (M1/M2/M3), the image defaults to `linux/arm64`. To explicitly 
 docker build --platform linux/amd64 -t abcore:local .
 ```
 
-`make docker` is also available as a shorthand (builds and tags as `abcore:local`).
+`make docker` is also available as a shorthand (builds and tags as `abfoundationglobal/abcore-v2:latest`).
 
 ---
 

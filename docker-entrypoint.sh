@@ -65,11 +65,15 @@ elif [ -n "${NAT:-}" ]; then
   NAT_ARGS=(--nat "${NAT}")
 fi
 
+# HTTP vhosts: default to localhost-only to prevent DNS-rebinding attacks.
+# Set HTTP_VHOSTS='*' when the RPC port is fronted by a reverse proxy.
+HTTP_VHOSTS="${HTTP_VHOSTS:-localhost,127.0.0.1}"
+
 exec geth \
   "$NETWORK_FLAG" \
   --datadir /data \
   --port 33333 \
-  --http --http.addr 0.0.0.0 --http.port 8545 --http.vhosts '*' \
+  --http --http.addr 0.0.0.0 --http.port 8545 --http.vhosts "${HTTP_VHOSTS}" \
   --http.api 'debug,txpool,net,web3,eth' \
   --ws --ws.addr 0.0.0.0 --ws.port 8546 \
   --ws.api 'debug,txpool,net,web3,eth' \

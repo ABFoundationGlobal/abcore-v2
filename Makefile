@@ -74,9 +74,9 @@ devtools:
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
-#? help: Build docker image
+#? docker: Build docker image
 docker:
-	docker build --pull -t bnb-chain/bsc:latest -f Dockerfile .
+	docker build --pull -t abfoundationglobal/abcore-v2:latest -f Dockerfile .
 
 #? help: Get more info on make commands.
 help: Makefile
