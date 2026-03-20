@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/lru"
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -1347,3 +1348,73 @@ func TestSignBAL_VerifyBAL_Integration(t *testing.T) {
 		})
 	}
 }
+
+// TestParliaGenesisSnapshotDiskCache verifies that snapshot() loads a
+// previously stored Parlia-genesis snapshot from disk (the loadSnapshot
+// short-circuit added in the IsOnParliaGenesis branch) rather than calling
+// newParliaGenesisSnapshot again.  The engine is created with a nil ethAPI so
+// that any accidental call to getCurrentValidators would panic immediately.
+func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
+	const genesisNum = uint64(10)
+
+	db := rawdb.NewMemoryDatabase()
+
+	chainCfg := *params.ParliaTestChainConfig // copy so we can mutate
+	chainCfg.ParliaGenesisBlock = big.NewInt(int64(genesisNum))
+
+	validators := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x1000000000000000000000000000000000000002"),
+		common.HexToAddress("0x1000000000000000000000000000000000000003"),
+	}
+	genesisHash := common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	// Pre-store a snapshot as if newParliaGenesisSnapshot had already run once.
+	sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+	pre := newSnapshot(chainCfg.Parlia, sigCache, genesisNum, genesisHash, validators, nil, nil)
+	if err := pre.store(db); err != nil {
+		t.Fatalf("pre-store snapshot: %v", err)
+	}
+
+	// Build a minimal Parlia engine with nil ethAPI.  If snapshot() incorrectly
+	// falls through to newParliaGenesisSnapshot the nil dereference will surface.
+	p := &Parlia{
+		chainConfig: &chainCfg,
+		config:      chainCfg.Parlia,
+		db:          db,
+		recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+		signatures:  sigCache,
+	}
+
+	snap, err := p.snapshot(&parliaStubChainReader{}, genesisNum, genesisHash, nil)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.Number != genesisNum {
+		t.Errorf("Number: got %d, want %d", snap.Number, genesisNum)
+	}
+	if len(snap.Validators) != len(validators) {
+		t.Errorf("Validators: got %d, want %d", len(snap.Validators), len(validators))
+	}
+	for _, v := range validators {
+		if _, ok := snap.Validators[v]; !ok {
+			t.Errorf("validator %s missing from snapshot", v)
+		}
+	}
+}
+
+// parliaStubChainReader is a no-op consensus.ChainHeaderReader.
+// snapshot() at ParliaGenesisBlock with a disk-cached snapshot never calls any
+// of these methods, so nil returns are safe.
+type parliaStubChainReader struct{}
+
+func (s *parliaStubChainReader) Config() *params.ChainConfig                      { return nil }
+func (s *parliaStubChainReader) CurrentHeader() *types.Header                     { return nil }
+func (s *parliaStubChainReader) GetHeader(common.Hash, uint64) *types.Header      { return nil }
+func (s *parliaStubChainReader) GetHeaderByNumber(uint64) *types.Header           { return nil }
+func (s *parliaStubChainReader) GetHeaderByHash(common.Hash) *types.Header        { return nil }
+func (s *parliaStubChainReader) GenesisHeader() *types.Header                     { return nil }
+func (s *parliaStubChainReader) GetTd(common.Hash, uint64) *big.Int               { return nil }
+func (s *parliaStubChainReader) GetHighestVerifiedHeader() *types.Header          { return nil }
+func (s *parliaStubChainReader) GetVerifiedBlockByHash(common.Hash) *types.Header { return nil }
+func (s *parliaStubChainReader) ChasingHead() *types.Header                       { return nil }

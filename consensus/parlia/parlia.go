@@ -764,8 +764,8 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 // newParliaGenesisSnapshot bootstraps the initial Parlia snapshot at ParliaGenesisBlock.
 // Used in the N+1 migration scheme: system contracts are deployed at atBlockBegin of block N,
 // so validators can be read from BSCValidatorSet at that block's state.
-func (p *Parlia) newParliaGenesisSnapshot(chain consensus.ChainHeaderReader, number uint64) (*Snapshot, error) {
-	header := chain.GetHeaderByNumber(number)
+func (p *Parlia) newParliaGenesisSnapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash) (*Snapshot, error) {
+	header := chain.GetHeader(hash, number)
 	if header == nil {
 		return nil, fmt.Errorf("parlia genesis snapshot: header %d not found", number)
 	}
@@ -785,6 +785,32 @@ func (p *Parlia) newParliaGenesisSnapshot(chain consensus.ChainHeaderReader, num
 		}
 	}
 	snap := newSnapshot(p.config, p.signatures, number, blockHash, validators, voteAddrs, p.ethAPI)
+
+	// Set hardfork-aware parameters, mirroring the checkpoint bootstrap logic in snapshot().
+	// System contracts are already deployed at atBlockBegin of ParliaGenesisBlock, so we can
+	// read directly from header state rather than inferring from extraData.
+	if p.chainConfig.IsFermi(header.Number, header.Time) {
+		snap.BlockInterval = fermiBlockInterval
+	} else if p.chainConfig.IsMaxwell(header.Number, header.Time) {
+		snap.BlockInterval = maxwellBlockInterval
+	} else if p.chainConfig.IsLorentz(header.Number, header.Time) {
+		snap.BlockInterval = lorentzBlockInterval
+	}
+	if p.chainConfig.IsMaxwell(header.Number, header.Time) {
+		snap.EpochLength = maxwellEpochLength
+	} else if p.chainConfig.IsLorentz(header.Number, header.Time) {
+		snap.EpochLength = lorentzEpochLength
+	}
+	if p.chainConfig.IsBohr(header.Number, header.Time) {
+		turnLength, err := p.getTurnLengthFromContract(header)
+		if err != nil {
+			return nil, fmt.Errorf("parlia genesis snapshot: failed to get turn length at block %d: %w", number, err)
+		}
+		if turnLength != nil {
+			snap.TurnLength = uint8(turnLength.Int64())
+		}
+	}
+
 	if err := snap.store(p.db); err != nil {
 		return nil, err
 	}
@@ -833,8 +859,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if p.chainConfig.IsOnParliaGenesis(new(big.Int).SetUint64(number)) {
 			// N+1 scheme: system contracts were deployed at atBlockBegin of ParliaGenesisBlock,
 			// so read the initial validator set from BSCValidatorSet instead of extraData.
+			// Try disk first: newParliaGenesisSnapshot stores unconditionally, but the
+			// checkpointInterval gate above won't load it if N%1024 != 0.
+			if s, err := loadSnapshot(p.config, p.signatures, p.db, hash, p.ethAPI); err == nil {
+				log.Trace("Loaded Parlia genesis snapshot from disk", "number", number, "hash", hash)
+				snap = s
+				break
+			}
 			var err error
-			if snap, err = p.newParliaGenesisSnapshot(chain, number); err != nil {
+			if snap, err = p.newParliaGenesisSnapshot(chain, number, hash); err != nil {
 				return nil, err
 			}
 			break
