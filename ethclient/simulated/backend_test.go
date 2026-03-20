@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -125,6 +126,34 @@ func TestNewBackend(t *testing.T) {
 	}
 	if num != 1 {
 		t.Fatalf("expected 1 got %v", num)
+	}
+}
+
+func TestCommitSyncsFilterMaps(t *testing.T) {
+	t.Parallel()
+
+	sim := NewBackend(types.GenesisAlloc{})
+	defer sim.Close()
+
+	client := sim.Client()
+	ctx := context.Background()
+	address := common.HexToAddress("0x0000000000000000000000000000000000001234")
+	topic := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000005678")
+
+	for i := 0; i < 8; i++ {
+		head := sim.Commit()
+		logs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(i + 1)),
+			ToBlock:   big.NewInt(int64(i + 1)),
+			Addresses: []common.Address{address},
+			Topics:    [][]common.Hash{{topic}},
+		})
+		if err != nil {
+			t.Fatalf("commit %d (%s): filter logs failed: %v", i+1, head, err)
+		}
+		if len(logs) != 0 {
+			t.Fatalf("commit %d (%s): expected no logs, got %d", i+1, head, len(logs))
+		}
 	}
 }
 

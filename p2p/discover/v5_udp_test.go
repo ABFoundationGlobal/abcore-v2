@@ -742,9 +742,11 @@ func TestUDPv5_lookup(t *testing.T) {
 
 	// Start the lookup.
 	resultC := make(chan []*enode.Node, 1)
+	closeC := make(chan struct{})
 	go func() {
 		resultC <- test.udp.Lookup(lookupTestnet.target.ID())
 		test.close()
+		close(closeC)
 	}()
 
 	// Answer lookup packets.
@@ -772,6 +774,8 @@ func TestUDPv5_lookup(t *testing.T) {
 	// Verify result nodes.
 	results := <-resultC
 	checkLookupResults(t, lookupTestnet, results)
+	// Wait for test.close() to complete in the goroutine before the test ends.
+	<-closeC
 }
 
 // This test checks the local node can be utilised to set key-values.
