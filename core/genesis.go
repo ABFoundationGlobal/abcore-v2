@@ -706,6 +706,36 @@ func DefaultChapelGenesisBlock() *Genesis {
 	}
 }
 
+// DefaultABCoreGenesisBlock returns the ABCore main network genesis block (chain ID 36888).
+func DefaultABCoreGenesisBlock() *Genesis {
+	balance, _ := new(big.Int).SetString("100000000000000000000000000000", 10)
+	return &Genesis{
+		Config:     params.ABCoreMainChainConfig,
+		Timestamp:  0x67fda368,
+		Difficulty: big.NewInt(1),
+		GasLimit:   63000000,
+		ExtraData:  hexutil.MustDecode("0x0000000000000000000000000000000000000000000000000000000000000000E9B95948d28EF808a9184d5fC98346EF3e56839c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Alloc: GenesisAlloc{
+			common.HexToAddress("0xda8B88027Ac27532E1525DD67974c2377b450A08"): {Balance: balance},
+		},
+	}
+}
+
+// DefaultABCoreTestGenesisBlock returns the ABCore test network genesis block (chain ID 26888).
+func DefaultABCoreTestGenesisBlock() *Genesis {
+	balance, _ := new(big.Int).SetString("100000000000000000000000000000", 10)
+	return &Genesis{
+		Config:     params.ABCoreTestChainConfig,
+		Timestamp:  0x67cab05a,
+		Difficulty: big.NewInt(1),
+		GasLimit:   21000000,
+		ExtraData:  hexutil.MustDecode("0x0000000000000000000000000000000000000000000000000000000000000000009F1DdAF7f528e60A7c560C51Ae997cD4709cC30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Alloc: GenesisAlloc{
+			common.HexToAddress("0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3"): {Balance: balance},
+		},
+	}
+}
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(gasLimit uint64, faucet *common.Address) *Genesis {
 	// Override the default period to the user requested one
