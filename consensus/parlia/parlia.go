@@ -761,6 +761,37 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	return p.verifySeal(chain, header, parents)
 }
 
+// newParliaGenesisSnapshot bootstraps the initial Parlia snapshot at ParliaGenesisBlock.
+// Used in the N+1 migration scheme: system contracts are deployed at atBlockBegin of block N,
+// so validators can be read from BSCValidatorSet at that block's state.
+func (p *Parlia) newParliaGenesisSnapshot(chain consensus.ChainHeaderReader, number uint64) (*Snapshot, error) {
+	header := chain.GetHeaderByNumber(number)
+	if header == nil {
+		return nil, fmt.Errorf("parlia genesis snapshot: header %d not found", number)
+	}
+	blockHash := header.Hash()
+	validators, voteAddressMap, err := p.getCurrentValidators(blockHash, new(big.Int).SetUint64(number))
+	if err != nil {
+		return nil, fmt.Errorf("parlia genesis snapshot: failed to get validators at block %d: %w", number, err)
+	}
+	sort.Sort(validatorsAscending(validators))
+	var voteAddrs []types.BLSPublicKey
+	if voteAddressMap != nil {
+		voteAddrs = make([]types.BLSPublicKey, len(validators))
+		for i, v := range validators {
+			if key := voteAddressMap[v]; key != nil {
+				voteAddrs[i] = *key
+			}
+		}
+	}
+	snap := newSnapshot(p.config, p.signatures, number, blockHash, validators, voteAddrs, p.ethAPI)
+	if err := snap.store(p.db); err != nil {
+		return nil, err
+	}
+	log.Info("Stored Parlia genesis snapshot to disk", "number", number, "hash", blockHash, "validators", len(validators))
+	return snap, nil
+}
+
 // snapshot retrieves the authorization snapshot at a given point in time.
 // !!! be careful
 // the block with `number` and `hash` is just the last element of `parents`,
@@ -799,6 +830,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// 		maxwellEpochLength = 1000 && turnLength = 16
 		// So just select block number like 1200, 2200, 3200, we can always get the right validators from `number - 200`
 		offset := uint64(200)
+		if p.chainConfig.IsOnParliaGenesis(new(big.Int).SetUint64(number)) {
+			// N+1 scheme: system contracts were deployed at atBlockBegin of ParliaGenesisBlock,
+			// so read the initial validator set from BSCValidatorSet instead of extraData.
+			var err error
+			if snap, err = p.newParliaGenesisSnapshot(chain, number); err != nil {
+				return nil, err
+			}
+			break
+		}
 		if number == 0 || (number%maxwellEpochLength == offset && (len(headers) > int(params.FullImmutabilityThreshold))) {
 			var (
 				checkpoint    *types.Header
