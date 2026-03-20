@@ -863,7 +863,20 @@ func (s *Ethereum) WaitFilterMapsIdle() {
 	if s.filterMaps == nil {
 		return
 	}
-	s.filterMaps.WaitIdle()
+	for {
+		var headNum uint64
+		if head := s.blockchain.CurrentBlock(); head != nil {
+			headNum = head.Number.Uint64()
+		}
+		s.filterMaps.WaitIdle()
+		var newHeadNum uint64
+		if newHead := s.blockchain.CurrentBlock(); newHead != nil {
+			newHeadNum = newHead.Number.Uint64()
+		}
+		if headNum == newHeadNum {
+			return
+		}
+	}
 }
 func (s *Ethereum) SyncMode() downloader.SyncMode {
 	mode, _ := s.handler.chainSync.modeAndLocalHead()
