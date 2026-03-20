@@ -34,10 +34,14 @@ var (
 	ChapelGenesisHash = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
 
-	// ABCoreGenesisHash is an unset placeholder. ABCore genesis hashes are not registered
-	// in the built-in genesis-hash→config map; chain config is loaded from genesis.json
-	// via `geth init` and is not looked up by hash at startup.
-	ABCoreGenesisHash = common.Hash{}
+	// ABCoreMainGenesisHash is the genesis block hash for ABCore mainnet (chain ID 36888).
+	// Computed from script/release/configs/mainnet/genesis.json.
+	ABCoreMainGenesisHash = common.HexToHash("0xb247d77242ca8e314af087f1b8a3e3b54d45fc76c02458d53fea171059419c0f")
+
+	// ABCoreTestGenesisHash is the genesis block hash for ABCore testnet (chain ID 26888).
+	// Computed from script/release/configs/testnet/genesis.json; verified against a
+	// running testnet node via eth_getBlockByNumber("0x0").
+	ABCoreTestGenesisHash = common.HexToHash("0x739b6207114baca3ef3cef5df3a43c75498b3865e72934dde37defe002217c1b")
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -316,18 +320,55 @@ var (
 		},
 	}
 
-	// ABCoreChainConfig is the chain config for ABCore testnet (chain ID 26888).
-	// The same binary also supports mainnet (chain ID 36888): use a genesis.json
-	// with "chainId": 36888 and appropriate fork blocks for mainnet — no recompilation needed.
+	// ABCoreMainChainConfig is the chain parameters for ABCore mainnet (chain ID 36888).
 	//
-	// EVM forks: Homestead through London are active from block 0 (matching ABCore v1 production state).
-	// Post-London EVM forks (Shanghai, Cancun, Prague): activated together with the corresponding
-	// BSC forks once the DualConsensus switch to Parlia is complete.
-	// BSC-specific forks: all set to 0 for testnet (fresh chain); tune to actual block heights for mainnet.
+	// Fork activation is derived from the on-chain genesis.json (script/release/configs/mainnet/genesis.json).
+	// Only forks explicitly present in that genesis config are set to block 0; all others are nil
+	// (not yet scheduled). This ensures the genesis block hash matches the deployed chain.
 	//
-	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to enable
-	// DualConsensus (Clique → Parlia transition at that block).
-	ABCoreChainConfig = &ChainConfig{
+	// ParliaGenesisBlock = nil means the chain runs pure Clique; set to a specific block number to
+	// enable DualConsensus (Clique → Parlia transition at that block).
+	ABCoreMainChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(36888),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		// Forks below are not present in genesis.json and must be nil until explicitly scheduled.
+		LondonBlock:     nil,
+		ShanghaiTime:    nil,
+		CancunTime:      nil,
+		PragueTime:      nil,
+		RamanujanBlock:  nil,
+		NielsBlock:      nil,
+		MirrorSyncBlock: nil,
+		BrunoBlock:      nil,
+		EulerBlock:      nil,
+		GibbsBlock:      nil,
+		NanoBlock:       nil,
+		MoranBlock:      nil,
+		PlanckBlock:     nil,
+		LubanBlock:      nil,
+		PlatoBlock:      nil,
+		HertzBlock:      nil,
+		HertzfixBlock:   nil,
+		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
+		ParliaGenesisBlock: nil,
+		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
+		Parlia:             &ParliaConfig{},
+	}
+
+	// ABCoreTestChainConfig is the chain parameters for ABCore testnet (chain ID 26888).
+	//
+	// Derived from script/release/configs/testnet/genesis.json. Mirrors ABCoreMainChainConfig
+	// with two differences: chain ID 26888 and Clique period 1 (1-second blocks).
+	ABCoreTestChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(26888),
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
@@ -339,30 +380,26 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		// Post-London EVM forks: not yet activated; enable together with BSC fork timestamps
-		// when the Parlia switch is ready.
-		ShanghaiTime: nil,
-		CancunTime:   nil,
-		PragueTime:   nil,
-		// BSC-specific forks: all active from block 0 for testnet.
-		// For mainnet upgrade, set these to the actual fork blocks on the live chain.
-		RamanujanBlock:  big.NewInt(0),
-		NielsBlock:      big.NewInt(0),
-		MirrorSyncBlock: big.NewInt(0),
-		BrunoBlock:      big.NewInt(0),
-		EulerBlock:      big.NewInt(0),
-		GibbsBlock:      big.NewInt(0),
-		NanoBlock:       big.NewInt(0),
-		MoranBlock:      big.NewInt(0),
-		PlanckBlock:     big.NewInt(0),
-		LubanBlock:      big.NewInt(0),
-		PlatoBlock:      big.NewInt(0),
-		HertzBlock:      big.NewInt(0),
-		HertzfixBlock:   big.NewInt(0),
-		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
+		// Forks below are not present in genesis.json and must be nil until explicitly scheduled.
+		LondonBlock:        nil,
+		ShanghaiTime:       nil,
+		CancunTime:         nil,
+		PragueTime:         nil,
+		RamanujanBlock:     nil,
+		NielsBlock:         nil,
+		MirrorSyncBlock:    nil,
+		BrunoBlock:         nil,
+		EulerBlock:         nil,
+		GibbsBlock:         nil,
+		NanoBlock:          nil,
+		MoranBlock:         nil,
+		PlanckBlock:        nil,
+		LubanBlock:         nil,
+		PlatoBlock:         nil,
+		HertzBlock:         nil,
+		HertzfixBlock:      nil,
 		ParliaGenesisBlock: nil,
-		Clique:             &CliqueConfig{Period: 3, Epoch: 200},
+		Clique:             &CliqueConfig{Period: 1, Epoch: 30000},
 		Parlia:             &ParliaConfig{},
 	}
 
@@ -650,6 +687,10 @@ func GetBuiltInChainConfig(ghash common.Hash) *ChainConfig {
 		return ChapelChainConfig
 	case RialtoGenesisHash:
 		return RialtoChainConfig
+	case ABCoreMainGenesisHash:
+		return ABCoreMainChainConfig
+	case ABCoreTestGenesisHash:
+		return ABCoreTestChainConfig
 	default:
 		return nil
 	}

@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -137,6 +138,27 @@ func TestConfigRules(t *testing.T) {
 	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsShanghai {
 		t.Errorf("expected %v to be shanghai", stamp)
 	}
+}
+
+func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
+	// ABCore mainnet: genesis hash must resolve to the mainnet config.
+	mainCfg := GetBuiltInChainConfig(ABCoreMainGenesisHash)
+	require.NotNil(t, mainCfg, "ABCoreMainGenesisHash should resolve to a built-in config")
+	require.Equal(t, int64(36888), mainCfg.ChainID.Int64(), "mainnet chain ID")
+	require.NotNil(t, mainCfg.Clique, "mainnet Clique config must be set")
+	require.Equal(t, uint64(3), mainCfg.Clique.Period, "mainnet Clique period")
+	require.Equal(t, uint64(30000), mainCfg.Clique.Epoch, "mainnet Clique epoch")
+
+	// ABCore testnet: genesis hash must resolve to the testnet config.
+	testCfg := GetBuiltInChainConfig(ABCoreTestGenesisHash)
+	require.NotNil(t, testCfg, "ABCoreTestGenesisHash should resolve to a built-in config")
+	require.Equal(t, int64(26888), testCfg.ChainID.Int64(), "testnet chain ID")
+	require.NotNil(t, testCfg.Clique, "testnet Clique config must be set")
+	require.Equal(t, uint64(1), testCfg.Clique.Period, "testnet Clique period")
+	require.Equal(t, uint64(30000), testCfg.Clique.Epoch, "testnet Clique epoch")
+
+	// An unknown genesis hash must return nil.
+	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
 }
 
 func TestTimestampCompatError(t *testing.T) {

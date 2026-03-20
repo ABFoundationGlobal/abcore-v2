@@ -108,11 +108,11 @@ func config() *params.ChainConfig {
 // 	}
 // }
 
-// abcoreConfig returns a ChainConfig for an ABCore chain (chain ID 26888).
+// abcoreConfig returns a ChainConfig for an ABCore testnet chain (chain ID 26888).
 // If parliaGenesisBlock is nil the config represents Phase 1 (pure Clique, no fork scheduled).
 // If parliaGenesisBlock is set the config represents Phase 2 (DualConsensus).
 func abcoreConfig(parliaGenesisBlock *big.Int) *params.ChainConfig {
-	cfg := copyConfig(params.ABCoreChainConfig)
+	cfg := copyConfig(params.ABCoreTestChainConfig)
 	cfg.LondonBlock = big.NewInt(0)
 	cfg.ParliaGenesisBlock = parliaGenesisBlock
 	return cfg
