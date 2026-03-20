@@ -659,14 +659,14 @@ func (c *dgramPipe) receive() (dgram, error) {
 	for len(c.queue) == 0 && !c.closed && !timedOut {
 		c.cond.Wait()
 	}
+	if len(c.queue) > 0 {
+		p := c.queue[0]
+		copy(c.queue, c.queue[1:])
+		c.queue = c.queue[:len(c.queue)-1]
+		return p, nil
+	}
 	if c.closed {
 		return dgram{}, errClosed
 	}
-	if timedOut {
-		return dgram{}, errTimeout
-	}
-	p := c.queue[0]
-	copy(c.queue, c.queue[1:])
-	c.queue = c.queue[:len(c.queue)-1]
-	return p, nil
+	return dgram{}, errTimeout
 }
