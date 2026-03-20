@@ -55,7 +55,8 @@ MaxPrice = 5000000000000000
 IgnorePrice = 50000000000000
 
 [Node]
-DataDir = "/data/nodedata"
+DataDir = "/data"
+NoUSB = true
 IPCPath = "geth.ipc"
 HTTPHost = "0.0.0.0"
 HTTPPort = 8545
@@ -75,7 +76,12 @@ BatchResponseMaxSize = 25000000
 MaxPeers = 50
 NoDiscovery = false
 DiscoveryV4 = true
-BootstrapNodes = ["enode://6a1fab59fe0fb617f244f7b3a811d9f6ae3f9f0c45cde4afd27c1a76e96b47fa8755e701ede323bd9c370a763194d2adfe684c433a50c8d20d60c64c70e26cd3@52.68.5.208:33333"]
+BootstrapNodes = [
+  "enode://b132ddbaa3b299005c8de082696de1082fcdfcf5911050b7e2a0e135121b35305cf575b72d075273a758040bf7e0dee557b67601e4a45bd13ef54437963611d4@13.112.97.231:33333",
+  "enode://92dba4d8a767fd64d5f8030e8573ddfe3e8791197596734f91156ffcfe3ed0a7be8e76deb8b28ad76eb2f9d386e6778fdd1afd718f0701d4fbfbb32acb1abfd2@13.113.113.254:33333",
+  "enode://43bb27f6b4551d589f4a1416bd765e34057c36ffb5a49a08ec81f9db5f4a2c06ed3b62ce0668e3efb93ad1ff24c1bdfeddb740c774cd7719de407d896f5c9150@52.193.88.188:33333",
+  "enode://50cf08d208e9f751b3e6685aee93d7f42c755c282aa18516f171a7ac63906a2c4e5ca439d094fd42a3cdf66b88ed6cc4984639f60ac9c57ecfd7aabee935769e@35.79.254.247:33333"
+]
 StaticNodes = []
 TrustedNodes = []
 ListenAddr = ":33333"

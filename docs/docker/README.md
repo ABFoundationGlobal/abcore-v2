@@ -33,11 +33,13 @@ On Apple Silicon (M1/M2/M3), the image defaults to `linux/arm64`. To explicitly 
 docker build --platform linux/amd64 -t abcore:local .
 ```
 
-`make docker` is also available as a shorthand (builds and tags as `bnb-chain/bsc:latest`).
+`make docker` is also available as a shorthand (builds and tags as `abcore:local`).
 
 ---
 
 ## Scenario 1 — Single Validator Node
+
+> **For ABCore testnet / mainnet:** no config files are needed. Set `-e NETWORK=testnet` or `-e NETWORK=mainnet` and the binary uses the built-in genesis and bootstrap nodes automatically. The directory layout and `config.toml` below apply to **custom / private chains** only.
 
 ### Directory layout
 
@@ -143,8 +145,10 @@ docker run -d \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `NETWORK` | `testnet` | `testnet` or `mainnet` — selects the built-in genesis and bootstrap nodes |
 | `MINE` | `false` | Set `true` to enable block production |
 | `MINER_ADDR` | — | Validator address to unlock (required when `MINE=true`) |
+| `PASSWORD_FILE` | `/data/password.txt` | Path to keystore password file inside the container |
 | `NAT` | — | NAT override. `auto` = use container IP (set automatically by the devnet compose). Accepts any value valid for geth `--nat` (e.g. `extip:1.2.3.4`) |
 
 Additional geth flags can be appended after the image name and are passed through to `geth` verbatim:
@@ -269,8 +273,8 @@ docker logs abcore-v1
 
 Common causes:
 - `MINE=true` but `MINER_ADDR` not set → entrypoint prints an explicit error and exits.
-- `config/genesis.json` missing → entrypoint fails on `geth init`.
 - Wrong keystore address or password → geth reports `could not unlock account`.
+- `NETWORK` set to an unknown value → entrypoint prints an explicit error and exits.
 
 **Validators not peering (multi-validator)**
 

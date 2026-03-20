@@ -1,0 +1,36 @@
+services:
+  node:
+    image: abfoundationglobal/abcore-v2:${TAG}
+    container_name: abcore-mainnet
+    restart: unless-stopped
+    environment:
+      NETWORK: mainnet
+      BSC_CONFIG: /abcore-config/node.toml
+      MINE: "${MINE:-false}"
+      MINER_ADDR: "${MINER_ADDR:-}"
+      NAT: "${NAT:-}"
+    volumes:
+      - ./node.toml:/abcore-config/node.toml:ro
+      - ${DATADIR:-/data/abcore/mainnet}:/data
+    ports:
+      - "127.0.0.1:8545:8545"
+      - "127.0.0.1:8546:8546"
+      - "0.0.0.0:33333:33333"
+      - "0.0.0.0:33333:33333/udp"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          wget -qO-
+          --post-data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
+          --header 'Content-Type: application/json'
+          http://localhost:8545 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "5"

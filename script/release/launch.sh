@@ -96,40 +96,10 @@ if [[ "$MODE" == "validator" ]]; then
   fi
 fi
 
-CONFIG_DIR="$SCRIPT_DIR/configs/$NETWORK"
-if [[ ! -d "$CONFIG_DIR" ]]; then
-  echo "ERROR: config directory not found: $CONFIG_DIR" >&2
-  exit 1
-fi
-
-NODE_CONFIG="$CONFIG_DIR/node.toml"
-GENESIS_CONFIG="$CONFIG_DIR/genesis.json"
-if [[ ! -f "$NODE_CONFIG" ]]; then
-  echo "ERROR: node config not found: $NODE_CONFIG" >&2
-  exit 1
-fi
-if [[ ! -f "$GENESIS_CONFIG" ]]; then
-  echo "ERROR: genesis config not found: $GENESIS_CONFIG" >&2
-  exit 1
-fi
-
 mkdir -p "$DATADIR"
 
-# Ensure nodedata is owned by the container user (uid 1000) so geth can write to it.
-# Uses a root-privileged one-shot container so no host sudo is needed.
-NODEDATA_DIR="$DATADIR/nodedata"
-if [[ ! -d "$NODEDATA_DIR" ]]; then
-  mkdir -p "$NODEDATA_DIR"
-  docker run --rm -v "${NODEDATA_DIR}:/nodedata" --user root busybox chown 1000:1000 /nodedata
-fi
-
-# Stage configs into a real host directory and mount that directory into the
-# container. This avoids binding individual files into /bsc/config when the
-# image does not already contain that parent directory.
-HOST_CONFIG_DIR="$DATADIR/.docker-config"
-mkdir -p "$HOST_CONFIG_DIR"
-cp "$NODE_CONFIG" "$HOST_CONFIG_DIR/config.toml"
-cp "$GENESIS_CONFIG" "$HOST_CONFIG_DIR/genesis.json"
+# Ensure data directory is owned by the container user (uid 1000).
+docker run --rm -v "${DATADIR}:/data" --user root busybox chown 1000:1000 /data
 
 CONTAINER_NAME="abcore-${NETWORK}-${MODE}"
 
@@ -143,15 +113,18 @@ fi
 DOCKER_ARGS=(
   run -d
   --name "$CONTAINER_NAME"
+  --restart unless-stopped
   -v "${DATADIR}:/data"
+  -e "NETWORK=${NETWORK}"
   -p "${RPC_BIND}:8545:8545"
   -p "${RPC_BIND}:8546:8546"
-  -p "33333:33333/tcp"
-  -p "33333:33333/udp"
+  -p "0.0.0.0:33333:33333/tcp"
+  -p "0.0.0.0:33333:33333/udp"
 )
 
 if [[ "$MODE" == "validator" ]]; then
-  cp "$(realpath "$PASSWORD_FILE")" "$HOST_CONFIG_DIR/password.txt"
+  cp "$(realpath "$PASSWORD_FILE")" "$DATADIR/password.txt"
+  chmod 600 "$DATADIR/password.txt"
   DOCKER_ARGS+=(
     -e "MINE=true"
     -e "MINER_ADDR=${MINER_ADDR}"

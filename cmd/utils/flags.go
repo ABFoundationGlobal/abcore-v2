@@ -182,6 +182,16 @@ var (
 		Usage:    "Chapel network: pre-configured Proof-of-Stake-Authority BSC test network",
 		Category: flags.EthCategory,
 	}
+	ABCoreFlag = &cli.BoolFlag{
+		Name:     "abcore",
+		Usage:    "ABCore main network (chain ID 36888)",
+		Category: flags.EthCategory,
+	}
+	ABCoreTestnetFlag = &cli.BoolFlag{
+		Name:     "abcore.testnet",
+		Usage:    "ABCore test network: pre-configured Clique PoA test network (chain ID 26888)",
+		Category: flags.EthCategory,
+	}
 	EnableBALFlag = &cli.BoolFlag{
 		Name:     "enablebal",
 		Usage:    "Enable block access list feature, validator will generate BAL for each block",
@@ -1389,9 +1399,10 @@ var (
 	// TestnetFlags is the flag group of all built-in supported testnets.
 	TestnetFlags = []cli.Flag{
 		ChapelFlag,
+		ABCoreTestnetFlag,
 	}
 	// NetworkFlags is the flag group of all built-in supported networks.
-	NetworkFlags = append([]cli.Flag{BSCMainnetFlag}, TestnetFlags...)
+	NetworkFlags = append([]cli.Flag{BSCMainnetFlag, ABCoreFlag}, TestnetFlags...)
 
 	// DatabaseFlags is the flag group of all database flags.
 	DatabaseFlags = []cli.Flag{
@@ -1465,12 +1476,15 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 // 4. default to mainnet nodes
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
-	if ctx.IsSet(BootnodesFlag.Name) {
+	switch {
+	case ctx.IsSet(BootnodesFlag.Name):
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
-	} else {
-		if cfg.BootstrapNodes != nil {
-			return // Already set by config file, don't apply defaults.
-		}
+	case cfg.BootstrapNodes != nil:
+		return // Already set by config file, don't apply defaults.
+	case ctx.Bool(ABCoreFlag.Name):
+		urls = params.ABCoreMainnetBootnodes
+	case ctx.Bool(ABCoreTestnetFlag.Name):
+		urls = params.ABCoreTestnetBootnodes
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)
 }
@@ -2078,7 +2092,7 @@ func setRequiredBlocks(ctx *cli.Context, cfg *ethconfig.Config) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags, don't allow network id override on preset networks
-	flags.CheckExclusive(ctx, BSCMainnetFlag, DeveloperFlag, NetworkIdFlag, OverrideGenesisFlag)
+	flags.CheckExclusive(ctx, BSCMainnetFlag, ABCoreFlag, ABCoreTestnetFlag, DeveloperFlag, NetworkIdFlag, OverrideGenesisFlag)
 	flags.CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 
 	// Set configurations from CLI flags
@@ -2430,6 +2444,16 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+	case ctx.Bool(ABCoreFlag.Name):
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 36888
+		}
+		cfg.Genesis = core.DefaultABCoreGenesisBlock()
+	case ctx.Bool(ABCoreTestnetFlag.Name) || cfg.NetworkId == 26888:
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 26888
+		}
+		cfg.Genesis = core.DefaultABCoreTestGenesisBlock()
 	case ctx.String(OverrideGenesisFlag.Name) != "":
 		f, err := os.Open(ctx.String(OverrideGenesisFlag.Name))
 		if err != nil {
@@ -2863,6 +2887,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultBSCGenesisBlock()
 	case ctx.Bool(ChapelFlag.Name):
 		genesis = core.DefaultChapelGenesisBlock()
+	case ctx.Bool(ABCoreFlag.Name):
+		genesis = core.DefaultABCoreGenesisBlock()
+	case ctx.Bool(ABCoreTestnetFlag.Name):
+		genesis = core.DefaultABCoreTestGenesisBlock()
 	case ctx.Bool(DeveloperFlag.Name):
 		Fatalf("Developer chains are ephemeral")
 	}

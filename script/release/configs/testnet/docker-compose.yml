@@ -1,0 +1,41 @@
+services:
+  node:
+    image: abfoundationglobal/abcore-v2:${TAG}
+    container_name: abcore-testnet
+    restart: unless-stopped
+    environment:
+      NETWORK: testnet
+      # 可选：挂载 node.toml 作为高级配置（TxPool、gas 等）
+      # 不设置则使用二进制内置默认值，无需任何配置文件
+      BSC_CONFIG: /abcore-config/node.toml
+      MINE: "${MINE:-false}"
+      MINER_ADDR: "${MINER_ADDR:-}"
+      NAT: "${NAT:-}"
+      # 验证者模式：将 password.txt 放入 $DATADIR，容器内路径为 /data/password.txt
+    volumes:
+      # 只读挂载 node.toml（可选高级调优，去掉此行则使用内置默认值）
+      - ./node.toml:/abcore-config/node.toml:ro
+      # 数据目录（链数据 + keystore）
+      - ${DATADIR:-/data/abcore/testnet}:/data
+    ports:
+      - "127.0.0.1:8545:8545"
+      - "127.0.0.1:8546:8546"
+      - "0.0.0.0:33333:33333"
+      - "0.0.0.0:33333:33333/udp"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          wget -qO-
+          --post-data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
+          --header 'Content-Type: application/json'
+          http://localhost:8545 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "5"
