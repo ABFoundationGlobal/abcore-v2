@@ -9,7 +9,8 @@ set -euo pipefail
 #
 # Scn2: Uses a custom genesis with the same config as ABCoreTestChainConfig
 #       but fresh validator accounts in extraData. Both v1 and v2 are init'd
-#       from this genesis (v2 uses --networkid 26888, not --abcore.testnet).
+#       from this genesis via --override.genesis; do NOT set --networkid 26888
+#       for v2 here, or ABCore will select DefaultABCoreTestGenesisBlock().
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh

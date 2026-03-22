@@ -8,9 +8,10 @@ set -euo pipefail
 #   set high so the network stays in Clique / pre-merge mode)
 #
 #   v1 node — initialized from custom genesis, no mining (sync-only)
-#   v2 node — initialized from custom genesis, --mine, validator key unlocked
-#              Started with --networkid 26888 (NOT --abcore.testnet, because the
-#              custom genesis has a different hash from the production testnet).
+#   v2 node — initialized from custom genesis via --override.genesis, --mine,
+#              validator key unlocked. Intentionally does NOT pass --networkid 26888
+#              to avoid the built-in testnet genesis and ensure the custom genesis
+#              is used.
 #
 # What this exercises:
 #   HasCliqueAndParlia() returns true (both Clique and Parlia configs present).
