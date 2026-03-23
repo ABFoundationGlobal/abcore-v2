@@ -21,7 +21,7 @@ services:
       - --http
       - --http.addr=0.0.0.0
       - --http.port=8545
-      - --http.vhosts=*
+      - --http.vhosts=localhost
       - --http.api=debug,txpool,net,web3,eth
       - --ws
       - --ws.addr=0.0.0.0

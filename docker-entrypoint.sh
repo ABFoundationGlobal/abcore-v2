@@ -5,8 +5,9 @@ set -e
 # Supported values: testnet, mainnet
 #
 # Bootstrap nodes, genesis, and chain config are baked into the binary.
-# All other node parameters (RPC, sync mode, ports, etc.) are configured
-# via node.toml. See script/release/configs/{testnet,mainnet}/node.toml.
+# Additional node parameters (RPC, sync mode, ports, etc.) are passed as
+# CLI arguments to this entrypoint via "$@". An optional node.toml is used
+# only if BSC_CONFIG is set; see script/release/configs/{testnet,mainnet}/node.toml.
 
 NETWORK="${NETWORK:-testnet}"
 case "$NETWORK" in
@@ -47,7 +48,12 @@ if [ "${MINE}" = "true" ]; then
       echo "ERROR: MINE=true but no keystore file found in /data/keystore/" >&2
       exit 1
     fi
-    MINER_ADDR=0x$(echo "$KEYSTORE_FILE" | sed 's/.*--//')
+    ADDR_HEX=$(echo "$KEYSTORE_FILE" | sed 's/.*--//')
+    if [ -z "$ADDR_HEX" ]; then
+      echo "ERROR: failed to parse validator address from keystore filename: $KEYSTORE_FILE" >&2
+      exit 1
+    fi
+    MINER_ADDR="0x${ADDR_HEX}"
     echo "INFO: using validator address ${MINER_ADDR}"
   fi
   if [ ! -f "$PASSWORD_FILE" ]; then

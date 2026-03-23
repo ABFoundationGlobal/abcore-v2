@@ -106,6 +106,7 @@ docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
 ---
 
 ## 4. RPC 节点部署
+
 ### 4.1 归档节点（full sync，全量历史状态）
 
 存储完整历史状态，支持任意区块高度的 `eth_call` / `debug_traceTransaction` 等查询。
@@ -125,7 +126,7 @@ docker run -d \
   abfoundationglobal/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
-         --http.vhosts '*' \
+         --http.vhosts localhost \
          --http.api 'debug,txpool,net,web3,eth' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
          --ws.api 'debug,txpool,net,web3,eth' \
@@ -136,10 +137,27 @@ docker run -d \
 ### 4.2 同步节点（snap sync，剪枝模式）
 
 仅保留近期状态，磁盘占用更小、同步更快，适合一般 RPC 服务。不支持历史状态查询（`debug_traceTransaction` 等）。
-归档节点去掉两个指令
+在归档节点的基础上去掉 `--syncmode full --gcmode archive` 两个参数：
+
 ```bash
---syncmode full \
---gcmode archive
+mkdir -p $DATADIR
+
+docker run -d \
+  --name abcore-$NETWORK \
+  --restart unless-stopped \
+  -v $DATADIR:/data \
+  -p 127.0.0.1:8545:8545 \
+  -p 127.0.0.1:8546:8546 \
+  -p 0.0.0.0:33333:33333 \
+  -p 0.0.0.0:33333:33333/udp \
+  -e NETWORK=$NETWORK \
+  abfoundationglobal/abcore-v2:$TAG \
+  --port 33333 \
+  --http --http.addr 0.0.0.0 --http.port 8545 \
+         --http.vhosts localhost \
+         --http.api 'debug,txpool,net,web3,eth' \
+  --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
+         --ws.api 'debug,txpool,net,web3,eth'
 ```
 
 ### 4.3 验证同步
@@ -238,7 +256,7 @@ docker run -d \
   abfoundationglobal/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
-         --http.vhosts '*' \
+         --http.vhosts localhost \
          --http.api 'debug,txpool,net,web3,eth' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
          --ws.api 'debug,txpool,net,web3,eth' \

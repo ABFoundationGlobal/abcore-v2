@@ -215,7 +215,7 @@ services:
       - --http
       - --http.addr=0.0.0.0
       - --http.port=8545
-      - --http.vhosts=*
+      - --http.vhosts=localhost
       - --http.api=debug,txpool,net,web3,eth
       - --ws
       - --ws.addr=0.0.0.0
@@ -402,7 +402,7 @@ docker exec -it abcore-validator geth attach \
   /data/geth.ipc
 
 # 4. 确认 v2 版本号
-docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
+docker exec abcore-validator geth version
 
 # 5. 链持续推进（每 ~3 秒递增）
 for i in 1 2 3; do
