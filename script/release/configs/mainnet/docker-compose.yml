@@ -5,29 +5,35 @@ services:
     restart: unless-stopped
     environment:
       NETWORK: mainnet
-      # node.toml 提供 TxPool、gas、RPC 等参数的调优值（见同目录 node.toml）
-      # 如不需要可注释掉本行及下方对应的 volumes 挂载，节点将使用二进制内置默认值
-      BSC_CONFIG: /abcore-config/node.toml
-      MINE: "${MINE:-false}"
-      MINER_ADDR: "${MINER_ADDR:-}"
-      NAT: "${NAT:-}"
-      # 验证者模式：将 password.txt 放入 $DATADIR，容器内路径为 /data/password.txt
+      # 高级调优（可选）：将 node.toml 放入 $DATADIR，取消下行注释
+      # BSC_CONFIG: /data/node.toml
     volumes:
-      # node.toml 高级调优配置（与上方 BSC_CONFIG 配合使用，可整体注释掉）
-      - ./node.toml:/abcore-config/node.toml:ro
-      - ${DATADIR:-/data/abcore/mainnet}:/data
+      - ${DATADIR:-/data/abcore-v2/mainnet}:/data
     ports:
       - "127.0.0.1:8545:8545"
       - "127.0.0.1:8546:8546"
       - "0.0.0.0:33333:33333"
       - "0.0.0.0:33333:33333/udp"
+    # 同步节点（snap sync，剪枝模式）
+    # 如需归档节点，追加：--syncmode full --gcmode archive
+    command:
+      - --port=33333
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.vhosts=localhost
+      - --http.api=debug,txpool,net,web3,eth
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=debug,txpool,net,web3,eth
     healthcheck:
       test:
         - CMD-SHELL
         - >
-          wget -qO-
-          --post-data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
-          --header 'Content-Type: application/json'
+          curl -sf -X POST
+          -H 'Content-Type: application/json'
+          -d '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
           http://localhost:8545 || exit 1
       interval: 10s
       timeout: 5s
