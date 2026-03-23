@@ -1,6 +1,6 @@
 # abcore-v2 节点部署手册（Docker）
 
-**文档版本**: 1.2
+**文档版本**: 1.3
 **适用版本**: abcore-v2
 **支持网络**: ABCore 测试网（Chain ID 26888）/ ABCore 主网（Chain ID 36888）
 
@@ -8,9 +8,9 @@
 >
 > ```bash
 > cat >> ~/.bashrc << 'EOF'
-> export NETWORK="testnet"              # testnet 或 mainnet
+> export NETWORK="testnet"                 # testnet 或 mainnet
 > export DATADIR="/data/abcore-v2/testnet" # 节点数据目录（含 keystore 和链数据）
-> export TAG="vX.Y.Z"                   # abcore-v2 镜像 tag
+> export TAG="vX.Y.Z"                      # abcore-v2 镜像 tag
 > EOF
 > source ~/.bashrc
 > ```
@@ -26,7 +26,12 @@
 | **RPC 节点** | 同步链数据，提供 RPC/WS 接口 | 否 |
 | **验证者节点** | 在 RPC 节点基础上解锁账户、参与 Clique PoA 出块 | 是 |
 
-两种角色使用**相同的镜像**，通过环境变量区分。Bootstrap 节点、创世区块、链配置均已**硬编码进二进制**（`--abcore.testnet` / `--abcore` flag），直接 `docker run` 即可启动，无需任何配置文件。
+两种角色使用**相同的镜像**，通过数据目录内容自动区分：
+
+- **公网 IP**：启动时自动检测，无需手动设置
+- **验证者模式**：检测到 `/data/keystore/` 有文件且 `/data/password.txt` 存在时自动启用，地址从 keystore 文件名提取
+
+Bootstrap 节点、创世区块、链配置均已**硬编码进二进制**（`--abcore.testnet` / `--abcore` flag）。
 
 ### 1.1 端口说明
 
@@ -101,37 +106,9 @@ docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
 ---
 
 ## 4. RPC 节点部署
-
-### 4.1 同步节点（snap sync，剪枝模式）
-
-仅保留近期状态，磁盘占用更小、同步更快，适合一般 RPC 服务。不支持历史状态查询（`debug_traceTransaction` 等）。
-
-```bash
-mkdir -p $DATADIR
-
-docker run -d \
-  --name abcore-$NETWORK \
-  --restart unless-stopped \
-  -v $DATADIR:/data \
-  -p 127.0.0.1:8545:8545 \
-  -p 127.0.0.1:8546:8546 \
-  -p 0.0.0.0:33333:33333 \
-  -p 0.0.0.0:33333:33333/udp \
-  -e NETWORK=$NETWORK \
-  -e NAT=extip:$(curl -s ifconfig.me) \
-  abfoundationglobal/abcore-v2:$TAG \
-  --port 33333 \
-  --http --http.addr 0.0.0.0 --http.port 8545 \
-         --http.vhosts '*' \
-         --http.api 'debug,txpool,net,web3,eth' \
-  --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
-         --ws.api 'debug,txpool,net,web3,eth'
-```
-
-### 4.2 归档节点（full sync，全量历史状态）
+### 4.1 归档节点（full sync，全量历史状态）
 
 存储完整历史状态，支持任意区块高度的 `eth_call` / `debug_traceTransaction` 等查询。
-在同步节点的基础上追加 `--syncmode full --gcmode archive` 两个参数：
 
 ```bash
 mkdir -p $DATADIR
@@ -145,7 +122,6 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=$NETWORK \
-  -e NAT=extip:$(curl -s ifconfig.me) \
   abfoundationglobal/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
@@ -155,6 +131,15 @@ docker run -d \
          --ws.api 'debug,txpool,net,web3,eth' \
   --syncmode full \
   --gcmode archive
+```
+
+### 4.2 同步节点（snap sync，剪枝模式）
+
+仅保留近期状态，磁盘占用更小、同步更快，适合一般 RPC 服务。不支持历史状态查询（`debug_traceTransaction` 等）。
+归档节点去掉两个指令
+```bash
+--syncmode full \
+--gcmode archive
 ```
 
 ### 4.3 验证同步
@@ -192,11 +177,10 @@ docker run -d \
 
 ### 4.5 使用 Docker Compose
 
+确认 `TAG`、`DATADIR` 已设置（见文档顶部），直接启动：
+
 ```bash
 cd /path/to/abcore-v2/script/release/configs/$NETWORK
-cp .env.example .env
-# 修改 TAG、DATADIR、NAT
-
 docker compose up -d
 docker compose logs -f --tail=50
 ```
@@ -209,29 +193,37 @@ docker compose logs -f --tail=50
 
 > **前提**：验证者地址须已经过现有授权验证者 `clique.propose` 投票并写入 checkpoint，才能实际出块。建议先以 RPC 节点模式同步至链头，再切换为验证者模式。
 
-### 5.1 生成验证者账户
+### 5.1 准备验证者账户
+
+根据情况选择其中一种：
+
+**情况 A：已有 keystore**
 
 ```bash
+mkdir -p $DATADIR/keystore
+cp /path/to/UTC--...  $DATADIR/keystore/
+cp /path/to/password.txt $DATADIR/password.txt
+chmod 600 $DATADIR/password.txt
+```
+
+**情况 B：新建账户**
+
+```bash
+mkdir -p $DATADIR
 docker run --rm -it \
   --entrypoint geth \
   -v $DATADIR:/data \
   abfoundationglobal/abcore-v2:$TAG \
   account new --datadir /data
-
-# 记录输出的地址（0x...），后续填入 MINER_ADDR
 # keystore 文件自动生成在 $DATADIR/keystore/UTC--...
-```
 
-### 5.2 准备密码文件
-
-```bash
 echo "YOUR_KEYSTORE_PASSWORD" > $DATADIR/password.txt
 chmod 600 $DATADIR/password.txt
 ```
 
-### 5.3 启动验证者节点
+### 5.2 启动验证者节点
 
-验证者节点以归档模式运行：
+keystore 和 password.txt 就位后直接启动，容器自动检测并开启验证者模式：
 
 ```bash
 docker run -d \
@@ -243,10 +235,6 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=$NETWORK \
-  -e NAT=extip:$(curl -s ifconfig.me) \
-  -e MINE=true \
-  -e MINER_ADDR=0xYourValidatorAddress \
-  -e PASSWORD_FILE=/data/password.txt \
   abfoundationglobal/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
@@ -258,30 +246,24 @@ docker run -d \
   --gcmode archive
 ```
 
-### 5.4 使用 Docker Compose
+启动日志中会打印自动检测结果：
 
-将 `password.txt` 放入配置目录（已在 `.gitignore` 中），编辑 `.env`：
-
-```bash
-cp $DATADIR/password.txt /path/to/abcore-v2/script/release/configs/$NETWORK/password.txt
-chmod 600 /path/to/abcore-v2/script/release/configs/$NETWORK/password.txt
+```
+INFO: keystore and password found, enabling validator mode automatically
+INFO: using validator address 0x...
+INFO: detected public IP x.x.x.x, setting NAT automatically
 ```
 
-```bash
-# .env
-TAG=vX.Y.Z
-DATADIR=/data/abcore/testnet
-NAT=extip:1.2.3.4
-MINE=true
-MINER_ADDR=0xYourValidatorAddress
-```
+### 5.3 使用 Docker Compose
+
+keystore 和 password.txt 就位后直接启动：
 
 ```bash
 cd /path/to/abcore-v2/script/release/configs/$NETWORK
 docker compose up -d
 ```
 
-### 5.5 验证出块
+### 5.4 验证出块
 
 ```bash
 docker exec -it abcore-$NETWORK-validator geth attach /data/geth.ipc
@@ -291,7 +273,7 @@ docker exec -it abcore-$NETWORK-validator geth attach /data/geth.ipc
 > clique.getSnapshot("latest").recents     # 出块后应出现本节点地址
 ```
 
-### 5.6 提案成为新签名者
+### 5.5 提案成为新签名者
 
 ```bash
 # 在已授权验证者节点的 geth console 中执行：
@@ -348,22 +330,23 @@ docker logs abcore-$NETWORK
 | 错误信息 | 原因 | 解决方法 |
 |---------|------|---------|
 | `NETWORK must be testnet or mainnet` | NETWORK 值不合法 | 检查 `-e NETWORK=` 参数 |
-| `MINE=true but MINER_ADDR is not set` | 验证者模式缺少地址 | 添加 `-e MINER_ADDR=0x...` |
-| `could not unlock account` | keystore 地址或密码错误 | 检查 `MINER_ADDR` 与 keystore 文件名末尾地址是否一致，以及 `password.txt` 内容 |
+| `no keystore file found in /data/keystore/` | keystore 目录为空 | 确认 keystore 文件已放入 `$DATADIR/keystore/` |
+| `password file not found` | 密码文件缺失 | 确认 `$DATADIR/password.txt` 存在且权限为 600 |
+| `could not unlock account` | keystore 与密码不匹配 | 检查 keystore 文件名末尾地址与密码是否对应 |
 | `mkdir /data/geth: permission denied` | 数据目录权限不足 | `sudo chown -R $(id -u):$(id -g) $DATADIR` |
 
 ### 节点有 peers 但不出块
 
 ```bash
 docker exec -it abcore-$NETWORK geth attach /data/geth.ipc
-> eth.mining                           # 若为 false 检查 MINE 环境变量
+> eth.mining                           # 若为 false，检查 keystore/password.txt 是否存在
 > clique.getSnapshot("latest").signers # 确认本节点地址是否在授权列表中
 ```
 
 ### P2P 连接数为 0
 
 1. 确认 33333 端口（TCP + UDP）在防火墙/安全组中已开放
-2. 确认 `-e NAT=extip:<PUBLIC_IP>` 已正确设置
+2. 检查启动日志中是否有 `detected public IP` — 若无，手动指定：`-e NAT=extip:<PUBLIC_IP>`
 3. 手动添加 bootstrap 节点（测试网）：
    ```
    > admin.addPeer("enode://b132ddb...@13.112.97.231:33333")

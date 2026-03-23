@@ -23,15 +23,33 @@ if [ -n "${BSC_CONFIG:-}" ] && [ -f "$BSC_CONFIG" ]; then
 fi
 
 # Validator / mining support.
-# Set MINE=true and MINER_ADDR=0x... to enable block production.
-# Keystore must be in /data/keystore/, password file at PASSWORD_FILE.
-MINE_ARGS=()
-if [ "${MINE:-false}" = "true" ]; then
-  if [ -z "${MINER_ADDR:-}" ]; then
-    echo "ERROR: MINE=true but MINER_ADDR is not set" >&2
-    exit 1
+# Auto-detection: if MINE is not set, enable mining automatically when
+# /data/keystore/ contains a keystore file and /data/password.txt exists.
+# Override by setting MINE=true/false explicitly.
+PASSWORD_FILE="${PASSWORD_FILE:-/data/password.txt}"
+
+if [ -z "${MINE:-}" ]; then
+  KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+  if [ -n "$KEYSTORE_FILE" ] && [ -f "$PASSWORD_FILE" ]; then
+    MINE=true
+    echo "INFO: keystore and password found, enabling validator mode automatically"
+  else
+    MINE=false
   fi
-  PASSWORD_FILE="${PASSWORD_FILE:-/data/password.txt}"
+fi
+
+MINE_ARGS=()
+if [ "${MINE}" = "true" ]; then
+  # Auto-extract MINER_ADDR from keystore filename if not set.
+  if [ -z "${MINER_ADDR:-}" ]; then
+    KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+    if [ -z "$KEYSTORE_FILE" ]; then
+      echo "ERROR: MINE=true but no keystore file found in /data/keystore/" >&2
+      exit 1
+    fi
+    MINER_ADDR=0x$(echo "$KEYSTORE_FILE" | grep -oP '[0-9a-fA-F]{40}$')
+    echo "INFO: using validator address ${MINER_ADDR}"
+  fi
   if [ ! -f "$PASSWORD_FILE" ]; then
     echo "ERROR: password file not found at $PASSWORD_FILE" >&2
     exit 1
@@ -48,13 +66,21 @@ if [ "${MINE:-false}" = "true" ]; then
 fi
 
 # NAT configuration.
-# NAT=auto  → use the container's own IP (Docker devnet)
+# Auto-detection: if NAT is not set, query the public IP automatically.
+# NAT=auto → use the container's own IP (for Docker devnet / local testing)
 # NAT=<val> → pass verbatim, e.g. extip:1.2.3.4
 NAT_ARGS=()
-if [ "${NAT:-}" = "auto" ]; then
+if [ -z "${NAT:-}" ]; then
+  PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null \
+           || curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+  if [ -n "$PUBLIC_IP" ]; then
+    NAT_ARGS=(--nat "extip:${PUBLIC_IP}")
+    echo "INFO: detected public IP ${PUBLIC_IP}, setting NAT automatically"
+  fi
+elif [ "${NAT}" = "auto" ]; then
   CONTAINER_IP=$(hostname -i | awk '{print $1}')
   NAT_ARGS=(--nat "extip:${CONTAINER_IP}")
-elif [ -n "${NAT:-}" ]; then
+else
   NAT_ARGS=(--nat "${NAT}")
 fi
 

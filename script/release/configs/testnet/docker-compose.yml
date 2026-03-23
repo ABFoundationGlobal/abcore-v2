@@ -5,10 +5,6 @@ services:
     restart: unless-stopped
     environment:
       NETWORK: testnet
-      NAT: "${NAT:-}"
-      MINE: "${MINE:-false}"
-      MINER_ADDR: "${MINER_ADDR:-}"
-      PASSWORD_FILE: "${PASSWORD_FILE:-/data/password.txt}"
       # 高级调优（可选）：将 node.toml 放入 $DATADIR，取消下行注释
       # BSC_CONFIG: /data/node.toml
     volumes:

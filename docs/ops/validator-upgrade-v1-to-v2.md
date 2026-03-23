@@ -2,7 +2,7 @@
 
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
-**文档版本**: 1.1
+**文档版本**: 1.2
 **适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
@@ -12,7 +12,7 @@
 cat >> ~/.bashrc << 'EOF'
 export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
-export TAG="vX.Y.Z"                           # abcore-v2 目标 Release tag（例如最新稳定版）
+export TAG="vX.Y.Z"                           # abcore-v2 目标 Release tag
 EOF
 source ~/.bashrc
 ```
@@ -174,9 +174,8 @@ docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
 ```
 $DOCKER_DIR/
 ├── docker-compose.yml
-├── .env
 └── nodedata/            ← 将现有 datadir 迁移至此（bind mount → 容器 /data）
-    ├── keystore/        ← 来自原 v1 datadir
+    ├── keystore/        ← 来自原 v1 datadir（容器自动检测，启用验证者模式）
     ├── geth/            ← 来自原 v1 datadir（链数据）
     └── password.txt     ← 解锁密码（权限设为 600）
 ```
@@ -191,6 +190,8 @@ chmod 600 $DOCKER_DIR/nodedata/password.txt
 
 ### 3.3 准备 docker-compose.yml
 
+容器启动时自动检测：若 `/data/keystore/` 有 keystore 文件且 `/data/password.txt` 存在，则自动启用验证者模式（`--mine`）；公网 IP 也自动探测，无需手动配置。
+
 ```bash
 cat > $DOCKER_DIR/docker-compose.yml << 'EOF'
 services:
@@ -200,10 +201,8 @@ services:
     restart: unless-stopped
     environment:
       NETWORK: testnet
-      NAT: "${NAT}"
-      MINE: "true"
-      MINER_ADDR: "${MINER_ADDR}"
-      PASSWORD_FILE: /data/password.txt
+      # 高级调优（可选）：将 node.toml 放入 $DOCKER_DIR/nodedata，取消下行注释
+      # BSC_CONFIG: /data/node.toml
     volumes:
       - ./nodedata:/data
     ports:
@@ -244,22 +243,24 @@ services:
 EOF
 ```
 
-### 3.4 准备 .env 文件
+### 3.4 启动容器
+
+keystore 和 password.txt 就位后直接启动，容器自动检测并开启验证者模式：
 
 ```bash
-# 自动获取验证者地址（从 keystore 文件名提取）和公网 IP
-MINER_ADDR=0x$(ls $NODE_DIR/nodedata/keystore/ | head -1 | grep -oP '[0-9a-fA-F]{40}$')
-PUBLIC_IP=$(curl -s ifconfig.me)
+cd $DOCKER_DIR
+docker compose up -d
 
-# 确认上面输出正确后执行写入
-cat > $DOCKER_DIR/.env << EOF
-TAG=${TAG}
-MINER_ADDR=${MINER_ADDR}
-NAT=extip:${PUBLIC_IP}
-EOF
+# 查看启动日志
+docker compose logs -f --tail=50
+```
 
-chmod 600 $DOCKER_DIR/.env
-cat $DOCKER_DIR/.env   # 验证内容
+启动日志中会打印自动检测结果：
+
+```
+INFO: keystore and password found, enabling validator mode automatically
+INFO: using validator address 0x...
+INFO: detected public IP x.x.x.x, setting NAT automatically
 ```
 
 ---
@@ -305,7 +306,6 @@ chmod 600 ./nodedata/password.txt
 
 ```bash
 cd $DOCKER_DIR
-
 docker compose up -d
 
 # 查看启动日志
@@ -318,6 +318,9 @@ docker compose ps
 正常启动日志中应包含：
 
 ```
+INFO: keystore and password found, enabling validator mode automatically
+INFO: using validator address 0x...
+INFO: detected public IP x.x.x.x, setting NAT automatically
 INFO [xx:xx:xx] Starting peer-to-peer node  ...
 INFO [xx:xx:xx] IPC endpoint opened  ...
 INFO [xx:xx:xx] Unlocked account  ...
@@ -399,7 +402,7 @@ docker exec -it abcore-validator geth attach \
   /data/geth.ipc
 
 # 4. 确认 v2 版本号
-docker exec abcore-validator geth version
+docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
 
 # 5. 链持续推进（每 ~3 秒递增）
 for i in 1 2 3; do
@@ -459,21 +462,28 @@ docker compose logs --tail=50
 
 | 错误信息 | 原因 | 解决方法 |
 |---------|------|---------|
-| `MINE=true but MINER_ADDR is not set` | `.env` 中 `MINER_ADDR` 为空 | 检查 `.env` 文件 |
-| `could not unlock account` | keystore 地址或密码错误 | 确认 `MINER_ADDR` 与 keystore 文件名末尾地址一致，检查 `password.txt` |
-| `password file not found` | 密码文件路径错误 | 确认 `password.txt` 在 `./nodedata/` 目录下 |
+| `no keystore file found in /data/keystore/` | keystore 目录为空 | 确认 keystore 文件已放入 `./nodedata/keystore/` |
+| `could not unlock account` | keystore 与密码不匹配 | 检查 keystore 文件名末尾地址与 `password.txt` 是否对应 |
+| `password file not found` | 密码文件缺失 | 确认 `./nodedata/password.txt` 存在且权限为 600 |
+| `NETWORK must be testnet or mainnet` | NETWORK 值不合法 | 检查 `docker-compose.yml` 中 `NETWORK:` 配置 |
 
 ### 节点有 peers 但不出块
 
 ```bash
 docker exec -it abcore-validator geth attach /data/geth.ipc
-> eth.mining             # 若为 false，检查 MINE 环境变量
-> clique.getSnapshot("latest").signers  # 确认本节点地址在列表中
+> eth.mining             # 若为 false，检查 keystore/password.txt 是否存在于 ./nodedata/
+> clique.getSnapshot("latest").signers  # 确认本节点地址是否在授权列表中
 ```
 
 ### P2P 连接数为 0
 
-检查 `.env` 中 `NAT=extip:x.x.x.x` 是否为宿主机公网 IP，并确认 33333 端口（TCP + UDP）在防火墙和安全组中开放。
+1. 确认 33333 端口（TCP + UDP）在防火墙/安全组中已开放
+2. 检查启动日志中是否有 `detected public IP` — 若无，手动指定：在 `docker-compose.yml` 的 `environment` 中添加 `NAT: "extip:<PUBLIC_IP>"`
+3. 手动添加已知节点：
+   ```bash
+   docker exec -it abcore-validator geth attach /data/geth.ipc
+   > admin.addPeer("enode://...")
+   ```
 
 ---
 
@@ -493,7 +503,7 @@ docker compose -f $DOCKER_DIR/docker-compose.yml restart validator
 docker compose -f $DOCKER_DIR/docker-compose.yml down
 
 # 升级镜像
-docker pull abfoundationglobal/abcore-v2:$TAG   # 或重新 build
+docker compose -f $DOCKER_DIR/docker-compose.yml pull   # 或重新 build/load
 docker compose -f $DOCKER_DIR/docker-compose.yml up -d
 
 # 查看容器资源使用
