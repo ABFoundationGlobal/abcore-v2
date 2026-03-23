@@ -5,12 +5,9 @@ set -e
 # Supported values: testnet, mainnet
 #
 # Bootstrap nodes, genesis, and chain config are baked into the binary.
-# No external config files are required for basic operation.
-#
-# Advanced config override:
-#   Mount a custom config at /bsc/config/config.toml (or set BSC_CONFIG).
-#   The mounted config acts as a baseline; the --abcore[.testnet] network flag
-#   is always passed so genesis and bootstrap nodes are always correct.
+# Additional node parameters (RPC, sync mode, ports, etc.) are passed as
+# CLI arguments to this entrypoint via "$@". An optional node.toml is used
+# only if BSC_CONFIG is set; see script/release/configs/{testnet,mainnet}/node.toml.
 
 NETWORK="${NETWORK:-testnet}"
 case "$NETWORK" in
@@ -19,32 +16,52 @@ case "$NETWORK" in
   *) echo "ERROR: NETWORK must be testnet or mainnet, got: $NETWORK" >&2; exit 1 ;;
 esac
 
-# Config override: if a config file is provided, pass it via --config.
-# Individual CLI flags below override any values in the config file.
+# Config file: set BSC_CONFIG to the container path of node.toml.
+# e.g. -e BSC_CONFIG=/data/node.toml (if node.toml is placed in $DATADIR)
 CONFIG_ARGS=()
-BSC_CONFIG="${BSC_CONFIG:-${BSC_HOME}/config/config.toml}"
-if [ -f "$BSC_CONFIG" ]; then
+if [ -n "${BSC_CONFIG:-}" ] && [ -f "$BSC_CONFIG" ]; then
   CONFIG_ARGS=(--config "$BSC_CONFIG")
 fi
 
-# Validator / mining support
-# Set MINE=true and MINER_ADDR=0x... to enable block production.
-# The keystore must be present in /data/keystore/
-# and the password file at /data/password.txt (or PASSWORD_FILE).
-MINE_ARGS=()
-if [ "${MINE:-false}" = "true" ]; then
-  if [ -z "${MINER_ADDR:-}" ]; then
-    echo "ERROR: MINE=true but MINER_ADDR is not set" >&2
-    exit 1
+# Validator / mining support.
+# Auto-detection: if MINE is not set, enable mining automatically when
+# /data/keystore/ contains a keystore file and /data/password.txt exists.
+# Override by setting MINE=true/false explicitly.
+PASSWORD_FILE="${PASSWORD_FILE:-/data/password.txt}"
+
+if [ -z "${MINE:-}" ]; then
+  KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+  if [ -n "$KEYSTORE_FILE" ] && [ -f "$PASSWORD_FILE" ]; then
+    MINE=true
+    echo "INFO: keystore and password found, enabling validator mode automatically"
+  else
+    MINE=false
   fi
-  PASSWORD_FILE="${PASSWORD_FILE:-/data/password.txt}"
+fi
+
+MINE_ARGS=()
+if [ "${MINE}" = "true" ]; then
+  # Auto-extract MINER_ADDR from keystore filename if not set.
+  if [ -z "${MINER_ADDR:-}" ]; then
+    KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+    if [ -z "$KEYSTORE_FILE" ]; then
+      echo "ERROR: MINE=true but no keystore file found in /data/keystore/" >&2
+      exit 1
+    fi
+    ADDR_HEX=$(echo "$KEYSTORE_FILE" | sed 's/.*--//')
+    if [ -z "$ADDR_HEX" ]; then
+      echo "ERROR: failed to parse validator address from keystore filename: $KEYSTORE_FILE" >&2
+      exit 1
+    fi
+    MINER_ADDR="0x${ADDR_HEX}"
+    echo "INFO: using validator address ${MINER_ADDR}"
+  fi
   if [ ! -f "$PASSWORD_FILE" ]; then
     echo "ERROR: password file not found at $PASSWORD_FILE" >&2
     exit 1
   fi
   # --allow-insecure-unlock is required when HTTP-RPC is enabled.
-  # Ensure port 8545 is NOT exposed publicly on validator nodes
-  # (use -p 127.0.0.1:8545:8545 in docker run, not -p 0.0.0.0:8545:8545).
+  # Never expose port 8545 publicly on validator nodes.
   MINE_ARGS=(
     --mine
     --unlock "${MINER_ADDR}"
@@ -54,32 +71,28 @@ if [ "${MINE:-false}" = "true" ]; then
   )
 fi
 
-# NAT configuration
-# NAT=auto  → advertise the container's own IP (for Docker devnet)
-# NAT=<val> → pass the value verbatim (e.g. extip:1.2.3.4)
+# NAT configuration.
+# Auto-detection: if NAT is not set, query the public IP automatically.
+# NAT=auto → use the container's own IP (for Docker devnet / local testing)
+# NAT=<val> → pass verbatim, e.g. extip:1.2.3.4
 NAT_ARGS=()
-if [ "${NAT:-}" = "auto" ]; then
+if [ -z "${NAT:-}" ]; then
+  PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null \
+           || curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+  if [ -n "$PUBLIC_IP" ]; then
+    NAT_ARGS=(--nat "extip:${PUBLIC_IP}")
+    echo "INFO: detected public IP ${PUBLIC_IP}, setting NAT automatically"
+  fi
+elif [ "${NAT}" = "auto" ]; then
   CONTAINER_IP=$(hostname -i | awk '{print $1}')
   NAT_ARGS=(--nat "extip:${CONTAINER_IP}")
-elif [ -n "${NAT:-}" ]; then
+else
   NAT_ARGS=(--nat "${NAT}")
 fi
-
-# HTTP vhosts: default to localhost-only to prevent DNS-rebinding attacks.
-# Set HTTP_VHOSTS='*' when the RPC port is fronted by a reverse proxy.
-HTTP_VHOSTS="${HTTP_VHOSTS:-localhost,127.0.0.1}"
 
 exec geth \
   "$NETWORK_FLAG" \
   --datadir /data \
-  --port 33333 \
-  --http --http.addr 0.0.0.0 --http.port 8545 --http.vhosts "${HTTP_VHOSTS}" \
-  --http.api 'debug,txpool,net,web3,eth' \
-  --ws --ws.addr 0.0.0.0 --ws.port 8546 \
-  --ws.api 'debug,txpool,net,web3,eth' \
-  --ipcpath /data/geth.ipc \
-  --syncmode full \
-  --gcmode archive \
   "${CONFIG_ARGS[@]}" \
   "${MINE_ARGS[@]}" \
   "${NAT_ARGS[@]}" \

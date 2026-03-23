@@ -2,7 +2,7 @@
 
 ## v1.13.15（Supervisor + 裸机）→ abcore-v2（Docker Compose）
 
-**文档版本**: 1.0
+**文档版本**: 1.2
 **适用网络**: ABCore 测试网（Chain ID 26888）
 **共识机制**: Clique PoA
 
@@ -12,7 +12,7 @@
 cat >> ~/.bashrc << 'EOF'
 export NODE_DIR="/data/abcore/testnet"        # v1 裸机节点根目录
 export DOCKER_DIR="/data/abcore-docker"       # v2 Docker 部署根目录
-export TAG="vX.Y.Z"                           # abcore-v2 目标 Release tag（例如最新稳定版）
+export TAG="vX.Y.Z"                           # abcore-v2 目标 Release tag
 EOF
 source ~/.bashrc
 ```
@@ -28,8 +28,9 @@ source ~/.bashrc
 | 客户端版本 | v1.13.15 | abcore-v2 |
 | 进程管理 | Supervisor | Docker Compose |
 | 部署方式 | 裸机二进制 | 容器镜像 |
-| 数据目录 | `$NODE_DIR/nodedata`（或自定义路径） | Docker named volume 或 bind mount |
-| 配置文件 | 独立 `config.toml` | 容器内 `/bsc/config/config.toml` |
+| 数据目录 | `$NODE_DIR/nodedata`（或自定义路径） | bind mount 到容器 `/data` |
+| 配置文件 | 独立 `config.toml` | 启动参数直接传入，可选 `node.toml` 调优 |
+| Genesis / Bootstrap | 独立文件 | **已内置于二进制**，无需外部文件 |
 
 ### 1.2 兼容性保证
 
@@ -89,8 +90,6 @@ BACKUP_DIR="/data/backup/abcore-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
 cp -r $NODE_DIR/nodedata/keystore "$BACKUP_DIR/"
-# 注意原配置文件可能叫node.toml
-cp $NODE_DIR/conf/node.toml  "$BACKUP_DIR/"
 cp $NODE_DIR/password.txt "$BACKUP_DIR/"   # 如有独立密码文件
 
 # 验证备份完整性
@@ -106,8 +105,6 @@ echo "Backup location: $BACKUP_DIR"
 
 ```bash
 # 记录验证节点地址
-cat $NODE_DIR/nodedata/address.txt
-# 或从 keystore 文件名获取
 ls $NODE_DIR/nodedata/keystore/
 
 # 记录当前 enode
@@ -159,7 +156,6 @@ docker load < /tmp/abcore-v2.tar.gz
 docker images | grep abfoundationglobal
 
 # 方式 C：从 GitHub Release 下载预构建镜像（推荐，无需本地构建环境）
-# 需安装 GitHub CLI（gh）；$TAG 来自顶部环境变量（如 v0.1.0）
 gh release download $TAG -R ABFoundationGlobal/abcore-v2 \
   --pattern "abcore-v2-${TAG}-linux-amd64.tar.gz" -D /tmp/
 
@@ -170,100 +166,70 @@ docker images | grep abfoundationglobal
 验证镜像：
 
 ```bash
-docker run --rm abfoundationglobal/abcore-v2:$TAG geth version
-# 应输出 v2.x.x 版本信息
+docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
 ```
 
 ### 3.2 准备 Docker 目录结构
 
-为每台验证机创建以下目录布局：
-
 ```
 $DOCKER_DIR/
-├── conf/
-│   ├── config.toml      ← 从现有节点迁移并调整
-│   ├── genesis.json     ← 生产环境 genesis 文件
-│   └── password.txt     ← 解锁密码（权限设为 600）
-├── nodedata/            ← 将现有 datadir bind mount 到此处
-│   ├── keystore/        ← 来自原 v1 datadir
-│   └── geth/            ← 来自原 v1 datadir（链数据）
-└── docker-compose.yml
+├── docker-compose.yml
+└── nodedata/            ← 将现有 datadir 迁移至此（bind mount → 容器 /data）
+    ├── keystore/        ← 来自原 v1 datadir（容器自动检测，启用验证者模式）
+    ├── geth/            ← 来自原 v1 datadir（链数据）
+    └── password.txt     ← 解锁密码（权限设为 600）
 ```
 
 ```bash
-mkdir -p $DOCKER_DIR/{conf,nodedata}
+mkdir -p $DOCKER_DIR/nodedata
 
-# 拷贝 config 文件（必须与现有链数据匹配,注意原节点可能用的是node.toml）
-cp $NODE_DIR/conf/node.toml $DOCKER_DIR/conf/config.toml
-# 拷贝 genesis 文件（必须与现有链数据匹配）
-cp $NODE_DIR/conf/abcore-testnet-genesis.json $DOCKER_DIR/conf/genesis.json
-
-# 拷贝解锁密码文件
-cp $NODE_DIR/password.txt $DOCKER_DIR/conf/password.txt
-chmod 600 $DOCKER_DIR/conf/password.txt
-
-# 修复 conf 目录权限（容器内 bsc 用户 uid=1000 需要读取权限）
-docker run --rm -v "$DOCKER_DIR/conf:/conf" busybox chown -R 1000:1000 /conf
+# 拷贝密码文件到数据目录
+cp $NODE_DIR/password.txt $DOCKER_DIR/nodedata/password.txt
+chmod 600 $DOCKER_DIR/nodedata/password.txt
 ```
 
-### 3.3 准备 config.toml
+### 3.3 准备 docker-compose.yml
 
-> **重要**：以下仅展示**需要修改或新增的字段**，不是完整配置文件。必须以第 3.2 节中 `cp $NODE_DIR/conf/node.toml $DOCKER_DIR/conf/config.toml` 迁移过来的完整配置为基础进行修改，保留其中的 `[Eth]`（含 `NetworkId = 26888`、`SyncMode` 等）、`[Node.P2P]`（含 `StaticNodes`）等原有字段，否则节点将连错网络或丢失对等节点配置。
-
-关键修改项如下：
-
-```toml
-# $DOCKER_DIR/conf/config.toml（在现有配置基础上修改下列字段）
-
-[Node]
-DataDir = "/data"              # 容器内固定路径，与 Dockerfile 一致（已 chown bsc 用户）
-NoUSB = true
-HTTPHost = "0.0.0.0"
-HTTPVirtualHosts = ["127.0.0.1", "localhost"]   # 生产环境限制访问
-WSHost = "0.0.0.0"
-
-[Node.P2P]
-ListenAddr = ":33333"
-
-[Eth.Miner]
-#**注意**：若 v1 配置中存在 `NewPayloadTimeout = 2000000000`，必须将其注释掉或删除。v2 的 `minerConfig` 中未定义该字段，保留会导致启动时 fatal error。
-#NewPayloadTimeout = 2000000000
-```
-
-> **说明**：`--allow-insecure-unlock` 标志由容器 entrypoint 在 `MINE=true` 时自动追加，无需在 config.toml 中重复设置 `InsecureUnlockAllowed`。
-
-> **与本地开发配置的差异**：`NetworkId = 26888`，`HTTPVirtualHosts` 限制为已知 IP，`DatabaseCache` 根据服务器内存调整。
-
-### 3.4 准备 docker-compose.yml
+容器启动时自动检测：若 `/data/keystore/` 有 keystore 文件且 `/data/password.txt` 存在，则自动启用验证者模式（`--mine`）；公网 IP 也自动探测，无需手动配置。
 
 ```bash
 cat > $DOCKER_DIR/docker-compose.yml << 'EOF'
 services:
   validator:
-    # 无需指定 command：镜像 ENTRYPOINT（docker-entrypoint.sh）会自动读取
-    # /bsc/config/config.toml，初始化 genesis（首次），然后启动 geth。
     image: abfoundationglobal/abcore-v2:${TAG}
     container_name: abcore-validator
     restart: unless-stopped
     environment:
-      MINE: "true"
-      MINER_ADDR: "${VALIDATOR_ADDR}"
-      NAT: "extip:${PUBLIC_IP}"
+      NETWORK: testnet
+      # 高级调优（可选）：将 node.toml 放入 $DOCKER_DIR/nodedata，取消下行注释
+      # BSC_CONFIG: /data/node.toml
     volumes:
-      - ./conf:/bsc/config:ro
       - ./nodedata:/data
     ports:
       - "127.0.0.1:8545:8545"
       - "127.0.0.1:8546:8546"
       - "0.0.0.0:33333:33333"
       - "0.0.0.0:33333:33333/udp"
+    command:
+      - --port=33333
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.vhosts=localhost
+      - --http.api=debug,txpool,net,web3,eth
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=debug,txpool,net,web3,eth
+      - --syncmode=full
+      - --gcmode=archive
     healthcheck:
       test:
         - CMD-SHELL
         - >
-          wget -qO-
-          --post-data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
-          --header 'Content-Type: application/json'
+          curl -sf -X POST
+          -H 'Content-Type: application/json'
+          -d '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
           http://localhost:8545 || exit 1
       interval: 10s
       timeout: 5s
@@ -277,24 +243,24 @@ services:
 EOF
 ```
 
-### 3.5 准备 .env 文件
+### 3.4 启动容器
 
-从 keystore 文件名自动提取验证者地址和公网 IP，确认输出正确后写入：
+keystore 和 password.txt 就位后直接启动，容器自动检测并开启验证者模式：
 
 ```bash
-# 自动获取验证者地址（从 keystore 文件名提取）和公网 IP
-VALIDATOR_ADDR=0x$(ls $NODE_DIR/nodedata/keystore/ | head -1 | grep -oP '[0-9a-fA-F]{40}$')
-PUBLIC_IP=$(curl -s ifconfig.me)
+cd $DOCKER_DIR
+docker compose up -d
 
-# 确认上面输出正确后执行写入
-cat > $DOCKER_DIR/.env << EOF
-TAG=${TAG}
-VALIDATOR_ADDR=${VALIDATOR_ADDR}
-PUBLIC_IP=${PUBLIC_IP}
-EOF
+# 查看启动日志
+docker compose logs -f --tail=50
+```
 
-chmod 600 $DOCKER_DIR/.env
-cat $DOCKER_DIR/.env   # 验证内容
+启动日志中会打印自动检测结果：
+
+```
+INFO: keystore and password found, enabling validator mode automatically
+INFO: using validator address 0x...
+INFO: detected public IP x.x.x.x, setting NAT automatically
 ```
 
 ---
@@ -323,26 +289,23 @@ echo "v1 process stopped"
 
 ### 步骤 2：迁移数据目录
 
-v2 与 v1 的数据格式完全兼容。将原 v1 datadir 中的全部数据迁移到 `./nodedata/`，与 docker-compose.yml 中 `./nodedata:/data` 的 bind mount 保持一致：
+v2 与 v1 的数据格式完全兼容。将原 v1 datadir 中的全部数据迁移到 `./nodedata/`：
 
 ```bash
 cd $DOCKER_DIR
 
-# 创建数据目录（如尚未创建）
-mkdir -p ./nodedata
-
 # 将 v1 datadir 完整同步过来（含 keystore 和链数据）
 rsync -av --progress $NODE_DIR/nodedata/ ./nodedata/
 
-# rsync 完成后修复权限（容器内 bsc 用户 uid=1000 需要读写权限）
-docker run --rm -v "$DOCKER_DIR/nodedata:/nodedata" busybox chown -R 1000:1000 /nodedata
+# 确保密码文件在 nodedata 目录中
+cp $NODE_DIR/password.txt ./nodedata/password.txt
+chmod 600 ./nodedata/password.txt
 ```
 
 ### 步骤 3：启动 Docker 容器
 
 ```bash
 cd $DOCKER_DIR
-
 docker compose up -d
 
 # 查看启动日志
@@ -355,6 +318,9 @@ docker compose ps
 正常启动日志中应包含：
 
 ```
+INFO: keystore and password found, enabling validator mode automatically
+INFO: using validator address 0x...
+INFO: detected public IP x.x.x.x, setting NAT automatically
 INFO [xx:xx:xx] Starting peer-to-peer node  ...
 INFO [xx:xx:xx] IPC endpoint opened  ...
 INFO [xx:xx:xx] Unlocked account  ...
@@ -494,27 +460,30 @@ $NODE_DIR/bin/geth attach --exec \
 docker compose logs --tail=50
 ```
 
-常见原因：
-
-- `MINE=true` 但 `MINER_ADDR` 未设置 → entrypoint 打印明确错误并退出
-- `conf/genesis.json` 缺失 → `geth init` 失败
-- keystore 地址或密码错误 → `could not unlock account`
+| 错误信息 | 原因 | 解决方法 |
+|---------|------|---------|
+| `no keystore file found in /data/keystore/` | keystore 目录为空 | 确认 keystore 文件已放入 `./nodedata/keystore/` |
+| `could not unlock account` | keystore 与密码不匹配 | 检查 keystore 文件名末尾地址与 `password.txt` 是否对应 |
+| `password file not found` | 密码文件缺失 | 确认 `./nodedata/password.txt` 存在且权限为 600 |
+| `NETWORK must be testnet or mainnet` | NETWORK 值不合法 | 检查 `docker-compose.yml` 中 `NETWORK:` 配置 |
 
 ### 节点有 peers 但不出块
 
 ```bash
 docker exec -it abcore-validator geth attach /data/geth.ipc
-> eth.mining             # 若为 false，执行 miner.start()
-> clique.getSnapshot("latest").signers  # 确认本节点地址在列表中
+> eth.mining             # 若为 false，检查 keystore/password.txt 是否存在于 ./nodedata/
+> clique.getSnapshot("latest").signers  # 确认本节点地址是否在授权列表中
 ```
 
 ### P2P 连接数为 0
 
-检查 `NAT` 环境变量是否设置为宿主机公网 IP（`extip:x.x.x.x`），并确认 33333 端口（TCP + UDP）在防火墙和安全组中开放。
-
-### genesis.json 不匹配
-
-若日志显示 `incompatible genesis`，说明 `conf/genesis.json` 与链数据中的 genesis 不符。必须使用**与现有链数据对应的原始 genesis 文件**（Chain ID 26888），不可使用本地 devnet 的测试 genesis（Chain ID 7140）。
+1. 确认 33333 端口（TCP + UDP）在防火墙/安全组中已开放
+2. 检查启动日志中是否有 `detected public IP` — 若无，手动指定：在 `docker-compose.yml` 的 `environment` 中添加 `NAT: "extip:<PUBLIC_IP>"`
+3. 手动添加已知节点：
+   ```bash
+   docker exec -it abcore-validator geth attach /data/geth.ipc
+   > admin.addPeer("enode://...")
+   ```
 
 ---
 
@@ -533,8 +502,8 @@ docker compose -f $DOCKER_DIR/docker-compose.yml restart validator
 # 停止节点
 docker compose -f $DOCKER_DIR/docker-compose.yml down
 
-# 强制重建镜像并重启
-docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
+# 升级镜像
+docker compose -f $DOCKER_DIR/docker-compose.yml pull   # 或重新 build/load
 docker compose -f $DOCKER_DIR/docker-compose.yml up -d
 
 # 查看容器资源使用
