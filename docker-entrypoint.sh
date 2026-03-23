@@ -47,7 +47,7 @@ if [ "${MINE}" = "true" ]; then
       echo "ERROR: MINE=true but no keystore file found in /data/keystore/" >&2
       exit 1
     fi
-    MINER_ADDR=0x$(echo "$KEYSTORE_FILE" | grep -oP '[0-9a-fA-F]{40}$')
+    MINER_ADDR=0x$(echo "$KEYSTORE_FILE" | sed 's/.*--//')
     echo "INFO: using validator address ${MINER_ADDR}"
   fi
   if [ ! -f "$PASSWORD_FILE" ]; then
