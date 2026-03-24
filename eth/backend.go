@@ -31,6 +31,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 
@@ -812,6 +813,18 @@ func (s *Ethereum) StartMining() error {
 			go func() {
 				s.waitForSyncAndMaxwell(parlia)
 			}()
+		}
+
+		if dc, ok := s.engine.(*dual.DualConsensus); ok {
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+			if wallet == nil || err != nil {
+				log.Error("Etherbase account unavailable locally", "err", err)
+				return fmt.Errorf("signer missing: %v", err)
+			}
+			// Authorize both inner engines: Clique handles pre-fork blocks,
+			// Parlia handles post-fork blocks.
+			dc.Clique().Authorize(eb, wallet.SignData)
+			dc.Parlia().Authorize(eb, wallet.SignData, wallet.SignTx)
 		}
 
 		if clique, ok := s.engine.(*clique.Clique); ok {
