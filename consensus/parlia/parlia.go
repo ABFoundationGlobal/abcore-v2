@@ -761,63 +761,6 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	return p.verifySeal(chain, header, parents)
 }
 
-// newParliaGenesisSnapshot bootstraps the initial Parlia snapshot at ParliaGenesisBlock.
-// Used in the N+1 migration scheme: system contracts are deployed at atBlockBegin of block N,
-// so validators can be read from BSCValidatorSet at that block's state.
-func (p *Parlia) newParliaGenesisSnapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash) (*Snapshot, error) {
-	header := chain.GetHeader(hash, number)
-	if header == nil {
-		return nil, fmt.Errorf("parlia genesis snapshot: header %d not found", number)
-	}
-	blockHash := header.Hash()
-	validators, voteAddressMap, err := p.getCurrentValidators(blockHash, new(big.Int).SetUint64(number))
-	if err != nil {
-		return nil, fmt.Errorf("parlia genesis snapshot: failed to get validators at block %d: %w", number, err)
-	}
-	sort.Sort(validatorsAscending(validators))
-	var voteAddrs []types.BLSPublicKey
-	if voteAddressMap != nil {
-		voteAddrs = make([]types.BLSPublicKey, len(validators))
-		for i, v := range validators {
-			if key := voteAddressMap[v]; key != nil {
-				voteAddrs[i] = *key
-			}
-		}
-	}
-	snap := newSnapshot(p.config, p.signatures, number, blockHash, validators, voteAddrs, p.ethAPI)
-
-	// Set hardfork-aware parameters, mirroring the checkpoint bootstrap logic in snapshot().
-	// System contracts are already deployed at atBlockBegin of ParliaGenesisBlock, so we can
-	// read directly from header state rather than inferring from extraData.
-	if p.chainConfig.IsFermi(header.Number, header.Time) {
-		snap.BlockInterval = fermiBlockInterval
-	} else if p.chainConfig.IsMaxwell(header.Number, header.Time) {
-		snap.BlockInterval = maxwellBlockInterval
-	} else if p.chainConfig.IsLorentz(header.Number, header.Time) {
-		snap.BlockInterval = lorentzBlockInterval
-	}
-	if p.chainConfig.IsMaxwell(header.Number, header.Time) {
-		snap.EpochLength = maxwellEpochLength
-	} else if p.chainConfig.IsLorentz(header.Number, header.Time) {
-		snap.EpochLength = lorentzEpochLength
-	}
-	if p.chainConfig.IsBohr(header.Number, header.Time) {
-		turnLength, err := p.getTurnLengthFromContract(header)
-		if err != nil {
-			return nil, fmt.Errorf("parlia genesis snapshot: failed to get turn length at block %d: %w", number, err)
-		}
-		if turnLength != nil {
-			snap.TurnLength = uint8(turnLength.Int64())
-		}
-	}
-
-	if err := snap.store(p.db); err != nil {
-		return nil, err
-	}
-	log.Info("Stored Parlia genesis snapshot to disk", "number", number, "hash", blockHash, "validators", len(validators))
-	return snap, nil
-}
-
 // snapshot retrieves the authorization snapshot at a given point in time.
 // !!! be careful
 // the block with `number` and `hash` is just the last element of `parents`,
@@ -856,22 +799,6 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// 		maxwellEpochLength = 1000 && turnLength = 16
 		// So just select block number like 1200, 2200, 3200, we can always get the right validators from `number - 200`
 		offset := uint64(200)
-		if p.chainConfig.IsOnParliaGenesis(new(big.Int).SetUint64(number)) {
-			// N+1 scheme: system contracts were deployed at atBlockBegin of ParliaGenesisBlock,
-			// so read the initial validator set from BSCValidatorSet instead of extraData.
-			// Try disk first: newParliaGenesisSnapshot stores unconditionally, but the
-			// checkpointInterval gate above won't load it if N%1024 != 0.
-			if s, err := loadSnapshot(p.config, p.signatures, p.db, hash, p.ethAPI); err == nil {
-				log.Trace("Loaded Parlia genesis snapshot from disk", "number", number, "hash", hash)
-				snap = s
-				break
-			}
-			var err error
-			if snap, err = p.newParliaGenesisSnapshot(chain, number, hash); err != nil {
-				return nil, err
-			}
-			break
-		}
 		if number == 0 || (number%maxwellEpochLength == offset && (len(headers) > int(params.FullImmutabilityThreshold))) {
 			var (
 				checkpoint    *types.Header
@@ -1067,6 +994,25 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
+// getValidatorsFromCliqueCheckpoint returns the validator set from the most recent Clique
+// epoch checkpoint at or before header's parent. Used only at ParliaGenesisBlock, where
+// system contracts are not yet initialised so getCurrentValidators cannot be called.
+func (p *Parlia) getValidatorsFromCliqueCheckpoint(chain consensus.ChainHeaderReader, header *types.Header) ([]common.Address, error) {
+	cliqueCfg := p.chainConfig.Clique
+	if cliqueCfg == nil {
+		return nil, errors.New("getValidatorsFromCliqueCheckpoint: Clique config is nil")
+	}
+	parentNum := header.Number.Uint64() - 1
+	checkpointNum := parentNum - (parentNum % cliqueCfg.Epoch)
+	checkpointHeader := chain.GetHeaderByNumber(checkpointNum)
+	if checkpointHeader == nil {
+		return nil, fmt.Errorf("getValidatorsFromCliqueCheckpoint: checkpoint block %d not found", checkpointNum)
+	}
+	// Clique epoch headers use the same pre-Luban format as Parlia; parseValidators handles both.
+	validators, _, err := parseValidators(checkpointHeader, p.chainConfig, cliqueCfg.Epoch)
+	return validators, err
+}
+
 func (p *Parlia) prepareValidators(chain consensus.ChainHeaderReader, header *types.Header) error {
 	epochLength, err := p.epochLength(chain, header, nil)
 	if err != nil {
@@ -1076,9 +1022,28 @@ func (p *Parlia) prepareValidators(chain consensus.ChainHeaderReader, header *ty
 		return nil
 	}
 
-	newValidators, voteAddressMap, err := p.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, big.NewInt(1)))
-	if err != nil {
-		return err
+	// At ParliaGenesisBlock the system contracts are not yet initialised (initContract runs
+	// in Finalize, after Prepare). Read the active validator set from the last Clique
+	// checkpoint instead of calling the contract.
+	//
+	// voteAddressMap is intentionally left nil for the IsOnParliaGenesis path: if
+	// LubanBlock == ParliaGenesisBlock the IsOnLuban branch below fills it with zero BLS
+	// keys; if LubanBlock > ParliaGenesisBlock the pre-Luban write path is taken and
+	// voteAddressMap is never accessed.  Either way no extra initialisation is needed here.
+	var (
+		newValidators  []common.Address
+		voteAddressMap map[common.Address]*types.BLSPublicKey
+	)
+	if p.chainConfig.IsOnParliaGenesis(header.Number) {
+		newValidators, err = p.getValidatorsFromCliqueCheckpoint(chain, header)
+		if err != nil {
+			return err
+		}
+	} else {
+		newValidators, voteAddressMap, err = p.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, big.NewInt(1)))
+		if err != nil {
+			return err
+		}
 	}
 	// sort validator by address
 	sort.Sort(validatorsAscending(newValidators))
@@ -1502,8 +1467,12 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 	}
 
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	if header.Number.Cmp(common.Big1) == 0 {
+	// No block rewards in PoA, so the state remains as is and uncles are dropped.
+	// initContract is also called at ParliaGenesisBlock so that the system contracts
+	// deployed by TryUpdateBuildInSystemContract (atBlockBegin) are properly initialised
+	// in the same block: their init() functions decode INIT_VALIDATORSET_BYTES and
+	// populate the on-chain validator set (with BLS keys) for subsequent epoch reads.
+	if header.Number.Cmp(common.Big1) == 0 || p.chainConfig.IsOnParliaGenesis(header.Number) {
 		err := p.initContract(state, header, cx, txs, receipts, systemTxs, usedGas, false, tracer)
 		if err != nil {
 			log.Error("init contract failed")
@@ -1601,7 +1570,8 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 	}
 
-	if header.Number.Cmp(common.Big1) == 0 {
+	// See Finalize for why initContract is also triggered at ParliaGenesisBlock.
+	if header.Number.Cmp(common.Big1) == 0 || p.chainConfig.IsOnParliaGenesis(header.Number) {
 		err := p.initContract(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
 		if err != nil {
 			log.Error("init contract failed")
