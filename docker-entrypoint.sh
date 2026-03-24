@@ -1,68 +1,99 @@
 #!/bin/bash
 set -e
 
-DEFAULT_BSC_CONFIG=${BSC_HOME}/config/config.toml
-DEFAULT_BSC_GENESIS=${BSC_HOME}/config/genesis.json
-FALLBACK_CONFIG=${DATA_DIR}/.docker-config/config.toml
-FALLBACK_GENESIS=${DATA_DIR}/.docker-config/genesis.json
-FALLBACK_PASSWORD=${DATA_DIR}/.docker-config/password.txt
+# Network selection via NETWORK env var (default: testnet).
+# Supported values: testnet, mainnet
+#
+# Bootstrap nodes, genesis, and chain config are baked into the binary.
+# Additional node parameters (RPC, sync mode, ports, etc.) are passed as
+# CLI arguments to this entrypoint via "$@". An optional node.toml is used
+# only if BSC_CONFIG is set; see script/release/configs/{testnet,mainnet}/node.toml.
 
-BSC_CONFIG=${BSC_CONFIG:-$DEFAULT_BSC_CONFIG}
-BSC_GENESIS=${BSC_GENESIS:-$DEFAULT_BSC_GENESIS}
-PASSWORD_FILE=${PASSWORD_FILE:-${BSC_HOME}/config/password.txt}
+NETWORK="${NETWORK:-testnet}"
+case "$NETWORK" in
+  testnet)  NETWORK_FLAG="--abcore.testnet" ;;
+  mainnet)  NETWORK_FLAG="--abcore" ;;
+  *) echo "ERROR: NETWORK must be testnet or mainnet, got: $NETWORK" >&2; exit 1 ;;
+esac
 
-if [ ! -f "$BSC_CONFIG" ] && [ -f "$FALLBACK_CONFIG" ]; then
-  BSC_CONFIG="$FALLBACK_CONFIG"
-fi
-if [ ! -f "$BSC_GENESIS" ] && [ -f "$FALLBACK_GENESIS" ]; then
-  BSC_GENESIS="$FALLBACK_GENESIS"
-fi
-if [ ! -f "$PASSWORD_FILE" ] && [ -f "$FALLBACK_PASSWORD" ]; then
-  PASSWORD_FILE="$FALLBACK_PASSWORD"
-fi
-
-[ -f "$BSC_CONFIG" ] || { echo "ERROR: config.toml not found (looked for $DEFAULT_BSC_CONFIG and $FALLBACK_CONFIG)" >&2; exit 1; }
-[ -f "$BSC_GENESIS" ] || { echo "ERROR: genesis.json not found (looked for $DEFAULT_BSC_GENESIS and $FALLBACK_GENESIS)" >&2; exit 1; }
-
-# Init genesis state if geth not exist
-DATA_DIR=$(grep -E '^\s*DataDir\s*=' "${BSC_CONFIG}" | head -1 | grep -oP '"\K[^"]+')
-
-GETH_DIR=${DATA_DIR}/geth
-if [ ! -d "$GETH_DIR" ]; then
-  geth --datadir ${DATA_DIR} init ${BSC_GENESIS}
+# Config file: set BSC_CONFIG to the container path of node.toml.
+# e.g. -e BSC_CONFIG=/data/node.toml (if node.toml is placed in $DATADIR)
+CONFIG_ARGS=()
+if [ -n "${BSC_CONFIG:-}" ] && [ -f "$BSC_CONFIG" ]; then
+  CONFIG_ARGS=(--config "$BSC_CONFIG")
 fi
 
-# Validator / mining support
-# Set MINE=true and MINER_ADDR=0x... to enable block production.
-# The keystore must be present in ${DATA_DIR}/keystore/
-# and the password file at /bsc/config/password.txt
+# Validator / mining support.
+# Auto-detection: if MINE is not set, enable mining automatically when
+# /data/keystore/ contains a keystore file and /data/password.txt exists.
+# Override by setting MINE=true/false explicitly.
+PASSWORD_FILE="${PASSWORD_FILE:-/data/password.txt}"
+
+if [ -z "${MINE:-}" ]; then
+  KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+  if [ -n "$KEYSTORE_FILE" ] && [ -f "$PASSWORD_FILE" ]; then
+    MINE=true
+    echo "INFO: keystore and password found, enabling validator mode automatically"
+  else
+    MINE=false
+  fi
+fi
+
 MINE_ARGS=()
-if [ "${MINE:-false}" = "true" ]; then
+if [ "${MINE}" = "true" ]; then
+  # Auto-extract MINER_ADDR from keystore filename if not set.
   if [ -z "${MINER_ADDR:-}" ]; then
-    echo "ERROR: MINE=true but MINER_ADDR is not set" >&2
+    KEYSTORE_FILE=$(ls /data/keystore/ 2>/dev/null | head -1)
+    if [ -z "$KEYSTORE_FILE" ]; then
+      echo "ERROR: MINE=true but no keystore file found in /data/keystore/" >&2
+      exit 1
+    fi
+    ADDR_HEX=$(echo "$KEYSTORE_FILE" | sed 's/.*--//')
+    if [ -z "$ADDR_HEX" ]; then
+      echo "ERROR: failed to parse validator address from keystore filename: $KEYSTORE_FILE" >&2
+      exit 1
+    fi
+    MINER_ADDR="0x${ADDR_HEX}"
+    echo "INFO: using validator address ${MINER_ADDR}"
+  fi
+  if [ ! -f "$PASSWORD_FILE" ]; then
+    echo "ERROR: password file not found at $PASSWORD_FILE" >&2
     exit 1
   fi
+  # --allow-insecure-unlock is required when HTTP-RPC is enabled.
+  # Never expose port 8545 publicly on validator nodes.
   MINE_ARGS=(
     --mine
     --unlock "${MINER_ADDR}"
     --miner.etherbase "${MINER_ADDR}"
-    # --allow-insecure-unlock is required to unlock accounts over the HTTP-RPC
-    # interface. Only enabled when MINE=true (i.e. this is a signing validator).
-    # Do NOT set MINE=true on internet-facing or production nodes.
     --allow-insecure-unlock
     --password "${PASSWORD_FILE}"
   )
 fi
 
-# NAT configuration
-# NAT=auto  → advertise the container's own IP (for Docker devnet)
-# NAT=<val> → pass the value verbatim (e.g. extip:1.2.3.4)
+# NAT configuration.
+# Auto-detection: if NAT is not set, query the public IP automatically.
+# NAT=auto → use the container's own IP (for Docker devnet / local testing)
+# NAT=<val> → pass verbatim, e.g. extip:1.2.3.4
 NAT_ARGS=()
-if [ "${NAT:-}" = "auto" ]; then
+if [ -z "${NAT:-}" ]; then
+  PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null \
+           || curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+  if [ -n "$PUBLIC_IP" ]; then
+    NAT_ARGS=(--nat "extip:${PUBLIC_IP}")
+    echo "INFO: detected public IP ${PUBLIC_IP}, setting NAT automatically"
+  fi
+elif [ "${NAT}" = "auto" ]; then
   CONTAINER_IP=$(hostname -i | awk '{print $1}')
   NAT_ARGS=(--nat "extip:${CONTAINER_IP}")
-elif [ -n "${NAT:-}" ]; then
+else
   NAT_ARGS=(--nat "${NAT}")
 fi
 
-exec "geth" "--config" "${BSC_CONFIG}" "${MINE_ARGS[@]}" "${NAT_ARGS[@]}" "$@"
+exec geth \
+  "$NETWORK_FLAG" \
+  --datadir /data \
+  "${CONFIG_ARGS[@]}" \
+  "${MINE_ARGS[@]}" \
+  "${NAT_ARGS[@]}" \
+  "$@"

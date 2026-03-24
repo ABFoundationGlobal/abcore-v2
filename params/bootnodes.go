@@ -30,6 +30,25 @@ var MainnetBootnodes = []string{
 	"enode://5db798deb67df75d073f8e2953dad283148133acb520625ea804c9c4ad09a35f13592a762d8f89056248f3889f6dcc33490c145774ea4ff2966982294909b37a@107.20.191.97:30311",
 }
 
+// ABCoreMainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
+// the ABCore main network (chain ID 36888).
+var ABCoreMainnetBootnodes = []string{
+	"enode://3965529bc8c043ead2fa9d4f235c50b35e3eda45284654a51ddc140ae4a78c8e919cf6a8645e2f48f3089cb579d7d7e90de75544e2faa7ad5300a2c3990a7e5b@54.150.187.191:33333",
+	"enode://30cf5e0262b3c1a430183de31063944a6d0164f5ab9c052df942c0f53a635c14b0cea1bcc3b989dbf2297d5939f93165fc8fc817e398fb6b9487fb39a5f342ee@57.182.215.62:33333",
+	"enode://41aae1cc2db6f1c25c10da9ab9cf98aaece11d08bcda981f18c4cdef8c4fe38a5236086e4aa607c96c2b2d09981b797fbb77cf89f8676086f1d81b7f8f8b324c@13.115.82.61:33333",
+	"enode://d5b90bf1c9442d010eead3bc549ade1592d0475a1faea76e18f130fe154cf7b331287284bcfc360ebbca3617e1aea3e9a0e749f1eaca751253648a34bed5c968@35.72.71.22:33333",
+	"enode://12c5dc3ce362f5303b04e426e1ffa1bcad3d09996c95a4fe132edee222b06652f2a3ee0a3b4423a38084767e7fd349177ec4c4f0c9624b3183df3573d08f14be@57.182.84.6:33333",
+}
+
+// ABCoreTestnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
+// the ABCore test network (chain ID 26888).
+var ABCoreTestnetBootnodes = []string{
+	"enode://b132ddbaa3b299005c8de082696de1082fcdfcf5911050b7e2a0e135121b35305cf575b72d075273a758040bf7e0dee557b67601e4a45bd13ef54437963611d4@13.112.97.231:33333",
+	"enode://92dba4d8a767fd64d5f8030e8573ddfe3e8791197596734f91156ffcfe3ed0a7be8e76deb8b28ad76eb2f9d386e6778fdd1afd718f0701d4fbfbb32acb1abfd2@13.113.113.254:33333",
+	"enode://43bb27f6b4551d589f4a1416bd765e34057c36ffb5a49a08ec81f9db5f4a2c06ed3b62ce0668e3efb93ad1ff24c1bdfeddb740c774cd7719de407d896f5c9150@52.193.88.188:33333",
+	"enode://50cf08d208e9f751b3e6685aee93d7f42c755c282aa18516f171a7ac63906a2c4e5ca439d094fd42a3cdf66b88ed6cc4984639f60ac9c57ecfd7aabee935769e@35.79.254.247:33333",
+}
+
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QMOEswP62yzDjSwWS4YEjtTZ5PO6r65CPqYBkgTTkrpaedQ8uEUo1uMALtJIvb2w_WWEVmg5yt1UAuK1ftxUU7QDhGV0aDKQu6TalgMAAAD__________4JpZIJ2NIJpcIQEnfA2iXNlY3AyNTZrMaEDfol8oLr6XJ7FsdAYE7lpJhKMls4G_v6qQOGKJUWGb_uDdGNwgiMog3VkcIIjKA", // # 4.157.240.54 | azure-us-east-virginia

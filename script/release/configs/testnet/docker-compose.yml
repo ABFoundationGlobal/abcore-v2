@@ -1,0 +1,46 @@
+services:
+  node:
+    image: abfoundationglobal/abcore-v2:${TAG}
+    container_name: abcore-testnet
+    restart: unless-stopped
+    environment:
+      NETWORK: testnet
+      # 高级调优（可选）：将 node.toml 放入 $DATADIR，取消下行注释
+      # BSC_CONFIG: /data/node.toml
+    volumes:
+      - ${DATADIR:-/data/abcore-v2/testnet}:/data
+    ports:
+      - "127.0.0.1:8545:8545"
+      - "127.0.0.1:8546:8546"
+      - "0.0.0.0:33333:33333"
+      - "0.0.0.0:33333:33333/udp"
+    # 同步节点（snap sync，剪枝模式）
+    # 如需归档节点，追加：--syncmode full --gcmode archive
+    command:
+      - --port=33333
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.vhosts=localhost
+      - --http.api=debug,txpool,net,web3,eth
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=debug,txpool,net,web3,eth
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          curl -sf -X POST
+          -H 'Content-Type: application/json'
+          -d '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}'
+          http://localhost:8545 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "5"

@@ -70,6 +70,7 @@ type simClient struct {
 // other code that interacts with the Ethereum chain.
 type Backend struct {
 	node   *node.Node
+	eth    *eth.Ethereum
 	beacon *catalyst.SimulatedBeacon
 	client simClient
 }
@@ -137,6 +138,7 @@ func newWithNode(stack *node.Node, conf *eth.Config, blockPeriod uint64) (*Backe
 	}
 	return &Backend{
 		node:   stack,
+		eth:    backend,
 		beacon: beacon,
 		client: simClient{ethclient.NewClient(stack.Attach())},
 	}, nil
@@ -163,7 +165,11 @@ func (n *Backend) Close() error {
 
 // Commit seals a block and moves the chain forward to a new empty block.
 func (n *Backend) Commit() common.Hash {
-	return n.beacon.Commit()
+	hash := n.beacon.Commit()
+	if n.eth != nil {
+		n.eth.WaitFilterMapsIdle()
+	}
+	return hash
 }
 
 // Rollback removes all pending transactions, reverting to the last committed state.

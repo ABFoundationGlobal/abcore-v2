@@ -933,6 +933,10 @@ func importHistory(ctx *cli.Context) error {
 			network = "mainnet"
 		case ctx.Bool(utils.ChapelFlag.Name):
 			network = "chapel"
+		case ctx.Bool(utils.ABCoreFlag.Name):
+			network = "abcore"
+		case ctx.Bool(utils.ABCoreTestnetFlag.Name):
+			network = "abcore-testnet"
 		}
 	} else {
 		// No network flag set, try to determine network based on files

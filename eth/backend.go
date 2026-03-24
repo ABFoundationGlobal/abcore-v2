@@ -858,6 +858,26 @@ func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downlo
 func (s *Ethereum) Synced() bool                       { return s.handler.synced.Load() }
 func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
 func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
+
+func (s *Ethereum) WaitFilterMapsIdle() {
+	if s.filterMaps == nil {
+		return
+	}
+	for {
+		var headNum uint64
+		if head := s.blockchain.CurrentBlock(); head != nil {
+			headNum = head.Number.Uint64()
+		}
+		s.filterMaps.WaitIdle()
+		var newHeadNum uint64
+		if newHead := s.blockchain.CurrentBlock(); newHead != nil {
+			newHeadNum = newHead.Number.Uint64()
+		}
+		if headNum == newHeadNum {
+			return
+		}
+	}
+}
 func (s *Ethereum) SyncMode() downloader.SyncMode {
 	mode, _ := s.handler.chainSync.modeAndLocalHead()
 	return mode
