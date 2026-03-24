@@ -1355,11 +1355,9 @@ func TestSignBAL_VerifyBAL_Integration(t *testing.T) {
 // newParliaGenesisSnapshot again.  The engine is created with a nil ethAPI so
 // that any accidental call to getCurrentValidators would panic immediately.
 func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
-	// ParliaGenesisBlock must be checkpoint-interval-aligned (multiple of checkpointInterval=1024)
-	// for the standard on-disk snapshot path (number%checkpointInterval==0) to trigger.
-	// The old IsOnParliaGenesis special-case load was removed in favour of the natural
-	// snap.apply() walkback; non-aligned ParliaGenesisBlock numbers no longer need a
-	// separate disk-cache anchor.
+	// Verifies that a snapshot stored at ParliaGenesisBlock is loaded from disk via the
+	// standard checkpointInterval-based path (number%checkpointInterval==0).
+	// ParliaGenesisBlock is therefore set to checkpointInterval (1024) so the path triggers.
 	const genesisNum = uint64(checkpointInterval)
 
 	db := rawdb.NewMemoryDatabase()
@@ -1472,15 +1470,46 @@ func TestGetValidatorsFromCliqueCheckpoint(t *testing.T) {
 		common.HexToAddress("0x3000000000000000000000000000000000000003"),
 	}
 
+	t.Run("nilChain", func(t *testing.T) {
+		cfg := migrationChainConfig(200, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		_, err := p.getValidatorsFromCliqueCheckpoint(nil, &types.Header{Number: big.NewInt(200)})
+		if err == nil || !strings.Contains(err.Error(), "chain is nil") {
+			t.Fatalf("want chain is nil error, got %v", err)
+		}
+	})
+
+	t.Run("headerNumberZero", func(t *testing.T) {
+		cfg := migrationChainConfig(200, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		_, err := p.getValidatorsFromCliqueCheckpoint(&parliaStubChainReader{}, &types.Header{Number: big.NewInt(0)})
+		if err == nil || !strings.Contains(err.Error(), "Number > 0") {
+			t.Fatalf("want Number > 0 error, got %v", err)
+		}
+	})
+
 	t.Run("noCliqueConfig", func(t *testing.T) {
 		cfg := *params.ParliaTestChainConfig
 		cfg.ParliaGenesisBlock = big.NewInt(200)
 		cfg.Clique = nil
 		p := &Parlia{chainConfig: &cfg, config: cfg.Parlia}
 
-		_, err := p.getValidatorsFromCliqueCheckpoint(nil, &types.Header{Number: big.NewInt(200)})
+		_, err := p.getValidatorsFromCliqueCheckpoint(&parliaStubChainReader{}, &types.Header{Number: big.NewInt(200)})
 		if err == nil || !strings.Contains(err.Error(), "Clique config is nil") {
 			t.Fatalf("want Clique config is nil error, got %v", err)
+		}
+	})
+
+	t.Run("epochZero", func(t *testing.T) {
+		cfg := migrationChainConfig(200, 200)
+		cfg.Clique = &params.CliqueConfig{Epoch: 0}
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		_, err := p.getValidatorsFromCliqueCheckpoint(&parliaStubChainReader{}, &types.Header{Number: big.NewInt(200)})
+		if err == nil || !strings.Contains(err.Error(), "epoch is zero") {
+			t.Fatalf("want epoch is zero error, got %v", err)
 		}
 	})
 

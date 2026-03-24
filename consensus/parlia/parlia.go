@@ -998,9 +998,18 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // epoch checkpoint at or before header's parent. Used only at ParliaGenesisBlock, where
 // system contracts are not yet initialised so getCurrentValidators cannot be called.
 func (p *Parlia) getValidatorsFromCliqueCheckpoint(chain consensus.ChainHeaderReader, header *types.Header) ([]common.Address, error) {
+	if chain == nil {
+		return nil, errors.New("getValidatorsFromCliqueCheckpoint: chain is nil")
+	}
+	if header == nil || header.Number == nil || header.Number.Sign() == 0 {
+		return nil, errors.New("getValidatorsFromCliqueCheckpoint: header must have Number > 0")
+	}
 	cliqueCfg := p.chainConfig.Clique
 	if cliqueCfg == nil {
 		return nil, errors.New("getValidatorsFromCliqueCheckpoint: Clique config is nil")
+	}
+	if cliqueCfg.Epoch == 0 {
+		return nil, errors.New("getValidatorsFromCliqueCheckpoint: Clique epoch is zero")
 	}
 	parentNum := header.Number.Uint64() - 1
 	checkpointNum := parentNum - (parentNum % cliqueCfg.Epoch)
@@ -1256,9 +1265,24 @@ func (p *Parlia) verifyValidators(chain consensus.ChainHeaderReader, header *typ
 		return nil
 	}
 
-	newValidators, voteAddressMap, err := p.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, big.NewInt(1)))
-	if err != nil {
-		return err
+	// At ParliaGenesisBlock the system contracts have not yet been initialised
+	// (initContract runs later in Finalize), so getCurrentValidators cannot read from
+	// the contract. Use getValidatorsFromCliqueCheckpoint instead, consistent with
+	// what prepareValidators wrote into header.Extra.
+	var (
+		newValidators  []common.Address
+		voteAddressMap map[common.Address]*types.BLSPublicKey
+	)
+	if p.chainConfig.IsOnParliaGenesis(header.Number) {
+		newValidators, err = p.getValidatorsFromCliqueCheckpoint(chain, header)
+		if err != nil {
+			return err
+		}
+	} else {
+		newValidators, voteAddressMap, err = p.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, big.NewInt(1)))
+		if err != nil {
+			return err
+		}
 	}
 	// sort validator by address
 	sort.Sort(validatorsAscending(newValidators))
