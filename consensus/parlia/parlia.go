@@ -1492,9 +1492,10 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped.
-	// initContract is also called at ParliaGenesisBlock so that the system contracts
-	// deployed by TryUpdateBuildInSystemContract (atBlockBegin) are properly initialised
-	// in the same block: their init() functions decode INIT_VALIDATORSET_BYTES and
+	// initContract is also called at ParliaGenesisBlock so that system contracts
+	// deployed earlier in block processing by TryUpdateBuildInSystemContract
+	// (with atBlockBegin=true, in state_processor.go) are properly initialised in
+	// the same block: their init() functions decode INIT_VALIDATORSET_BYTES and
 	// populate the on-chain validator set (with BLS keys) for subsequent epoch reads.
 	if header.Number.Cmp(common.Big1) == 0 || p.chainConfig.IsOnParliaGenesis(header.Number) {
 		err := p.initContract(state, header, cx, txs, receipts, systemTxs, usedGas, false, tracer)

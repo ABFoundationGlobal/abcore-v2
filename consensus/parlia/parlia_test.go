@@ -1349,15 +1349,14 @@ func TestSignBAL_VerifyBAL_Integration(t *testing.T) {
 	}
 }
 
-// TestParliaGenesisSnapshotDiskCache verifies that snapshot() loads a
-// previously stored Parlia-genesis snapshot from disk (the loadSnapshot
-// short-circuit added in the IsOnParliaGenesis branch) rather than calling
-// newParliaGenesisSnapshot again.  The engine is created with a nil ethAPI so
-// that any accidental call to getCurrentValidators would panic immediately.
-func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
-	// Verifies that a snapshot stored at ParliaGenesisBlock is loaded from disk via the
-	// standard checkpointInterval-based path (number%checkpointInterval==0).
-	// ParliaGenesisBlock is therefore set to checkpointInterval (1024) so the path triggers.
+// TestSnapshotDiskCheckpointCache verifies that snapshot() loads a previously
+// stored snapshot from disk via the generic checkpointInterval-based path
+// (number%checkpointInterval==0), without consulting the backing chain or ethAPI.
+// A stub chain reader and a minimal Parlia instance (nil ethAPI) are sufficient;
+// any accidental call to getCurrentValidators would panic immediately.
+func TestSnapshotDiskCheckpointCache(t *testing.T) {
+	// ParliaGenesisBlock is set to checkpointInterval (1024) so the standard
+	// on-disk path triggers for this block number.
 	const genesisNum = uint64(checkpointInterval)
 
 	db := rawdb.NewMemoryDatabase()
