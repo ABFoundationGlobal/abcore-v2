@@ -1355,7 +1355,12 @@ func TestSignBAL_VerifyBAL_Integration(t *testing.T) {
 // newParliaGenesisSnapshot again.  The engine is created with a nil ethAPI so
 // that any accidental call to getCurrentValidators would panic immediately.
 func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
-	const genesisNum = uint64(10)
+	// ParliaGenesisBlock must be checkpoint-interval-aligned (multiple of checkpointInterval=1024)
+	// for the standard on-disk snapshot path (number%checkpointInterval==0) to trigger.
+	// The old IsOnParliaGenesis special-case load was removed in favour of the natural
+	// snap.apply() walkback; non-aligned ParliaGenesisBlock numbers no longer need a
+	// separate disk-cache anchor.
+	const genesisNum = uint64(checkpointInterval)
 
 	db := rawdb.NewMemoryDatabase()
 
@@ -1369,15 +1374,12 @@ func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
 	}
 	genesisHash := common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-	// Pre-store a snapshot as if newParliaGenesisSnapshot had already run once.
 	sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
 	pre := newSnapshot(chainCfg.Parlia, sigCache, genesisNum, genesisHash, validators, nil, nil)
 	if err := pre.store(db); err != nil {
 		t.Fatalf("pre-store snapshot: %v", err)
 	}
 
-	// Build a minimal Parlia engine with nil ethAPI.  If snapshot() incorrectly
-	// falls through to newParliaGenesisSnapshot the nil dereference will surface.
 	p := &Parlia{
 		chainConfig: &chainCfg,
 		config:      chainCfg.Parlia,
@@ -1403,9 +1405,8 @@ func TestParliaGenesisSnapshotDiskCache(t *testing.T) {
 	}
 }
 
-// parliaStubChainReader is a no-op consensus.ChainHeaderReader.
-// snapshot() at ParliaGenesisBlock with a disk-cached snapshot never calls any
-// of these methods, so nil returns are safe.
+// parliaStubChainReader is a no-op consensus.ChainHeaderReader used in tests where
+// snapshot() short-circuits before touching the chain (e.g. recentSnaps or disk cache hit).
 type parliaStubChainReader struct{}
 
 func (s *parliaStubChainReader) Config() *params.ChainConfig                      { return nil }
@@ -1418,3 +1419,306 @@ func (s *parliaStubChainReader) GetTd(common.Hash, uint64) *big.Int             
 func (s *parliaStubChainReader) GetHighestVerifiedHeader() *types.Header          { return nil }
 func (s *parliaStubChainReader) GetVerifiedBlockByHash(common.Hash) *types.Header { return nil }
 func (s *parliaStubChainReader) ChasingHead() *types.Header                       { return nil }
+
+// stubChainByNumber embeds parliaStubChainReader and overrides GetHeaderByNumber to
+// serve specific headers from a map.  All other chain methods return nil.
+type stubChainByNumber struct {
+	parliaStubChainReader
+	headers map[uint64]*types.Header
+}
+
+func (s *stubChainByNumber) GetHeaderByNumber(n uint64) *types.Header {
+	return s.headers[n]
+}
+
+// cliqueEpochExtra builds a pre-Luban Clique/Parlia epoch header Extra field:
+//
+//	vanity(32) + N×addr(20) + seal(65)
+//
+// This is the format written by Clique and consumed by parseValidators in pre-Luban mode.
+func cliqueEpochExtra(validators []common.Address) []byte {
+	extra := make([]byte, extraVanity)
+	for _, v := range validators {
+		extra = append(extra, v.Bytes()...)
+	}
+	return append(extra, make([]byte, extraSeal)...)
+}
+
+// migrationChainConfig returns a *ChainConfig suitable for Clique→Parlia migration tests.
+//
+// LubanBlock is set equal to parliaGenesisBlock.  This ensures that all Clique checkpoint
+// headers (block number < parliaGenesisBlock) satisfy !IsLuban, so parseValidators correctly
+// applies the pre-Luban format when reading their extraData.  This mirrors the real-world
+// constraint: LubanBlock >= ParliaGenesisBlock.
+func migrationChainConfig(parliaGenesisBlock, cliqueEpoch uint64) *params.ChainConfig {
+	cfg := *params.ABCoreTestChainConfig // value copy; mutate safely
+	parliaGenesisBig := big.NewInt(int64(parliaGenesisBlock))
+	cfg.LubanBlock = new(big.Int).Set(parliaGenesisBig)
+	cfg.ParliaGenesisBlock = new(big.Int).Set(parliaGenesisBig)
+	cfg.Clique = &params.CliqueConfig{Period: 0, Epoch: cliqueEpoch}
+	cfg.Parlia = &params.ParliaConfig{}
+	return &cfg
+}
+
+// TestGetValidatorsFromCliqueCheckpoint exercises getValidatorsFromCliqueCheckpoint across
+// the key cases: error paths, basic round-trip, checkpoint-at-genesis, different epoch sizes,
+// and ParliaGenesisBlock that coincides with an epoch boundary.
+func TestGetValidatorsFromCliqueCheckpoint(t *testing.T) {
+	// These three addresses are in ascending bytes.Compare order — the same order
+	// that parseValidators returns them (it preserves extraData order).
+	addrs := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		common.HexToAddress("0x3000000000000000000000000000000000000003"),
+	}
+
+	t.Run("noCliqueConfig", func(t *testing.T) {
+		cfg := *params.ParliaTestChainConfig
+		cfg.ParliaGenesisBlock = big.NewInt(200)
+		cfg.Clique = nil
+		p := &Parlia{chainConfig: &cfg, config: cfg.Parlia}
+
+		_, err := p.getValidatorsFromCliqueCheckpoint(nil, &types.Header{Number: big.NewInt(200)})
+		if err == nil || !strings.Contains(err.Error(), "Clique config is nil") {
+			t.Fatalf("want Clique config is nil error, got %v", err)
+		}
+	})
+
+	t.Run("checkpointHeaderNotFound", func(t *testing.T) {
+		// epoch=200, parliaGenesis=400 → parentNum=399, checkpointNum=200; chain returns nil
+		cfg := migrationChainConfig(400, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		_, err := p.getValidatorsFromCliqueCheckpoint(
+			&parliaStubChainReader{},
+			&types.Header{Number: big.NewInt(400)},
+		)
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("want checkpoint not found error, got %v", err)
+		}
+	})
+
+	t.Run("basicThreeValidators", func(t *testing.T) {
+		// epoch=200, parliaGenesis=400 → parentNum=399, checkpointNum=399-199=200
+		cfg := migrationChainConfig(400, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{
+			200: {Number: big.NewInt(200), Extra: cliqueEpochExtra(addrs)},
+		}}
+		got, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: big.NewInt(400)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != len(addrs) {
+			t.Fatalf("got %d validators, want %d", len(got), len(addrs))
+		}
+		for i, want := range addrs {
+			if got[i] != want {
+				t.Errorf("[%d] addr: got %s, want %s", i, got[i], want)
+			}
+		}
+	})
+
+	t.Run("checkpointIsGenesis", func(t *testing.T) {
+		// epoch=200, parliaGenesis=100 → parentNum=99, checkpointNum=99-99=0
+		cfg := migrationChainConfig(100, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{
+			0: {Number: big.NewInt(0), Extra: cliqueEpochExtra(addrs[:2])},
+		}}
+		got, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: big.NewInt(100)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d validators, want 2", len(got))
+		}
+		for i, want := range addrs[:2] {
+			if got[i] != want {
+				t.Errorf("[%d] addr: got %s, want %s", i, got[i], want)
+			}
+		}
+	})
+
+	t.Run("checkpointNumCalculation", func(t *testing.T) {
+		// epoch=100, parliaGenesis=350 → parentNum=349, checkpointNum=349-49=300
+		cfg := migrationChainConfig(350, 100)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{
+			300: {Number: big.NewInt(300), Extra: cliqueEpochExtra(addrs[:1])},
+		}}
+		got, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: big.NewInt(350)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0] != addrs[0] {
+			t.Errorf("unexpected validators: %v", got)
+		}
+	})
+
+	t.Run("parliaGenesisIsEpochBlock", func(t *testing.T) {
+		// ParliaGenesisBlock==epoch: epoch=200, parliaGenesis=200
+		// parentNum=199, checkpointNum=199-199=0
+		cfg := migrationChainConfig(200, 200)
+		p := &Parlia{chainConfig: cfg, config: cfg.Parlia}
+
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{
+			0: {Number: big.NewInt(0), Extra: cliqueEpochExtra(addrs)},
+		}}
+		got, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: big.NewInt(200)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != len(addrs) {
+			t.Fatalf("got %d validators, want %d", len(got), len(addrs))
+		}
+		for i, want := range addrs {
+			if got[i] != want {
+				t.Errorf("[%d] addr: got %s, want %s", i, got[i], want)
+			}
+		}
+	})
+}
+
+// TestPrepareValidatorsAtParliaGenesis verifies that prepareValidators writes the correct
+// extraData format when called at ParliaGenesisBlock, covering:
+//   - LubanBlock == ParliaGenesisBlock → Luban format with zero BLS keys
+//   - LubanBlock >  ParliaGenesisBlock → pre-Luban format (addresses only)
+//   - Non-epoch block → no-op
+func TestPrepareValidatorsAtParliaGenesis(t *testing.T) {
+	// Addresses in ascending bytes.Compare order so the sorted output is deterministic.
+	addrs := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		common.HexToAddress("0x3000000000000000000000000000000000000003"),
+	}
+
+	// parliaGenesis=200, cliqueEpoch=200 → block 200 is an epoch block.
+	// parentNum=199, 199%200=199, checkpointNum=0.
+	const (
+		parliaGenesis = uint64(200)
+		cliqueEpoch   = uint64(200)
+	)
+	parentHash := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+	// setupEngine builds a Parlia with the parent snapshot pre-loaded in recentSnaps
+	// so epochLength() can return cliqueEpoch without needing a real chain walkback.
+	setupEngine := func(cfg *params.ChainConfig) (*Parlia, *stubChainByNumber) {
+		sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+		p := &Parlia{
+			chainConfig: cfg,
+			config:      cfg.Parlia,
+			recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+			signatures:  sigCache,
+		}
+		parentSnap := newSnapshot(cfg.Parlia, sigCache, parliaGenesis-1, parentHash, nil, nil, nil)
+		parentSnap.EpochLength = cliqueEpoch
+		p.recentSnaps.Add(parentHash, parentSnap)
+
+		// Clique genesis header (block 0) carries the initial validator set in pre-Luban format.
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{
+			0: {Number: big.NewInt(0), Extra: cliqueEpochExtra(addrs)},
+		}}
+		return p, chain
+	}
+
+	t.Run("lubanEqualsParlia_lubanFormat_zeroBlsKeys", func(t *testing.T) {
+		// When LubanBlock == ParliaGenesisBlock the Luban write path is taken and
+		// IsOnLuban fills voteAddressMap with 48-byte zero BLS keys.
+		cfg := migrationChainConfig(parliaGenesis, cliqueEpoch)
+		p, chain := setupEngine(cfg)
+
+		header := &types.Header{
+			Number:     big.NewInt(int64(parliaGenesis)),
+			ParentHash: parentHash,
+			Extra:      make([]byte, extraVanity), // Prepare sets vanity; seal is appended after
+		}
+		if err := p.prepareValidators(chain, header); err != nil {
+			t.Fatalf("prepareValidators: %v", err)
+		}
+
+		// Expected layout: vanity(32) + count(1) + N×(addr(20)+zeroBlsKey(48))
+		wantLen := extraVanity + validatorNumberSize + len(addrs)*validatorBytesLength
+		if len(header.Extra) != wantLen {
+			t.Fatalf("Extra len: got %d, want %d", len(header.Extra), wantLen)
+		}
+		if got := int(header.Extra[extraVanity]); got != len(addrs) {
+			t.Errorf("validator count byte: got %d, want %d", got, len(addrs))
+		}
+		for i, want := range addrs {
+			off := extraVanity + validatorNumberSize + i*validatorBytesLength
+			gotAddr := common.BytesToAddress(header.Extra[off : off+common.AddressLength])
+			if gotAddr != want {
+				t.Errorf("[%d] addr: got %s, want %s", i, gotAddr, want)
+			}
+			blsStart := off + common.AddressLength
+			for j := 0; j < types.BLSPublicKeyLength; j++ {
+				if header.Extra[blsStart+j] != 0 {
+					t.Errorf("[%d] BLS key byte %d: got %#x, want 0x00", i, j, header.Extra[blsStart+j])
+					break
+				}
+			}
+		}
+	})
+
+	t.Run("lubanAfterParlia_preLubanFormat", func(t *testing.T) {
+		// When LubanBlock > ParliaGenesisBlock the pre-Luban write path is taken:
+		// only 20-byte addresses are appended, no count byte or BLS keys.
+		cfg := migrationChainConfig(parliaGenesis, cliqueEpoch)
+		cfg.LubanBlock = big.NewInt(int64(parliaGenesis) + int64(cliqueEpoch)) // activate Luban one epoch later
+		p, chain := setupEngine(cfg)
+
+		header := &types.Header{
+			Number:     big.NewInt(int64(parliaGenesis)),
+			ParentHash: parentHash,
+			Extra:      make([]byte, extraVanity),
+		}
+		if err := p.prepareValidators(chain, header); err != nil {
+			t.Fatalf("prepareValidators: %v", err)
+		}
+
+		// Expected layout: vanity(32) + N×addr(20)
+		wantLen := extraVanity + len(addrs)*validatorBytesLengthBeforeLuban
+		if len(header.Extra) != wantLen {
+			t.Fatalf("Extra len: got %d, want %d", len(header.Extra), wantLen)
+		}
+		for i, want := range addrs {
+			off := extraVanity + i*validatorBytesLengthBeforeLuban
+			gotAddr := common.BytesToAddress(header.Extra[off : off+common.AddressLength])
+			if gotAddr != want {
+				t.Errorf("[%d] addr: got %s, want %s", i, gotAddr, want)
+			}
+		}
+	})
+
+	t.Run("nonEpochBlock_isNoOp", func(t *testing.T) {
+		// Block 201 with epoch=200: 201%200=1 → prepareValidators returns early, Extra unchanged.
+		cfg := migrationChainConfig(201, cliqueEpoch)
+		sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+		p := &Parlia{
+			chainConfig: cfg,
+			config:      cfg.Parlia,
+			recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+			signatures:  sigCache,
+		}
+		parentSnap := newSnapshot(cfg.Parlia, sigCache, 200, parentHash, nil, nil, nil)
+		parentSnap.EpochLength = cliqueEpoch
+		p.recentSnaps.Add(parentHash, parentSnap)
+
+		origExtra := make([]byte, extraVanity)
+		header := &types.Header{
+			Number:     big.NewInt(201),
+			ParentHash: parentHash,
+			Extra:      append([]byte(nil), origExtra...),
+		}
+		if err := p.prepareValidators(&parliaStubChainReader{}, header); err != nil {
+			t.Fatalf("prepareValidators: %v", err)
+		}
+		if len(header.Extra) != len(origExtra) {
+			t.Errorf("Extra was modified on non-epoch block: len %d → %d", len(origExtra), len(header.Extra))
+		}
+	})
+}
