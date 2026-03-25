@@ -357,7 +357,11 @@ func (d *DualConsensus) GetJustifiedNumberAndHash(chain consensus.ChainHeaderRea
 	if chain == nil {
 		return 0, common.Hash{}, errors.New("GetJustifiedNumberAndHash: nil chain")
 	}
-	return 0, chain.GetHeaderByNumber(0).Hash(), nil
+	genesis := chain.GetHeaderByNumber(0)
+	if genesis == nil {
+		return 0, common.Hash{}, errors.New("GetJustifiedNumberAndHash: genesis header not found")
+	}
+	return 0, genesis.Hash(), nil
 }
 
 // GetFinalizedHeader implements consensus.PoSA.
