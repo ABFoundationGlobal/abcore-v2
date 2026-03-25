@@ -1,4 +1,4 @@
-GENESIS_CONTRACT_REPO   := git@github.com:ABFoundationGlobal/abcore-v2-genesis-contract.git
+GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -49,8 +49,12 @@ pre:
 		git clone --branch $(GENESIS_CONTRACT_BRANCH) $(GENESIS_CONTRACT_REPO) $(GENESIS_CONTRACT_DIR); \
 	else \
 		actual_branch=$$(cd $(GENESIS_CONTRACT_DIR) && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"); \
-		if [ "$$actual_branch" != "$(GENESIS_CONTRACT_BRANCH)" ]; then \
-			echo "Warning: $(GENESIS_CONTRACT_DIR) is on branch '$$actual_branch', expected '$(GENESIS_CONTRACT_BRANCH)'."; \
+		if [ "$$actual_branch" = "unknown" ]; then \
+			echo "Error: $(GENESIS_CONTRACT_DIR) exists but is not a git repository. Remove it and re-run 'make pre'."; \
+			exit 1; \
+		elif [ "$$actual_branch" != "$(GENESIS_CONTRACT_BRANCH)" ]; then \
+			echo "$(GENESIS_CONTRACT_DIR) is on '$$actual_branch', switching to '$(GENESIS_CONTRACT_BRANCH)'..."; \
+			cd $(GENESIS_CONTRACT_DIR) && git fetch origin $(GENESIS_CONTRACT_BRANCH) && git checkout $(GENESIS_CONTRACT_BRANCH); \
 		else \
 			echo "$(GENESIS_CONTRACT_DIR) already on $(GENESIS_CONTRACT_BRANCH), skipping clone"; \
 		fi; \
@@ -92,6 +96,7 @@ _build:
 		echo "Error: abcore-v2-genesis-contract not prepared. Run 'make pre' first."; \
 		exit 1; \
 	}
+	mkdir -p "$(PARLIA_DIR)$(OUTDIR)"
 	cp $(PARLIA_DIR)validators.conf $(GENESIS_CONTRACT_DIR)/validators.conf
 	cd $(GENESIS_CONTRACT_DIR) && $(POETRY) run python -m scripts.generate generate-validators
 	cd $(GENESIS_CONTRACT_DIR) && { \

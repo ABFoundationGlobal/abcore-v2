@@ -50,12 +50,12 @@ type Upgrade struct {
 type upgradeHook func(blockNumber *big.Int, contractAddr common.Address, statedb vm.StateDB) error
 
 const (
-	mainNet        = "Mainnet"
-	chapelNet      = "Chapel"
-	rialtoNet      = "Rialto"
-	defaultNet     = "Default"
-	abcoreMainNet  = "ABCoreMainnet"
-	abcoreTestNet  = "ABCoreTestnet"
+	mainNet       = "Mainnet"
+	chapelNet     = "Chapel"
+	rialtoNet     = "Rialto"
+	defaultNet    = "Default"
+	abcoreMainNet = "ABCoreMainnet"
+	abcoreTestNet = "ABCoreTestnet"
 )
 
 var (
@@ -1062,7 +1062,7 @@ func init() {
 	}
 
 	// ParliaGenesis: inject all Parlia system contracts at the transition block for networks
-	// migrating from Clique to Parlia. Bytecode files live in core/systemcontracts/parliagenesis/{mainnet,testnet,devnet}/.
+	// migrating from Clique to Parlia. Bytecode files live in core/systemcontracts/parliagenesis/{mainnet,testnet,default}/.
 	// Contracts not used by this network (e.g. cross-chain bridge) should be filled with
 	// their full BSC bytecode so that extcodesize checks pass and calls do not revert.
 	parliaGenesisUpgrade[abcoreMainNet] = &Upgrade{
