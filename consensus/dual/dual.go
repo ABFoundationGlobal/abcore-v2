@@ -92,15 +92,6 @@ func (d *DualConsensus) VerifyHeader(chain consensus.ChainHeaderReader, header *
 	return d.clique.VerifyHeader(chain, header)
 }
 
-// errOut returns a buffered error channel pre-filled with n copies of err.
-func errOut(n int, err error) chan error {
-	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		errs <- err
-	}
-	return errs
-}
-
 // splitHeaders splits a contiguous header slice into [pre-fork, post-fork] halves.
 // Headers with Number < ParliaGenesisBlock go to pre; >= go to post.
 // Both slices may be empty (the caller checks this).
@@ -145,6 +136,7 @@ func (d *DualConsensus) VerifyHeaders(chain consensus.ChainHeaderReader, headers
 		defer func() {
 			if err := recover(); err != nil {
 				log.Error("DualConsensus VerifyHeaders panic", "err", err, "stack", string(debug.Stack()))
+				panic(err) // re-panic: leaving results undrained would deadlock the caller
 			}
 		}()
 		var (
@@ -266,7 +258,9 @@ func (d *DualConsensus) SealHash(header *types.Header) common.Hash {
 
 // SignBAL implements consensus.Engine.
 func (d *DualConsensus) SignBAL(bal *types.BlockAccessListEncode) error {
-	// BAL is a BSC/Parlia feature; Clique returns nil (no-op).
+	// BAL is a BSC/Parlia feature. DualConsensus always delegates BAL signing to Parlia,
+	// even for pre-fork (Clique-era) blocks, because BAL headers are only produced and
+	// verified in the Parlia phase.
 	return d.parlia.SignBAL(bal)
 }
 
