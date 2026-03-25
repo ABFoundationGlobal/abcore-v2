@@ -20,13 +20,13 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -309,4 +309,98 @@ func (d *DualConsensus) Close() error {
 		return cErr
 	}
 	return pErr
+}
+
+// compile-time check: DualConsensus must satisfy consensus.PoSA so that
+// eth/backend.go's votePool initialization and state_processor.go's system
+// transaction classification can use DualConsensus through the PoSA interface.
+var _ consensus.PoSA = (*DualConsensus)(nil)
+
+// IsSystemTransaction implements consensus.PoSA.
+// Pre-fork Clique has no system transactions; post-fork delegates to Parlia.
+func (d *DualConsensus) IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error) {
+	if d.isParlia(header.Number) {
+		return d.parlia.IsSystemTransaction(tx, header)
+	}
+	return false, nil
+}
+
+// IsSystemContract implements consensus.PoSA.
+// System contract addresses are a static set determined by Parlia; the same set
+// applies regardless of phase, so always delegate to Parlia.
+func (d *DualConsensus) IsSystemContract(to *common.Address) bool {
+	return d.parlia.IsSystemContract(to)
+}
+
+// EnoughDistance implements consensus.PoSA.
+// Clique has no distance concept; return true (permissive) to allow block production.
+func (d *DualConsensus) EnoughDistance(chain consensus.ChainReader, header *types.Header) bool {
+	if d.isParlia(header.Number) {
+		return d.parlia.EnoughDistance(chain, header)
+	}
+	return true
+}
+
+// IsLocalBlock implements consensus.PoSA.
+// Parlia.val is set by Parlia.Authorize, which DualConsensus always calls with the
+// same etherbase as Clique. Delegating to Parlia is correct for both phases.
+func (d *DualConsensus) IsLocalBlock(header *types.Header) bool {
+	return d.parlia.IsLocalBlock(header)
+}
+
+// GetJustifiedNumberAndHash implements consensus.PoSA.
+// Clique has no fast-finality voting; return genesis as the justified checkpoint.
+func (d *DualConsensus) GetJustifiedNumberAndHash(chain consensus.ChainHeaderReader, headers []*types.Header) (uint64, common.Hash, error) {
+	if len(headers) > 0 && d.isParlia(headers[len(headers)-1].Number) {
+		return d.parlia.GetJustifiedNumberAndHash(chain, headers)
+	}
+	if chain == nil {
+		return 0, common.Hash{}, errors.New("GetJustifiedNumberAndHash: nil chain")
+	}
+	return 0, chain.GetHeaderByNumber(0).Hash(), nil
+}
+
+// GetFinalizedHeader implements consensus.PoSA.
+// Clique has no finality; return the genesis header as the finalized anchor.
+func (d *DualConsensus) GetFinalizedHeader(chain consensus.ChainHeaderReader, header *types.Header) *types.Header {
+	if header != nil && d.isParlia(header.Number) {
+		return d.parlia.GetFinalizedHeader(chain, header)
+	}
+	if chain == nil {
+		return nil
+	}
+	return chain.GetHeaderByNumber(0)
+}
+
+// CheckFinalityAndNotify implements consensus.PoSA.
+// No-op during Clique phase; delegates to Parlia once the fork is active.
+func (d *DualConsensus) CheckFinalityAndNotify(chain consensus.ChainHeaderReader, targetBlockHash common.Hash, notifyFn func(*types.Header)) {
+	head := chain.CurrentHeader()
+	if head != nil && d.isParlia(head.Number) {
+		d.parlia.CheckFinalityAndNotify(chain, targetBlockHash, notifyFn)
+	}
+}
+
+// VerifyVote implements consensus.PoSA.
+// Votes are only produced and received in the Parlia phase; delegate unconditionally.
+func (d *DualConsensus) VerifyVote(chain consensus.ChainHeaderReader, vote *types.VoteEnvelope) error {
+	return d.parlia.VerifyVote(chain, vote)
+}
+
+// IsActiveValidatorAt implements consensus.PoSA.
+// Clique has no Parlia-style active validator set; return false pre-fork.
+func (d *DualConsensus) IsActiveValidatorAt(chain consensus.ChainHeaderReader, header *types.Header, checkVoteKeyFn func(*types.BLSPublicKey) bool) bool {
+	if d.isParlia(header.Number) {
+		return d.parlia.IsActiveValidatorAt(chain, header, checkVoteKeyFn)
+	}
+	return false
+}
+
+// NextProposalBlock implements consensus.PoSA.
+// Proposal blocks are a Parlia concept; return an error during Clique phase.
+func (d *DualConsensus) NextProposalBlock(chain consensus.ChainHeaderReader, header *types.Header, proposer common.Address) (uint64, uint64, error) {
+	if d.isParlia(header.Number) {
+		return d.parlia.NextProposalBlock(chain, header, proposer)
+	}
+	return 0, 0, errors.New("NextProposalBlock not supported in Clique phase")
 }

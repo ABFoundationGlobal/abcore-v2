@@ -4,6 +4,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
@@ -71,6 +73,113 @@ func TestIsParlia(t *testing.T) {
 		}
 	}
 }
+
+// TestPoSAInterfaceSatisfied verifies that DualConsensus satisfies consensus.PoSA
+// at compile time and via a runtime type assertion.
+func TestPoSAInterfaceSatisfied(t *testing.T) {
+	dc, err := New(testConfig(100), rawdb.NewMemoryDatabase(), nil, [32]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := any(dc).(consensus.PoSA); !ok {
+		t.Fatal("DualConsensus does not satisfy consensus.PoSA")
+	}
+}
+
+// TestPoSAPreForkStubs verifies that PoSA methods return safe zero values for pre-fork blocks.
+func TestPoSAPreForkStubs(t *testing.T) {
+	const fork = int64(100)
+	dc, err := New(testConfig(fork), rawdb.NewMemoryDatabase(), nil, [32]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	preForkHeader := makeHeader(fork - 1)
+
+	t.Run("IsSystemTransaction_preFork", func(t *testing.T) {
+		tx := types.NewTx(&types.LegacyTx{})
+		got, err := dc.IsSystemTransaction(tx, preForkHeader)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got {
+			t.Fatal("expected false for pre-fork system tx check")
+		}
+	})
+
+	t.Run("IsSystemContract_delegatesToParlia", func(t *testing.T) {
+		// A random non-system address should return false.
+		addr := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		if dc.IsSystemContract(&addr) {
+			t.Fatal("random address should not be a system contract")
+		}
+		// nil should return false.
+		if dc.IsSystemContract(nil) {
+			t.Fatal("nil should not be a system contract")
+		}
+	})
+
+	t.Run("EnoughDistance_preFork_returnsTrue", func(t *testing.T) {
+		if !dc.EnoughDistance(nil, preForkHeader) {
+			t.Fatal("expected true for pre-fork EnoughDistance")
+		}
+	})
+
+	t.Run("IsActiveValidatorAt_preFork_returnsFalse", func(t *testing.T) {
+		got := dc.IsActiveValidatorAt(nil, preForkHeader, nil)
+		if got {
+			t.Fatal("expected false for pre-fork IsActiveValidatorAt")
+		}
+	})
+
+	t.Run("NextProposalBlock_preFork_returnsError", func(t *testing.T) {
+		_, _, err := dc.NextProposalBlock(nil, preForkHeader, common.Address{})
+		if err == nil {
+			t.Fatal("expected error for pre-fork NextProposalBlock")
+		}
+	})
+
+	t.Run("GetJustifiedNumberAndHash_preFork_returnsGenesisNumber", func(t *testing.T) {
+		chain := &stubGenesisChain{}
+		num, hash, err := dc.GetJustifiedNumberAndHash(chain, []*types.Header{preForkHeader})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if num != 0 {
+			t.Errorf("expected justified number 0, got %d", num)
+		}
+		if hash == (common.Hash{}) {
+			// The hash is the RLP hash of an empty genesis header; just verify it is non-zero.
+			t.Error("expected non-zero hash for genesis")
+		}
+	})
+
+	t.Run("GetFinalizedHeader_preFork_returnsGenesisNumber", func(t *testing.T) {
+		chain := &stubGenesisChain{}
+		h := dc.GetFinalizedHeader(chain, preForkHeader)
+		if h == nil {
+			t.Fatal("expected non-nil genesis header")
+		}
+		if h.Number.Cmp(common.Big0) != 0 {
+			t.Errorf("expected genesis header (number 0), got number %s", h.Number)
+		}
+	})
+}
+
+// stubGenesisChain implements a minimal consensus.ChainHeaderReader that only
+// serves block 0 so the pre-fork PoSA stubs can return the genesis header.
+type stubGenesisChain struct {
+	consensus.ChainHeaderReader
+}
+
+func (s *stubGenesisChain) GetHeaderByNumber(n uint64) *types.Header {
+	if n == 0 {
+		return &types.Header{Number: big.NewInt(0)}
+	}
+	return nil
+}
+
+func (s *stubGenesisChain) CurrentHeader() *types.Header { return nil }
 
 // makeHeader creates a minimal types.Header with only Number set.
 func makeHeader(num int64) *types.Header {
