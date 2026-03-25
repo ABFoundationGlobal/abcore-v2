@@ -1,6 +1,6 @@
-GENESIS_CONTRACT_REPO := https://github.com/bnb-chain/bsc-genesis-contract.git
-GENESIS_CONTRACT_TAG  := v1.2.5
-GENESIS_CONTRACT_DIR  := bsc-genesis-contract
+GENESIS_CONTRACT_REPO   := git@github.com:ABFoundationGlobal/abcore-v2-genesis-contract.git
+GENESIS_CONTRACT_BRANCH := master
+GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
 POETRY                := $(or $(shell which poetry 2>/dev/null),$(HOME)/.local/bin/poetry)
@@ -14,7 +14,7 @@ PYTHON                := $(or \
 # ---- Chain parameters ----
 # Edit these values or override on the command line.
 # Values containing spaces must be quoted:
-#   make build CHAIN_ID=1234 BLOCK_INTERVAL="5 seconds"
+#   make mainnet CHAIN_ID=36888 BLOCK_INTERVAL="3 seconds"
 CHAIN_ID                       ?= 714
 MAX_ELECTED_VALIDATORS         ?= 3
 BLOCK_INTERVAL                 ?= 3 seconds
@@ -34,23 +34,26 @@ INIT_VOTING_PERIOD             ?= 2 minutes / BLOCK_INTERVAL
 INIT_MIN_PERIOD_AFTER_QUORUM   ?= uint64(1 minutes / BLOCK_INTERVAL)
 INIT_MINIMAL_DELAY             ?= 1 minutes
 
-.PHONY: pre build recover
+# ---- Output sub-directory (set automatically by each network target) ----
+OUTDIR ?= default
 
-## Clone bsc-genesis-contract and install dependencies
+.PHONY: pre build mainnet testnet recover _build
+
+## Clone abcore-v2-genesis-contract and install dependencies
 pre:
 	@if [ -z "$(PYTHON)" ]; then \
 		echo "Error: python3.13 / 3.12 / 3.11 / 3.10 not found. Install one of them first (rpds-py does not support Python 3.14+)."; \
 		exit 1; \
 	fi
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)" ]; then \
-		git clone --branch $(GENESIS_CONTRACT_TAG) $(GENESIS_CONTRACT_REPO) $(GENESIS_CONTRACT_DIR); \
+		git clone --branch $(GENESIS_CONTRACT_BRANCH) $(GENESIS_CONTRACT_REPO) $(GENESIS_CONTRACT_DIR); \
 	else \
-		actual_tag=$$(cd $(GENESIS_CONTRACT_DIR) && git describe --tags --exact-match 2>/dev/null || echo "unknown"); \
-		if [ "$$actual_tag" != "$(GENESIS_CONTRACT_TAG)" ]; then \
-			echo "Error: $(GENESIS_CONTRACT_DIR) is at tag '$$actual_tag', expected '$(GENESIS_CONTRACT_TAG)'. Remove the directory and re-run 'make pre'."; \
-			exit 1; \
+		actual_branch=$$(cd $(GENESIS_CONTRACT_DIR) && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"); \
+		if [ "$$actual_branch" != "$(GENESIS_CONTRACT_BRANCH)" ]; then \
+			echo "Warning: $(GENESIS_CONTRACT_DIR) is on branch '$$actual_branch', expected '$(GENESIS_CONTRACT_BRANCH)'."; \
+		else \
+			echo "$(GENESIS_CONTRACT_DIR) already on $(GENESIS_CONTRACT_BRANCH), skipping clone"; \
 		fi; \
-		echo "$(GENESIS_CONTRACT_DIR) already at $(GENESIS_CONTRACT_TAG), skipping clone"; \
 	fi
 	cd $(GENESIS_CONTRACT_DIR) && npm install
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)/lib/forge-std" ]; then \
@@ -63,15 +66,30 @@ pre:
 	fi
 	cd $(GENESIS_CONTRACT_DIR) && $(POETRY) env use $(PYTHON) && $(POETRY) install
 
-## Generate contracts with chain parameters and extract deployedBytecode into this directory.
-## Edit validators.conf and chain parameters above before running.
-build:
+## Generate contracts for ABCore mainnet (chain ID 36888) → mainnet/
+mainnet: OUTDIR = mainnet
+mainnet: CHAIN_ID = 36888
+mainnet: MAX_ELECTED_VALIDATORS = 21
+mainnet: _build
+
+## Generate contracts for ABCore testnet (chain ID 26888) → testnet/
+testnet: OUTDIR = testnet
+testnet: CHAIN_ID = 26888
+testnet: MAX_ELECTED_VALIDATORS = 7
+testnet: _build
+
+## Generate contracts with default chain parameters → default/
+build: OUTDIR = default
+build: _build
+
+## Internal: compile contracts and extract deployedBytecode into $(PARLIA_DIR)$(OUTDIR)/
+_build:
 	@[ -f "$(PARLIA_DIR)validators.conf" ] || { \
 		echo "Error: validators.conf not found. Copy validators.conf.example and fill in your validators."; \
 		exit 1; \
 	}
 	@[ -d "$(GENESIS_CONTRACT_DIR)/node_modules" ] || { \
-		echo "Error: bsc-genesis-contract not prepared. Run 'make pre' first."; \
+		echo "Error: abcore-v2-genesis-contract not prepared. Run 'make pre' first."; \
 		exit 1; \
 	}
 	cp $(PARLIA_DIR)validators.conf $(GENESIS_CONTRACT_DIR)/validators.conf
@@ -132,8 +150,8 @@ build:
 			echo "Error: empty bytecode for $${file}"; \
 			exit 1; \
 		}; \
-		printf '%s' "$$bytecode" > "$(PARLIA_DIR)$${file}"; \
-		echo "Written $${file}"; \
+		printf '%s' "$$bytecode" > "$(PARLIA_DIR)$(OUTDIR)/$${file}"; \
+		echo "Written $(OUTDIR)/$${file}"; \
 	done
 
 ## Restore contract source files if a previous build was interrupted
