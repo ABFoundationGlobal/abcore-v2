@@ -1,5 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
+GENESIS_CONTRACT_COMMIT := 3e6b2ff8aa155452045b25bfe632805e0d1fb5a6
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -48,16 +49,18 @@ pre:
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)" ]; then \
 		git clone --branch $(GENESIS_CONTRACT_BRANCH) $(GENESIS_CONTRACT_REPO) $(GENESIS_CONTRACT_DIR); \
 	else \
-		actual_branch=$$(cd $(GENESIS_CONTRACT_DIR) && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"); \
-		if [ "$$actual_branch" = "unknown" ]; then \
+		actual_commit=$$(cd $(GENESIS_CONTRACT_DIR) && git rev-parse HEAD 2>/dev/null || echo "unknown"); \
+		if [ "$$actual_commit" = "unknown" ]; then \
 			echo "Error: $(GENESIS_CONTRACT_DIR) exists but is not a git repository. Remove it and re-run 'make pre'."; \
 			exit 1; \
-		elif [ "$$actual_branch" != "$(GENESIS_CONTRACT_BRANCH)" ]; then \
-			echo "$(GENESIS_CONTRACT_DIR) is on '$$actual_branch', switching to '$(GENESIS_CONTRACT_BRANCH)'..."; \
-			cd $(GENESIS_CONTRACT_DIR) && git fetch origin $(GENESIS_CONTRACT_BRANCH) && git checkout $(GENESIS_CONTRACT_BRANCH); \
-		else \
-			echo "$(GENESIS_CONTRACT_DIR) already on $(GENESIS_CONTRACT_BRANCH), skipping clone"; \
 		fi; \
+	fi
+	@actual_commit=$$(cd $(GENESIS_CONTRACT_DIR) && git rev-parse HEAD); \
+	if [ "$$actual_commit" != "$(GENESIS_CONTRACT_COMMIT)" ]; then \
+		echo "Pinning $(GENESIS_CONTRACT_DIR) to $(GENESIS_CONTRACT_COMMIT)..."; \
+		cd $(GENESIS_CONTRACT_DIR) && git fetch origin && git checkout $(GENESIS_CONTRACT_COMMIT); \
+	else \
+		echo "$(GENESIS_CONTRACT_DIR) already at pinned commit $(GENESIS_CONTRACT_COMMIT)"; \
 	fi
 	cd $(GENESIS_CONTRACT_DIR) && npm install
 	@if [ ! -d "$(GENESIS_CONTRACT_DIR)/lib/forge-std" ]; then \
