@@ -50,10 +50,12 @@ type Upgrade struct {
 type upgradeHook func(blockNumber *big.Int, contractAddr common.Address, statedb vm.StateDB) error
 
 const (
-	mainNet    = "Mainnet"
-	chapelNet  = "Chapel"
-	rialtoNet  = "Rialto"
-	defaultNet = "Default"
+	mainNet       = "Mainnet"
+	chapelNet     = "Chapel"
+	rialtoNet     = "Rialto"
+	defaultNet    = "Default"
+	abcoreMainNet = "ABCoreMainnet"
+	abcoreTestNet = "ABCoreTestnet"
 )
 
 var (
@@ -1059,81 +1061,228 @@ func init() {
 		},
 	}
 
-	// ParliaGenesis: inject all Parlia system contracts at the transition block on custom networks
-	// migrating from Clique to Parlia. Only applied to defaultNet (custom chains).
-	// Fill the bytecode files in core/systemcontracts/parliagenesis/ before use.
+	// ParliaGenesis: inject all Parlia system contracts at the transition block for networks
+	// migrating from Clique to Parlia. Bytecode files live in core/systemcontracts/parliagenesis/{mainnet,testnet,default}/.
 	// Contracts not used by this network (e.g. cross-chain bridge) should be filled with
 	// their full BSC bytecode so that extcodesize checks pass and calls do not revert.
+	parliaGenesisUpgrade[abcoreMainNet] = &Upgrade{
+		UpgradeName: "parliaGenesis",
+		Configs: []*UpgradeConfig{
+			{
+				ContractAddr: common.HexToAddress(ValidatorContract),
+				Code:         parliagenesis.MainnetValidatorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SlashContract),
+				Code:         parliagenesis.MainnetSlashContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SystemRewardContract),
+				Code:         parliagenesis.MainnetSystemRewardContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(LightClientContract),
+				Code:         parliagenesis.MainnetLightClientContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenHubContract),
+				Code:         parliagenesis.MainnetTokenHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerIncentivizeContract),
+				Code:         parliagenesis.MainnetRelayerIncentivizeContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerHubContract),
+				Code:         parliagenesis.MainnetRelayerHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovHubContract),
+				Code:         parliagenesis.MainnetGovHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenManagerContract),
+				Code:         parliagenesis.MainnetTokenManagerContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(CrossChainContract),
+				Code:         parliagenesis.MainnetCrossChainContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakingContract),
+				Code:         parliagenesis.MainnetStakingContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeHubContract),
+				Code:         parliagenesis.MainnetStakeHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeCreditContract),
+				Code:         parliagenesis.MainnetStakeCreditContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovernorContract),
+				Code:         parliagenesis.MainnetGovernorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovTokenContract),
+				Code:         parliagenesis.MainnetGovTokenContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TimelockContract),
+				Code:         parliagenesis.MainnetTimelockContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenRecoverPortalContract),
+				Code:         parliagenesis.MainnetTokenRecoverPortalContract,
+			},
+		},
+	}
+
+	parliaGenesisUpgrade[abcoreTestNet] = &Upgrade{
+		UpgradeName: "parliaGenesis",
+		Configs: []*UpgradeConfig{
+			{
+				ContractAddr: common.HexToAddress(ValidatorContract),
+				Code:         parliagenesis.TestnetValidatorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SlashContract),
+				Code:         parliagenesis.TestnetSlashContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SystemRewardContract),
+				Code:         parliagenesis.TestnetSystemRewardContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(LightClientContract),
+				Code:         parliagenesis.TestnetLightClientContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenHubContract),
+				Code:         parliagenesis.TestnetTokenHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerIncentivizeContract),
+				Code:         parliagenesis.TestnetRelayerIncentivizeContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerHubContract),
+				Code:         parliagenesis.TestnetRelayerHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovHubContract),
+				Code:         parliagenesis.TestnetGovHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenManagerContract),
+				Code:         parliagenesis.TestnetTokenManagerContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(CrossChainContract),
+				Code:         parliagenesis.TestnetCrossChainContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakingContract),
+				Code:         parliagenesis.TestnetStakingContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeHubContract),
+				Code:         parliagenesis.TestnetStakeHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeCreditContract),
+				Code:         parliagenesis.TestnetStakeCreditContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovernorContract),
+				Code:         parliagenesis.TestnetGovernorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovTokenContract),
+				Code:         parliagenesis.TestnetGovTokenContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TimelockContract),
+				Code:         parliagenesis.TestnetTimelockContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenRecoverPortalContract),
+				Code:         parliagenesis.TestnetTokenRecoverPortalContract,
+			},
+		},
+	}
+
 	parliaGenesisUpgrade[defaultNet] = &Upgrade{
 		UpgradeName: "parliaGenesis",
 		Configs: []*UpgradeConfig{
 			{
 				ContractAddr: common.HexToAddress(ValidatorContract),
-				Code:         parliagenesis.ValidatorContract,
+				Code:         parliagenesis.DefaultValidatorContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(SlashContract),
-				Code:         parliagenesis.SlashContract,
+				Code:         parliagenesis.DefaultSlashContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(SystemRewardContract),
-				Code:         parliagenesis.SystemRewardContract,
+				Code:         parliagenesis.DefaultSystemRewardContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(LightClientContract),
-				Code:         parliagenesis.LightClientContract,
+				Code:         parliagenesis.DefaultLightClientContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(TokenHubContract),
-				Code:         parliagenesis.TokenHubContract,
+				Code:         parliagenesis.DefaultTokenHubContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(RelayerIncentivizeContract),
-				Code:         parliagenesis.RelayerIncentivizeContract,
+				Code:         parliagenesis.DefaultRelayerIncentivizeContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(RelayerHubContract),
-				Code:         parliagenesis.RelayerHubContract,
+				Code:         parliagenesis.DefaultRelayerHubContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(GovHubContract),
-				Code:         parliagenesis.GovHubContract,
+				Code:         parliagenesis.DefaultGovHubContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(TokenManagerContract),
-				Code:         parliagenesis.TokenManagerContract,
+				Code:         parliagenesis.DefaultTokenManagerContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(CrossChainContract),
-				Code:         parliagenesis.CrossChainContract,
+				Code:         parliagenesis.DefaultCrossChainContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(StakingContract),
-				Code:         parliagenesis.StakingContract,
+				Code:         parliagenesis.DefaultStakingContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(StakeHubContract),
-				Code:         parliagenesis.StakeHubContract,
+				Code:         parliagenesis.DefaultStakeHubContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(StakeCreditContract),
-				Code:         parliagenesis.StakeCreditContract,
+				Code:         parliagenesis.DefaultStakeCreditContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(GovernorContract),
-				Code:         parliagenesis.GovernorContract,
+				Code:         parliagenesis.DefaultGovernorContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(GovTokenContract),
-				Code:         parliagenesis.GovTokenContract,
+				Code:         parliagenesis.DefaultGovTokenContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(TimelockContract),
-				Code:         parliagenesis.TimelockContract,
+				Code:         parliagenesis.DefaultTimelockContract,
 			},
 			{
 				ContractAddr: common.HexToAddress(TokenRecoverPortalContract),
-				Code:         parliagenesis.TokenRecoverPortalContract,
+				Code:         parliagenesis.DefaultTokenRecoverPortalContract,
 			},
 		},
 	}
@@ -1171,6 +1320,10 @@ func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int,
 		network = chapelNet
 	case params.RialtoGenesisHash:
 		network = rialtoNet
+	case params.ABCoreMainGenesisHash:
+		network = abcoreMainNet
+	case params.ABCoreTestGenesisHash:
+		network = abcoreTestNet
 	default:
 		network = defaultNet
 	}
@@ -1209,6 +1362,10 @@ func upgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 		network = chapelNet
 	case params.RialtoGenesisHash:
 		network = rialtoNet
+	case params.ABCoreMainGenesisHash:
+		network = abcoreMainNet
+	case params.ABCoreTestGenesisHash:
+		network = abcoreTestNet
 	default:
 		network = defaultNet
 	}
