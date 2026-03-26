@@ -133,6 +133,10 @@ func (d *DualConsensus) VerifyHeaders(chain consensus.ChainHeaderReader, headers
 		results = make(chan error, len(headers))
 	)
 	gopool.Submit(func() {
+		// gopool goroutines run detached from the caller's goroutine.
+		// Without recovery a panic here would crash the whole process.
+		// We log the stack for diagnostics, then re-panic so the caller
+		// is not left blocking indefinitely on an undrained results channel.
 		defer func() {
 			if err := recover(); err != nil {
 				log.Error("DualConsensus VerifyHeaders panic", "err", err, "stack", string(debug.Stack()))
@@ -159,6 +163,9 @@ func (d *DualConsensus) VerifyHeaders(chain consensus.ChainHeaderReader, headers
 			}
 			select {
 			case err := <-cliqueResult:
+				// Defensive guard: Clique's VerifyHeaders contract guarantees exactly
+				// one result per input header, so done[old] should never be true here.
+				// The check prevents index corruption if that contract is ever violated.
 				if !done[old] {
 					errs[old], done[old] = err, true
 				}
@@ -297,12 +304,7 @@ func (d *DualConsensus) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // Close implements consensus.Engine.
 func (d *DualConsensus) Close() error {
-	cErr := d.clique.Close()
-	pErr := d.parlia.Close()
-	if cErr != nil {
-		return cErr
-	}
-	return pErr
+	return errors.Join(d.clique.Close(), d.parlia.Close())
 }
 
 // compile-time check: DualConsensus must satisfy consensus.PoSA so that
