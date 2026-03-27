@@ -12,11 +12,9 @@ package dual
 import (
 	"errors"
 	"math/big"
-	"runtime/debug"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
@@ -26,7 +24,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -132,17 +129,11 @@ func (d *DualConsensus) VerifyHeaders(chain consensus.ChainHeaderReader, headers
 		abort   = make(chan struct{})
 		results = make(chan error, len(headers))
 	)
-	gopool.Submit(func() {
-		// gopool goroutines run detached from the caller's goroutine.
-		// Without recovery a panic here would crash the whole process.
-		// We log the stack for diagnostics, then re-panic so the caller
-		// is not left blocking indefinitely on an undrained results channel.
-		defer func() {
-			if err := recover(); err != nil {
-				log.Error("DualConsensus VerifyHeaders panic", "err", err, "stack", string(debug.Stack()))
-				panic(err) // re-panic: leaving results undrained would deadlock the caller
-			}
-		}()
+	go func() {
+		// No recover: a panic here crashes the process immediately.
+		// This is the correct fail-fast behaviour for consensus code — a panic
+		// indicates a programming error that must not be silently swallowed.
+		// Matches the pattern used in consensus/beacon/consensus.go.
 		var (
 			old, new_, out            = 0, len(preHeaders), 0
 			errs                      = make([]error, len(headers))
@@ -177,7 +168,7 @@ func (d *DualConsensus) VerifyHeaders(chain consensus.ChainHeaderReader, headers
 				return
 			}
 		}
-	})
+	}()
 	return abort, results
 }
 

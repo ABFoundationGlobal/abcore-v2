@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
@@ -1539,15 +1540,22 @@ func (w *worker) getSealingBlock(params *generateParams) *newPayloadResult {
 }
 
 func (w *worker) tryWaitProposalDoneWhenStopping() {
-	parlia, ok := w.engine.(*parlia.Parlia)
-	// if the consensus is not parlia, just skip waiting
-	if !ok {
+	// Extract the inner Parlia engine. DualConsensus wraps Parlia after the fork
+	// point, so we check both concrete types. If the engine is neither, skip waiting
+	// since NextProposalBlock and BlockInterval are Parlia-specific.
+	var innerParlia *parlia.Parlia
+	switch e := w.engine.(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		innerParlia = e.Parlia()
+	default:
 		return
 	}
 
 	currentHeader := w.chain.CurrentBlock()
 	currentBlock := currentHeader.Number.Uint64()
-	startBlock, endBlock, err := parlia.NextProposalBlock(w.chain, currentHeader, w.coinbase)
+	startBlock, endBlock, err := innerParlia.NextProposalBlock(w.chain, currentHeader, w.coinbase)
 	if err != nil {
 		log.Warn("Failed to get next proposal block, skip waiting", "err", err)
 		return
@@ -1559,7 +1567,7 @@ func (w *worker) tryWaitProposalDoneWhenStopping() {
 		log.Warn("next proposal end block has passed, ignore")
 		return
 	}
-	blockInterval, err := parlia.BlockInterval(w.chain, currentHeader)
+	blockInterval, err := innerParlia.BlockInterval(w.chain, currentHeader)
 	if err != nil {
 		log.Debug("failed to get BlockInterval when tryWaitProposalDoneWhenStopping")
 	}
