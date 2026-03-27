@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/bidutil"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
@@ -520,10 +521,18 @@ func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 	if parentHeader == nil {
 		return 450 // fermiBlockInterval
 	}
-	parlia, _ := b.engine.(*parlia.Parlia)
+	var innerParlia *parlia.Parlia
+	switch e := b.engine.(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		innerParlia = e.Parlia()
+	default:
+		return 0
+	}
 	// only `Number` and `ParentHash` are used when `BlockInterval`
 	tmpHeader := &types.Header{ParentHash: parentHeader.Hash(), Number: new(big.Int).Add(parentHeader.Number, common.Big1)}
-	blockInterval, err := parlia.BlockInterval(b.chain, tmpHeader)
+	blockInterval, err := innerParlia.BlockInterval(b.chain, tmpHeader)
 	if err != nil {
 		log.Debug("failed to get BlockInterval when bidBetterBefore")
 	}
@@ -774,8 +783,11 @@ func (b *bidSimulator) simBid(interruptCh chan int32, bidRuntime *BidRuntime) {
 	gasLimit := bidRuntime.env.header.GasLimit
 	if bidRuntime.env.gasPool == nil {
 		bidRuntime.env.gasPool = new(core.GasPool).AddGas(gasLimit)
-		if p, ok := b.engine.(*parlia.Parlia); ok {
-			bidRuntime.env.gasPool.SubGas(p.EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
+		switch e := b.engine.(type) {
+		case *parlia.Parlia:
+			bidRuntime.env.gasPool.SubGas(e.EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
+		case *dual.DualConsensus:
+			bidRuntime.env.gasPool.SubGas(e.Parlia().EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
 		}
 		bidRuntime.env.gasPool.SubGas(params.PayBidTxGasLimit)
 	}

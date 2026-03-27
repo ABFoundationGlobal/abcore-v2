@@ -36,6 +36,15 @@ func TestNewRequiresCliqueConfig(t *testing.T) {
 	}
 }
 
+func TestNewRequiresParliaConfig(t *testing.T) {
+	cfg := testConfig(100)
+	cfg.Parlia = nil
+	_, err := New(cfg, rawdb.NewMemoryDatabase(), nil, [32]byte{})
+	if err == nil {
+		t.Fatal("expected error when Parlia config is nil")
+	}
+}
+
 func TestNewSucceeds(t *testing.T) {
 	dc, err := New(testConfig(100), rawdb.NewMemoryDatabase(), nil, [32]byte{})
 	if err != nil {

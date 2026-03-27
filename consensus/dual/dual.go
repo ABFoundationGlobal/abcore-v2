@@ -50,6 +50,9 @@ func New(
 	if config.Clique == nil {
 		return nil, errors.New("DualConsensus requires Clique config to be set")
 	}
+	if config.Parlia == nil {
+		return nil, errors.New("DualConsensus requires Parlia config to be set")
+	}
 	return &DualConsensus{
 		config: config,
 		clique: clique.New(config.Clique, db),

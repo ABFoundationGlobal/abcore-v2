@@ -432,8 +432,15 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			}
 			clearPending(head.Header.Number.Uint64())
 			timestamp = time.Now().Unix()
-			if p, ok := w.engine.(*parlia.Parlia); ok {
-				signedRecent, err := p.SignRecently(w.chain, head.Header)
+			var signingParlia *parlia.Parlia
+			switch e := w.engine.(type) {
+			case *parlia.Parlia:
+				signingParlia = e
+			case *dual.DualConsensus:
+				signingParlia = e.Parlia()
+			}
+			if signingParlia != nil {
+				signedRecent, err := signingParlia.SignRecently(w.chain, head.Header)
 				if err != nil {
 					timer.Reset(recommit)
 					log.Debug("Not allowed to propose block", "err", err)
@@ -763,8 +770,13 @@ func (w *worker) commitTransactions(env *environment, plainTxs, blobTxs *transac
 	)
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
-		if p, ok := w.engine.(*parlia.Parlia); ok {
-			gasReserved := p.EstimateGasReservedForSystemTxs(w.chain, env.header)
+		switch e := w.engine.(type) {
+		case *parlia.Parlia:
+			gasReserved := e.EstimateGasReservedForSystemTxs(w.chain, env.header)
+			env.gasPool.SubGas(gasReserved)
+			log.Debug("commitTransactions", "number", env.header.Number.Uint64(), "time", env.header.Time, "EstimateGasReservedForSystemTxs", gasReserved)
+		case *dual.DualConsensus:
+			gasReserved := e.Parlia().EstimateGasReservedForSystemTxs(w.chain, env.header)
 			env.gasPool.SubGas(gasReserved)
 			log.Debug("commitTransactions", "number", env.header.Number.Uint64(), "time", env.header.Time, "EstimateGasReservedForSystemTxs", gasReserved)
 		}
@@ -1271,11 +1283,18 @@ LOOP:
 			break
 		} else {
 			if !w.inTurn() && len(workList) == 1 {
-				if parliaEngine, ok := w.engine.(*parlia.Parlia); ok {
+				var backoffParlia *parlia.Parlia
+				switch e := w.engine.(type) {
+				case *parlia.Parlia:
+					backoffParlia = e
+				case *dual.DualConsensus:
+					backoffParlia = e.Parlia()
+				}
+				if backoffParlia != nil {
 					// When mining out of turn, continuous access to the txpool and trie database
 					// may cause lock contention, slowing down transaction insertion and block importing.
 					// Applying a backoff delay mitigates this issue and significantly reduces CPU usage.
-					if blockInterval, err := parliaEngine.BlockInterval(w.chain, w.chain.CurrentBlock()); err == nil {
+					if blockInterval, err := backoffParlia.BlockInterval(w.chain, w.chain.CurrentBlock()); err == nil {
 						beforeSealing := time.Until(time.UnixMilli(int64(work.header.MilliTimestamp())))
 						if wait := beforeSealing - time.Duration(blockInterval)*time.Millisecond; wait > 0 {
 							log.Debug("Applying backoff before mining", "block", work.header.Number, "waiting(ms)", wait.Milliseconds())
