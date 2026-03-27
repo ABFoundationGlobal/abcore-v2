@@ -528,7 +528,7 @@ func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 	case *dual.DualConsensus:
 		innerParlia = e.Parlia()
 	default:
-		return 0
+		return 450 // fermiBlockInterval fallback; 0 would break bid scheduling
 	}
 	// only `Number` and `ParentHash` are used when `BlockInterval`
 	tmpHeader := &types.Header{ParentHash: parentHeader.Hash(), Number: new(big.Int).Add(parentHeader.Number, common.Big1)}
@@ -783,11 +783,16 @@ func (b *bidSimulator) simBid(interruptCh chan int32, bidRuntime *BidRuntime) {
 	gasLimit := bidRuntime.env.header.GasLimit
 	if bidRuntime.env.gasPool == nil {
 		bidRuntime.env.gasPool = new(core.GasPool).AddGas(gasLimit)
-		switch e := b.engine.(type) {
-		case *parlia.Parlia:
-			bidRuntime.env.gasPool.SubGas(e.EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
-		case *dual.DualConsensus:
-			bidRuntime.env.gasPool.SubGas(e.Parlia().EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
+		// Reserve Parlia system-tx gas only when Parlia is active at this block number.
+		// During the pre-fork Clique phase, Parlia snapshot/seal-hash rules differ and
+		// EstimateGasReservedForSystemTxs may fail or return incorrect results.
+		if b.chainConfig.IsParliaActive(bidRuntime.env.header.Number) {
+			switch e := b.engine.(type) {
+			case *parlia.Parlia:
+				bidRuntime.env.gasPool.SubGas(e.EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
+			case *dual.DualConsensus:
+				bidRuntime.env.gasPool.SubGas(e.Parlia().EstimateGasReservedForSystemTxs(b.chain, bidRuntime.env.header))
+			}
 		}
 		bidRuntime.env.gasPool.SubGas(params.PayBidTxGasLimit)
 	}
