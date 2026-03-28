@@ -376,8 +376,16 @@ func (d *DualConsensus) CheckFinalityAndNotify(chain consensus.ChainHeaderReader
 }
 
 // VerifyVote implements consensus.PoSA.
-// Votes are only produced and received in the Parlia phase; delegate unconditionally.
+// Votes are only valid in the Parlia phase. During the Clique phase, reject
+// immediately rather than triggering Parlia snapshot validation on Clique-era
+// headers (unnecessary work and a potential DoS vector).
 func (d *DualConsensus) VerifyVote(chain consensus.ChainHeaderReader, vote *types.VoteEnvelope) error {
+	if vote == nil || vote.Data == nil {
+		return errors.New("invalid vote")
+	}
+	if !d.isParlia(new(big.Int).SetUint64(vote.Data.TargetNumber)) {
+		return errors.New("VerifyVote not supported in Clique phase")
+	}
 	return d.parlia.VerifyVote(chain, vote)
 }
 
