@@ -922,6 +922,9 @@ func (h *handler) needFullBroadcastInEVN(block *types.Block) bool {
 	if !h.enableEVNFeatures {
 		return false
 	}
+	if !h.chain.Config().IsParliaActive(block.Number()) {
+		return false
+	}
 
 	var innerParlia *parlia.Parlia
 	switch e := h.chain.Engine().(type) {
@@ -944,7 +947,10 @@ func (h *handler) needFullBroadcastInEVN(block *types.Block) bool {
 
 func (h *handler) queryValidatorNodeIDsMap() map[common.Address][]enode.ID {
 	latest := h.chain.CurrentHeader()
-	if !h.chain.Config().IsMaxwell(latest.Number, latest.Time) {
+	if latest == nil {
+		return nil
+	}
+	if !h.chain.Config().IsParliaActive(latest.Number) || !h.chain.Config().IsMaxwell(latest.Number, latest.Time) {
 		return nil
 	}
 

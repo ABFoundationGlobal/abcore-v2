@@ -541,6 +541,13 @@ func (api *BlockChainAPI) getFinalizedNumber(ctx context.Context, verifiedValida
 	if parliaConfig == nil {
 		return 0, fmt.Errorf("only parlia engine supported")
 	}
+	currentHeader, err := api.b.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	if err != nil {
+		return 0, err
+	}
+	if currentHeader == nil || !api.b.ChainConfig().IsParliaActive(currentHeader.Number) {
+		return 0, fmt.Errorf("only supported when Parlia is active")
+	}
 
 	curValidators, err := api.b.CurrentValidators()
 	if err != nil { // impossible
@@ -562,11 +569,7 @@ func (api *BlockChainAPI) getFinalizedNumber(ctx context.Context, verifiedValida
 		return 0, err
 	}
 
-	latestHeader, err := api.b.HeaderByNumber(ctx, rpc.LatestBlockNumber)
-	if err != nil { // impossible
-		return 0, err
-	}
-	lastHeader := latestHeader
+	lastHeader := currentHeader
 	confirmedValSet := make(map[common.Address]struct{}, valLen)
 	confirmedValSet[lastHeader.Coinbase] = struct{}{}
 	epochLength := int(1000) // maxwellEpochLength
@@ -579,7 +582,7 @@ func (api *BlockChainAPI) getFinalizedNumber(ctx context.Context, verifiedValida
 	}
 
 	finalizedBlockNumber := max(fastFinalizedHeader.Number.Int64(), lastHeader.Number.Int64())
-	log.Debug("getFinalizedNumber", "LatestBlockNumber", latestHeader.Number.Int64(), "fastFinalizedHeight", fastFinalizedHeader.Number.Int64(),
+	log.Debug("getFinalizedNumber", "LatestBlockNumber", currentHeader.Number.Int64(), "fastFinalizedHeight", fastFinalizedHeader.Number.Int64(),
 		"lastHeader", lastHeader.Number.Int64(), "finalizedBlockNumber", finalizedBlockNumber, "len(confirmedValSet)", len(confirmedValSet))
 
 	return finalizedBlockNumber, nil

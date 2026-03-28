@@ -521,6 +521,14 @@ func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 	if parentHeader == nil {
 		return 450 // fermiBlockInterval
 	}
+	nextBlockNumber := new(big.Int).Add(parentHeader.Number, common.Big1)
+	if !b.chainConfig.IsParliaActive(nextBlockNumber) {
+		if b.chainConfig.Clique != nil && b.chainConfig.Clique.Period > 0 {
+			return b.chainConfig.Clique.Period * 1000
+		}
+		return 450 // fermiBlockInterval fallback
+	}
+
 	var innerParlia *parlia.Parlia
 	switch e := b.engine.(type) {
 	case *parlia.Parlia:
@@ -531,7 +539,7 @@ func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 		return 450 // fermiBlockInterval fallback; 0 would break bid scheduling
 	}
 	// only `Number` and `ParentHash` are used when `BlockInterval`
-	tmpHeader := &types.Header{ParentHash: parentHeader.Hash(), Number: new(big.Int).Add(parentHeader.Number, common.Big1)}
+	tmpHeader := &types.Header{ParentHash: parentHeader.Hash(), Number: nextBlockNumber}
 	blockInterval, err := innerParlia.BlockInterval(b.chain, tmpHeader)
 	if err != nil {
 		log.Debug("failed to get BlockInterval when bidBetterBefore")

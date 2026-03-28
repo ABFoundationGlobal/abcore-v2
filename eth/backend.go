@@ -655,13 +655,14 @@ func (s *Ethereum) waitForSyncAndMaxwell(parlia *parlia.Parlia) {
 			if !s.Synced() {
 				continue
 			}
-			// Check if Maxwell fork is active
+			// Node ID registration depends on Parlia system contracts, so require
+			// both the consensus switch and Maxwell to be active.
 			header := s.blockchain.CurrentHeader()
 			if header == nil {
 				continue
 			}
 			chainConfig := s.blockchain.Config()
-			if !chainConfig.IsMaxwell(header.Number, header.Time) {
+			if !chainConfig.IsParliaActive(header.Number) || !chainConfig.IsMaxwell(header.Number, header.Time) {
 				continue
 			}
 			log.Info("Node is synced and Maxwell fork is active, proceeding with node ID registration")
