@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
@@ -431,8 +432,21 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			}
 			clearPending(head.Header.Number.Uint64())
 			timestamp = time.Now().Unix()
-			if p, ok := w.engine.(*parlia.Parlia); ok {
-				signedRecent, err := p.SignRecently(w.chain, head.Header)
+			var signingParlia *parlia.Parlia
+			switch e := w.engine.(type) {
+			case *parlia.Parlia:
+				signingParlia = e
+			case *dual.DualConsensus:
+				// Only use Parlia signing rules once Parlia is active for the next block.
+				// During the pre-fork Clique phase, Parlia snapshot/seal-hash rules differ
+				// from Clique and would produce errors or incorrect results.
+				nextBlockNum := new(big.Int).Add(head.Header.Number, big.NewInt(1))
+				if w.chainConfig.IsParliaActive(nextBlockNum) {
+					signingParlia = e.Parlia()
+				}
+			}
+			if signingParlia != nil {
+				signedRecent, err := signingParlia.SignRecently(w.chain, head.Header)
 				if err != nil {
 					timer.Reset(recommit)
 					log.Debug("Not allowed to propose block", "err", err)
@@ -762,10 +776,17 @@ func (w *worker) commitTransactions(env *environment, plainTxs, blobTxs *transac
 	)
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
-		if p, ok := w.engine.(*parlia.Parlia); ok {
-			gasReserved := p.EstimateGasReservedForSystemTxs(w.chain, env.header)
-			env.gasPool.SubGas(gasReserved)
-			log.Debug("commitTransactions", "number", env.header.Number.Uint64(), "time", env.header.Time, "EstimateGasReservedForSystemTxs", gasReserved)
+		if w.chainConfig.IsParliaActive(env.header.Number) {
+			switch e := w.engine.(type) {
+			case *parlia.Parlia:
+				gasReserved := e.EstimateGasReservedForSystemTxs(w.chain, env.header)
+				env.gasPool.SubGas(gasReserved)
+				log.Debug("commitTransactions", "number", env.header.Number.Uint64(), "time", env.header.Time, "EstimateGasReservedForSystemTxs", gasReserved)
+			case *dual.DualConsensus:
+				gasReserved := e.Parlia().EstimateGasReservedForSystemTxs(w.chain, env.header)
+				env.gasPool.SubGas(gasReserved)
+				log.Debug("commitTransactions", "number", env.header.Number.Uint64(), "time", env.header.Time, "EstimateGasReservedForSystemTxs", gasReserved)
+			}
 		}
 	}
 
@@ -1270,11 +1291,23 @@ LOOP:
 			break
 		} else {
 			if !w.inTurn() && len(workList) == 1 {
-				if parliaEngine, ok := w.engine.(*parlia.Parlia); ok {
+				var backoffParlia *parlia.Parlia
+				switch e := w.engine.(type) {
+				case *parlia.Parlia:
+					backoffParlia = e
+				case *dual.DualConsensus:
+					// The Parlia out-of-turn backoff is only relevant once Parlia is active.
+					// Parlia snapshots and seal-hash rules differ from Clique; using them on
+					// Clique-era headers can produce errors.
+					if w.chainConfig.IsParliaActive(work.header.Number) {
+						backoffParlia = e.Parlia()
+					}
+				}
+				if backoffParlia != nil {
 					// When mining out of turn, continuous access to the txpool and trie database
 					// may cause lock contention, slowing down transaction insertion and block importing.
 					// Applying a backoff delay mitigates this issue and significantly reduces CPU usage.
-					if blockInterval, err := parliaEngine.BlockInterval(w.chain, w.chain.CurrentBlock()); err == nil {
+					if blockInterval, err := backoffParlia.BlockInterval(w.chain, w.chain.CurrentBlock()); err == nil {
 						beforeSealing := time.Until(time.UnixMilli(int64(work.header.MilliTimestamp())))
 						if wait := beforeSealing - time.Duration(blockInterval)*time.Millisecond; wait > 0 {
 							log.Debug("Applying backoff before mining", "block", work.header.Number, "waiting(ms)", wait.Milliseconds())
@@ -1539,15 +1572,29 @@ func (w *worker) getSealingBlock(params *generateParams) *newPayloadResult {
 }
 
 func (w *worker) tryWaitProposalDoneWhenStopping() {
-	parlia, ok := w.engine.(*parlia.Parlia)
-	// if the consensus is not parlia, just skip waiting
-	if !ok {
+	// Extract the inner Parlia engine. DualConsensus wraps Parlia after the fork
+	// point, so we check both concrete types. If the engine is neither, skip waiting
+	// since NextProposalBlock and BlockInterval are Parlia-specific.
+	var innerParlia *parlia.Parlia
+	switch e := w.engine.(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		// NextProposalBlock/BlockInterval rely on Parlia snapshots; they are only valid
+		// once Parlia is active. Skip waiting during the pre-fork Clique phase to avoid
+		// errors from mismatched seal-hash/snapshot rules.
+		currentHeader := w.chain.CurrentBlock()
+		if w.chainConfig.IsParliaActive(currentHeader.Number) {
+			innerParlia = e.Parlia()
+		}
+	}
+	if innerParlia == nil {
 		return
 	}
 
 	currentHeader := w.chain.CurrentBlock()
 	currentBlock := currentHeader.Number.Uint64()
-	startBlock, endBlock, err := parlia.NextProposalBlock(w.chain, currentHeader, w.coinbase)
+	startBlock, endBlock, err := innerParlia.NextProposalBlock(w.chain, currentHeader, w.coinbase)
 	if err != nil {
 		log.Warn("Failed to get next proposal block, skip waiting", "err", err)
 		return
@@ -1559,7 +1606,7 @@ func (w *worker) tryWaitProposalDoneWhenStopping() {
 		log.Warn("next proposal end block has passed, ignore")
 		return
 	}
-	blockInterval, err := parlia.BlockInterval(w.chain, currentHeader)
+	blockInterval, err := innerParlia.BlockInterval(w.chain, currentHeader)
 	if err != nil {
 		log.Debug("failed to get BlockInterval when tryWaitProposalDoneWhenStopping")
 	}

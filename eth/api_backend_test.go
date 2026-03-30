@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -37,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/holiman/uint256"
 )
 
@@ -79,6 +81,39 @@ func initBackend(withLocal bool) *EthAPIBackend {
 	}
 	return &EthAPIBackend{
 		eth: eth,
+	}
+}
+
+func initDualBackendForCliquePhase(t *testing.T) *EthAPIBackend {
+	t.Helper()
+
+	db := rawdb.NewMemoryDatabase()
+	chainConfig := *params.ABCoreTestChainConfig
+	chainConfig.ParliaGenesisBlock = big.NewInt(10)
+	extraData := make([]byte, 32+common.AddressLength+65)
+	copy(extraData[32:], address.Bytes())
+	gspec := &core.Genesis{
+		Config:     &chainConfig,
+		Alloc:      types.GenesisAlloc{address: {Balance: funds}},
+		Difficulty: common.Big1,
+		ExtraData:  extraData,
+	}
+	genesis := gspec.MustCommit(db, triedb.NewDatabase(db, triedb.HashDefaults))
+	engine, err := dual.New(&chainConfig, db, nil, genesis.Hash())
+	if err != nil {
+		t.Fatalf("failed to create dual consensus engine: %v", err)
+	}
+	chain, err := core.NewBlockChain(db, gspec, engine, nil)
+	if err != nil {
+		t.Fatalf("failed to create blockchain: %v", err)
+	}
+	t.Cleanup(chain.Stop)
+
+	return &EthAPIBackend{
+		eth: &Ethereum{
+			blockchain: chain,
+			engine:     engine,
+		},
 	}
 }
 
@@ -129,6 +164,18 @@ func pricedSetCodeTxWithAuth(nonce uint64, gaslimit uint64, gasFee, tip *uint256
 func TestSendTx(t *testing.T) {
 	testSendTx(t, false)
 	testSendTx(t, true)
+}
+
+func TestCurrentValidatorsRejectsDualConsensusBeforeParliaGenesis(t *testing.T) {
+	b := initDualBackendForCliquePhase(t)
+
+	_, err := b.CurrentValidators()
+	if err == nil {
+		t.Fatal("expected CurrentValidators to reject Clique phase under DualConsensus")
+	}
+	if err.Error() != "validators are not available during Clique phase" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSendTxEIP2681(t *testing.T) {

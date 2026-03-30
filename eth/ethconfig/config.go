@@ -18,13 +18,13 @@
 package ethconfig
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
@@ -271,9 +271,7 @@ func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, ee *et
 	//   - set  → DualConsensus (Phase 2: Clique pre-fork, Parlia post-fork)
 	if config.HasCliqueAndParlia() {
 		if config.ParliaGenesisBlock != nil {
-			// DualConsensus is not yet implemented (task I-2).
-			// TODO(I-2): return dual.New(config, db, ee, genesisHash), nil
-			return nil, fmt.Errorf("ABCore DualConsensus (parliaGenesisBlock=%v) is not yet implemented", config.ParliaGenesisBlock)
+			return dual.New(config, db, ee, genesisHash)
 		}
 		return clique.New(config.Clique, db), nil
 	}
