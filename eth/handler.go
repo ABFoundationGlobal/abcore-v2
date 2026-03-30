@@ -33,6 +33,7 @@ import (
 	"github.com/dchest/siphash"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/monitor"
@@ -921,14 +922,22 @@ func (h *handler) needFullBroadcastInEVN(block *types.Block) bool {
 	if !h.enableEVNFeatures {
 		return false
 	}
+	if !h.chain.Config().IsParliaActive(block.Number()) {
+		return false
+	}
 
-	parlia, ok := h.chain.Engine().(*parlia.Parlia)
-	if !ok {
+	var innerParlia *parlia.Parlia
+	switch e := h.chain.Engine().(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		innerParlia = e.Parlia()
+	default:
 		return false
 	}
 	coinbase := block.Coinbase()
 	// check whether the block is created by self
-	if parlia.ConsensusAddress() == coinbase {
+	if innerParlia.ConsensusAddress() == coinbase {
 		log.Debug("full broadcast mined block to EVN", "coinbase", coinbase)
 		return true
 	}
@@ -938,17 +947,25 @@ func (h *handler) needFullBroadcastInEVN(block *types.Block) bool {
 
 func (h *handler) queryValidatorNodeIDsMap() map[common.Address][]enode.ID {
 	latest := h.chain.CurrentHeader()
-	if !h.chain.Config().IsMaxwell(latest.Number, latest.Time) {
+	if latest == nil {
+		return nil
+	}
+	if !h.chain.Config().IsParliaActive(latest.Number) || !h.chain.Config().IsMaxwell(latest.Number, latest.Time) {
 		return nil
 	}
 
 	log.Debug("queryValidatorNodeIDs after maxwell", "number", latest.Number, "time", latest.Time)
-	parlia, ok := h.chain.Engine().(*parlia.Parlia)
-	if !ok {
+	var innerParlia *parlia.Parlia
+	switch e := h.chain.Engine().(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		innerParlia = e.Parlia()
+	default:
 		return nil
 	}
 
-	nodeIDsMap, err := parlia.GetNodeIDsMap()
+	nodeIDsMap, err := innerParlia.GetNodeIDsMap()
 	if err != nil {
 		return nil
 	}
