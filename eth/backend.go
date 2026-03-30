@@ -31,6 +31,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 
@@ -494,13 +495,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		// Create votePool instance
 		votePool := vote.NewVotePool(eth.blockchain, posa)
 		eth.votePool = votePool
-		if parlia, ok := eth.engine.(*parlia.Parlia); ok {
+
+		// Attach votePool to the inner Parlia engine so the miner can collect votes
+		// for block assembly. DualConsensus exposes the inner Parlia via Parlia().
+		var innerParlia *parlia.Parlia
+		if p, ok := eth.engine.(*parlia.Parlia); ok {
+			innerParlia = p
+		} else if dc, ok := eth.engine.(*dual.DualConsensus); ok {
+			innerParlia = dc.Parlia()
+		}
+		if innerParlia != nil {
 			if !config.Miner.DisableVoteAttestation {
 				// if there is no VotePool in Parlia Engine, the miner can't get votes for assembling
-				parlia.VotePool = votePool
+				innerParlia.VotePool = votePool
 			}
 		} else {
-			return nil, errors.New("Engine is not Parlia type")
+			return nil, errors.New("Engine is not Parlia or DualConsensus type")
 		}
 		log.Info("Create votePool successfully")
 		eth.handler.votepool = votePool
@@ -571,11 +581,13 @@ func makeExtraData(extra []byte) []byte {
 func (s *Ethereum) APIs() []rpc.API {
 	apis := ethapi.GetAPIs(s.APIBackend)
 
-	// Append any APIs exposed explicitly by the consensus engine
-	if p, ok := s.engine.(*parlia.Parlia); ok {
+	// Append any APIs exposed explicitly by the consensus engine.
+	// DualConsensus.APIs() already delegates to both inner engines.
+	if d, ok := s.engine.(*dual.DualConsensus); ok {
+		apis = append(apis, d.APIs(s.BlockChain())...)
+	} else if p, ok := s.engine.(*parlia.Parlia); ok {
 		apis = append(apis, p.APIs(s.BlockChain())...)
-	}
-	if c, ok := s.engine.(*clique.Clique); ok {
+	} else if c, ok := s.engine.(*clique.Clique); ok {
 		apis = append(apis, c.APIs(s.BlockChain())...)
 	}
 
@@ -643,13 +655,14 @@ func (s *Ethereum) waitForSyncAndMaxwell(parlia *parlia.Parlia) {
 			if !s.Synced() {
 				continue
 			}
-			// Check if Maxwell fork is active
+			// Node ID registration depends on Parlia system contracts, so require
+			// both the consensus switch and Maxwell to be active.
 			header := s.blockchain.CurrentHeader()
 			if header == nil {
 				continue
 			}
 			chainConfig := s.blockchain.Config()
-			if !chainConfig.IsMaxwell(header.Number, header.Time) {
+			if !chainConfig.IsParliaActive(header.Number) || !chainConfig.IsMaxwell(header.Number, header.Time) {
 				continue
 			}
 			log.Info("Node is synced and Maxwell fork is active, proceeding with node ID registration")
@@ -811,6 +824,22 @@ func (s *Ethereum) StartMining() error {
 			// Start a goroutine to handle node ID registration after sync
 			go func() {
 				s.waitForSyncAndMaxwell(parlia)
+			}()
+		}
+
+		if dc, ok := s.engine.(*dual.DualConsensus); ok {
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+			if wallet == nil || err != nil {
+				log.Error("Etherbase account unavailable locally", "err", err)
+				return fmt.Errorf("signer missing: %v", err)
+			}
+			// Authorize both inner engines: Clique handles pre-fork blocks,
+			// Parlia handles post-fork blocks.
+			dc.Clique().Authorize(eb, wallet.SignData)
+			dc.Parlia().Authorize(eb, wallet.SignData, wallet.SignTx)
+			// Start node ID registration goroutine — same as the pure Parlia path.
+			go func() {
+				s.waitForSyncAndMaxwell(dc.Parlia())
 			}()
 		}
 

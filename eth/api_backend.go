@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/dual"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
@@ -509,13 +510,28 @@ func (b *EthAPIBackend) Engine() consensus.Engine {
 }
 
 func (b *EthAPIBackend) CurrentValidators() ([]common.Address, error) {
-	if p, ok := b.eth.engine.(*parlia.Parlia); ok {
-		service := p.APIs(b.Chain())[0].Service
+	currentHeader := b.eth.blockchain.CurrentHeader()
+	if currentHeader == nil {
+		return nil, errors.New("current header not found")
+	}
+
+	var innerParlia *parlia.Parlia
+	switch e := b.eth.engine.(type) {
+	case *parlia.Parlia:
+		innerParlia = e
+	case *dual.DualConsensus:
+		if !b.eth.blockchain.Config().IsParliaActive(currentHeader.Number) {
+			return nil, errors.New("validators are not available during Clique phase")
+		}
+		innerParlia = e.Parlia()
+	}
+	if innerParlia != nil {
+		service := innerParlia.APIs(b.Chain())[0].Service
 		currentHead := rpc.LatestBlockNumber
 		return service.(*parlia.API).GetValidators(&currentHead)
 	}
 
-	return []common.Address{}, errors.New("not supported")
+	return nil, errors.New("not supported")
 }
 
 func (b *EthAPIBackend) CurrentHeader() *types.Header {
