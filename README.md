@@ -2,14 +2,14 @@
 
 ABCore v2 is a fork of [bnb-chain/bsc](https://github.com/bnb-chain/bsc) upgrading ABCore from Clique PoA (go-ethereum v1.13) to Parlia PoSA with full modern EVM support.
 
-**Upstream base:** `bnb-chain/bsc` at commit [`1efeee04`](https://github.com/bnb-chain/bsc/commit/1efeee0421003c6e9a28c56dd40b55bf482cf26c) (tag: `v1.7.0-alpha`)
+**Upstream base:** `bnb-chain/bsc` at commit [`ce498e9d`](https://github.com/bnb-chain/bsc/commit/ce498e9d873b691a76f4e42d1a93b94880017efb) (tag: `v1.7.2`)
 
 ## Branch Strategy
 
 | Branch | Purpose |
 |---|---|
 | `master` | ABCore stable — contains full BSC history + ABCore commits on top; default branch |
-| `bsc` | Pinned to latest stable BSC release tag (current: `v1.7.0-alpha`) — **never commit here directly** |
+| `bsc` | Pinned to latest stable BSC release tag (current: `v1.7.2`) — **never commit here directly** |
 | `feature/*` | Development branches, branched from `master` |
 
 `master` contains the complete upstream BSC commit history with ABCore changes layered on top, following the same model as BSC itself (which forks go-ethereum). This gives a real git merge base for upstream syncs.
@@ -29,11 +29,11 @@ git fetch bsc --tags
 git merge --ff-only v1.7.3          # use the release tag, never floating bsc/master
 git push origin bsc
 
-# 2. Create a sync branch from the new bsc tip
-git checkout -b sync/bsc-vX.Y.Z bsc
+# 2. Create a sync branch from master
+git checkout -b sync/bsc-vX.Y.Z master
 
-# 3. Merge master into the sync branch (conflicts resolved here)
-git merge master
+# 3. Merge bsc into the sync branch (conflicts resolved here)
+git merge bsc
 # resolve any conflicts, then:
 git push origin sync/bsc-vX.Y.Z
 
@@ -42,7 +42,7 @@ git push origin sync/bsc-vX.Y.Z
 #    This records the new BSC release in master's ancestry for future syncs.
 ```
 
-Conflicts (e.g. a consensus file changed by both BSC and ABCore) are resolved on the sync branch. `master` is not touched until the PR is reviewed and merged.
+The sync branch is created from `master` and `bsc` is merged in. This means the PR diff shows only the new BSC delta plus any conflict resolutions — not the full ABCore history. `master` is not touched until the PR is reviewed and merged.
 
 ### Normal feature development
 
@@ -210,11 +210,11 @@ Download latest chaindata snapshot from [here](https://github.com/bnb-chain/bsc-
 
 #### 4. Start a full node
 ```shell
-## It will run with Path-Base Storage Scheme by default and enable inline state prune, keeping the latest 90000 blocks' history state.
-./geth --config ./config.toml --datadir ./node  --cache 8000 --rpc.allow-unprotected-txs --history.transactions 0
+## It will run with Path-Base Storage Scheme by default and enable inline state prune, keeping the latest 600000 blocks' history state.
+./geth --config ./config.toml --datadir ./node  --cache 8000 --rpc.allow-unprotected-txs --history.transactions 0 --history.logs 576000
 
 ## It is recommend to run fullnode with `--tries-verify-mode none` if you want high performance and care little about state consistency.
-./geth --config ./config.toml --datadir ./node  --cache 8000 --rpc.allow-unprotected-txs --history.transactions 0 --tries-verify-mode none
+./geth --config ./config.toml --datadir ./node  --cache 8000 --rpc.allow-unprotected-txs --history.transactions 0 --history.logs 576000 --tries-verify-mode none
 ```
 
 #### 5. Monitor node status
