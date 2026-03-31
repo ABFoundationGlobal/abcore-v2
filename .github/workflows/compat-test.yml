@@ -1,0 +1,118 @@
+name: Compat Test
+
+on:
+  push:
+    branches:
+      - master
+
+  pull_request:
+    branches:
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - '**/*.go'
+              - 'go.sum'
+              - 'go.mod'
+              - 'script/compat-clique-v1-v2/**'
+              - 'script/no-genesis-v2/**'
+
+  compat-test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.25.x"
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Cache v1 binary
+      uses: actions/cache@v4
+      with:
+        path: script/compat-clique-v1-v2/bin/geth-v1
+        key: geth-v1-${{ hashFiles('script/compat-clique-v1-v2/00-get-v1-geth.sh') }}
+
+    - name: Build v2
+      env:
+        CGO_CFLAGS: "-O -D__BLST_PORTABLE__"
+        CGO_CFLAGS_ALLOW: "-O -D__BLST_PORTABLE__"
+      run: make geth
+
+    - name: Download v1 binary (if not cached)
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: bash script/compat-clique-v1-v2/00-get-v1-geth.sh
+
+    - name: Run no-genesis-v2 tests
+      env:
+        ABCORE_V2_GETH: ${{ github.workspace }}/build/bin/geth
+        ABCORE_V1_GETH: ${{ github.workspace }}/script/compat-clique-v1-v2/bin/geth-v1
+      run: bash script/no-genesis-v2/99-run-all.sh
+
+    - name: Run compat-clique-v1-v2 tests
+      env:
+        ABCORE_V2_GETH: ${{ github.workspace }}/build/bin/geth
+        ABCORE_V1_GETH: ${{ github.workspace }}/script/compat-clique-v1-v2/bin/geth-v1
+      run: bash script/compat-clique-v1-v2/99-run-all.sh
+
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: compat-test-logs
+        path: |
+          script/compat-clique-v1-v2/data-*/
+          script/no-genesis-v2/data-*/
+        retention-days: 3
+
+  compat-test-status:
+    name: compat-test-status
+    needs:
+      - changes
+      - compat-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Finalize Compat Test status
+      run: |
+        if [ "${{ needs.changes.outputs.src }}" != "true" ]; then
+          echo "Compat Test not required for this change set."
+          exit 0
+        fi
+
+        if [ "${{ needs.compat-test.result }}" != "success" ]; then
+          echo "Compat Test result: ${{ needs.compat-test.result }}"
+          exit 1
+        fi
+
+        echo "Compat Test passed."
