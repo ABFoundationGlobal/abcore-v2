@@ -8,34 +8,41 @@ ABCore v2 is a fork of [bnb-chain/bsc](https://github.com/bnb-chain/bsc) upgradi
 
 | Branch | Purpose |
 |---|---|
-| `master` | ABCore stable — default branch, all PRs target here |
-| `bsc-master` | Pure upstream mirror of `bnb-chain/bsc` master — **never commit here directly** |
+| `master` | ABCore stable — contains full BSC history + ABCore commits on top; default branch |
+| `bsc` | Pinned to latest stable BSC release tag (current: `v1.7.0-alpha`) — **never commit here directly** |
 | `feature/*` | Development branches, branched from `master` |
 
-### Syncing upstream changes
+`master` contains the complete upstream BSC commit history with ABCore changes layered on top, following the same model as BSC itself (which forks go-ethereum). This gives a real git merge base for upstream syncs.
 
-When BSC releases new changes, sync them via a dedicated branch to keep both `bsc-master` and `master` clean:
+To see only ABCore-specific changes:
+```bash
+git log --oneline bsc..master       # ABCore commits only
+git diff bsc master                 # full ABCore diff against last synced BSC release
+```
+
+### Syncing a new BSC release
 
 ```bash
-# 1. Update bsc-master (fast-forward only — must never diverge from upstream)
-git fetch bsc
-git checkout bsc-master
-git merge --ff-only bsc/master
-git push origin bsc-master
+# 1. Advance bsc to the new release tag (always fast-forward)
+git checkout bsc
+git fetch bsc --tags
+git merge --ff-only v1.7.3          # use the release tag, never floating bsc/master
+git push origin bsc
 
-# 2. Create a sync branch from bsc-master
-git checkout -b sync/upstream-YYYY-MM-DD bsc-master
+# 2. Create a sync branch from the new bsc tip
+git checkout -b sync/bsc-vX.Y.Z bsc
 
 # 3. Merge master into the sync branch (conflicts resolved here)
 git merge master
 # resolve any conflicts, then:
-git push origin sync/upstream-YYYY-MM-DD
+git push origin sync/bsc-vX.Y.Z
 
-# 4. Open PR: sync/upstream-YYYY-MM-DD → master
+# 4. Open PR: sync/bsc-vX.Y.Z → master
 #    Use "Create a merge commit" (not squash, not rebase)
+#    This records the new BSC release in master's ancestry for future syncs.
 ```
 
-If there are conflicts (e.g. we modified a consensus file that upstream also changed), they are resolved on the sync branch. Neither `bsc-master` nor `master` is touched until the PR is merged.
+Conflicts (e.g. a consensus file changed by both BSC and ABCore) are resolved on the sync branch. `master` is not touched until the PR is reviewed and merged.
 
 ### Normal feature development
 
