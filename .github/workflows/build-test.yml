@@ -33,6 +33,7 @@ jobs:
               - 'docker/**'
               - 'Dockerfile*'
               - 'Makefile'
+              - '.github/workflows/build-test.yml'
 
   build-test:
     needs: changes

@@ -31,6 +31,7 @@ jobs:
               - 'go.sum'
               - 'go.mod'
               - 'build/ci.go'
+              - '.github/workflows/unit-test.yml'
 
   unit-test:
     needs: changes

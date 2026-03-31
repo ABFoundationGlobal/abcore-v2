@@ -31,6 +31,7 @@ jobs:
               - 'go.sum'
               - 'go.mod'
               - 'tests/run-evm-tests.sh'
+              - '.github/workflows/evm-tests.yml'
 
   evm-test:
     needs: changes

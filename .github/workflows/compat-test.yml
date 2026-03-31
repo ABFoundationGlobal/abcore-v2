@@ -32,6 +32,7 @@ jobs:
               - 'go.mod'
               - 'script/compat-clique-v1-v2/**'
               - 'script/no-genesis-v2/**'
+              - '.github/workflows/compat-test.yml'
 
   compat-test:
     needs: changes

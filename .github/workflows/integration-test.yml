@@ -34,6 +34,7 @@ jobs:
               - 'Dockerfile*'
               - 'tests/truffle/**'
               - 'Makefile'
+              - '.github/workflows/integration-test.yml'
 
   integration-test:
     needs: changes
