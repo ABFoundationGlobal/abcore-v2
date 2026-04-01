@@ -37,7 +37,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.src == 'true'
     env:
-      EVM_FIXTURES_VERSION: v5.1.0
+      EVM_FIXTURES_VERSION: v5.4.0
     strategy:
       matrix:
         go-version: [1.25.x]
