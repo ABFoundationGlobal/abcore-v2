@@ -5,7 +5,8 @@
 #   1. All 3 nodes are alive and on the same chain past the fork
 #   2. Block 0 (genesis epoch) has Clique extraData with signer list (>97 bytes)
 #   3. Block at PARLIA_GENESIS_BLOCK is produced by DualConsensus (via parlia.getValidators)
-#   4. Parlia validator set at fork block contains the same addresses as Clique signers
+#   4. Parlia validator set at fork block contains the same addresses as the last
+#      pre-fork Clique checkpoint signer set
 #   5. System contract ValidatorSet (0x1000) has non-empty code at PARLIA_GENESIS_BLOCK
 #   6. ValidatorSet code was absent before the fork
 set -euo pipefail
@@ -67,16 +68,30 @@ else
   fail "Block ${PRE_FORK} not found"
 fi
 
-# ── 5. parlia.getValidators() at fork block returns our Clique signers ────────
-# Extract Clique signers from genesis extraData
-inner_hex="${genesis_hex:64:$(( ${#genesis_hex} - 64 - 130 ))}"
+# ── 5. parlia.getValidators() at fork block returns the last Clique signer set ─
+CHECKPOINT_BLOCK=$(( PRE_FORK - (PRE_FORK % CLIQUE_EPOCH) ))
+checkpoint_ed=$(attach_exec "$GETH" "$IPC1" "eth.getBlock(${CHECKPOINT_BLOCK}).extraData")
+checkpoint_hex="${checkpoint_ed#0x}"
+if [[ -z "$checkpoint_hex" || "$checkpoint_hex" == "$checkpoint_ed" ]]; then
+  fail "Could not read extraData for Clique checkpoint block ${CHECKPOINT_BLOCK}"
+  checkpoint_hex=""
+fi
+
+# Extract Clique signers from the last pre-fork checkpoint extraData
+inner_hex=""
+if [[ ${#checkpoint_hex} -gt 194 ]]; then
+  inner_hex="${checkpoint_hex:64:$(( ${#checkpoint_hex} - 64 - 130 ))}"
+fi
 clique_signers=()
 while [[ ${#inner_hex} -ge 40 ]]; do
   addr="0x${inner_hex:0:40}"
   clique_signers+=("$(echo "$addr" | tr '[:upper:]' '[:lower:]')")
   inner_hex="${inner_hex:40}"
 done
-log "Clique signers (from genesis): ${clique_signers[*]}"
+log "Clique signers (from checkpoint ${CHECKPOINT_BLOCK}): ${clique_signers[*]}"
+if [[ ${#clique_signers[@]} -eq 0 ]]; then
+  fail "No Clique signers parsed from checkpoint ${CHECKPOINT_BLOCK}"
+fi
 
 # parlia.getValidators uses HTTP port since IPC only exposes the parlia namespace
 # if the API is registered. Use the HTTP endpoint instead.
@@ -96,12 +111,7 @@ for v in result:
 " 2>/dev/null || true)
 
   if [[ -z "$parlia_vals" ]]; then
-    # parlia.getValidators may return null for unknown-genesis chains since the
-    # Parlia snapshot is initialized from the Clique checkpoint at the fork block.
-    # A null/empty result here is acceptable — the key test is that the system
-    # contract was deployed (check 6 below). Log and skip rather than fail.
-    log "  INFO: parlia.getValidators(${FORK_BLOCK}) returned empty (defaultNet — expected)"
-    ok "parlia_getValidators call succeeded (empty result OK for defaultNet)"
+    fail "parlia_getValidators(${FORK_BLOCK}) returned empty"
   else
     log "Parlia validators: ${parlia_vals}"
     ok "parlia_getValidators(${FORK_BLOCK}) returned validators"

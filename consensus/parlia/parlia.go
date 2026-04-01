@@ -902,8 +902,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	//
 	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
 	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
-	// The genesis snapshot already carries the correct validator set (same signers as the
-	// last Clique epoch checkpoint, parsed from genesis extraData).
+	// Before skipping the Clique-sealed prefix, reseed the snapshot validator set from the
+	// last Clique checkpoint so fork-block Prepare/Seal/CalcDifficulty use the validator
+	// set that was actually active at the transition point.
 	//
 	// When the headers slice contains only pre-fork blocks, advance the snapshot's Number
 	// and Hash to the tip of that range so that apply()'s contiguity check passes for the
@@ -920,6 +921,12 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 		}
 		if firstPost > 0 {
+			snap = snap.copy()
+			forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
+			if err != nil {
+				return nil, err
+			}
+			snap.Validators = validatorInfoMap(forkValidators)
 			// Advance the snapshot anchor to the last pre-fork block, skipping
 			// apply() for those Clique-sealed headers entirely.
 			last := headers[firstPost-1]
@@ -1049,6 +1056,16 @@ func (p *Parlia) getValidatorsFromCliqueCheckpoint(chain consensus.ChainHeaderRe
 	// Clique epoch headers use the same pre-Luban format as Parlia; parseValidators handles both.
 	validators, _, err := parseValidators(checkpointHeader, p.chainConfig, cliqueCfg.Epoch)
 	return validators, err
+}
+
+func validatorInfoMap(validators []common.Address) map[common.Address]*ValidatorInfo {
+	ordered := append([]common.Address(nil), validators...)
+	sort.Sort(validatorsAscending(ordered))
+	validatorSet := make(map[common.Address]*ValidatorInfo, len(ordered))
+	for idx, validator := range ordered {
+		validatorSet[validator] = &ValidatorInfo{Index: idx + 1}
+	}
+	return validatorSet
 }
 
 func (p *Parlia) prepareValidators(chain consensus.ChainHeaderReader, header *types.Header) error {
