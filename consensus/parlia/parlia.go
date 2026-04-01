@@ -895,6 +895,40 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
+	// When DualConsensus is active (HasCliqueAndParlia), Parlia must not apply pre-fork
+	// Clique-sealed headers. Clique signs with SealHash(header) (no chainId) while Parlia's
+	// ecrecover uses types.SealHash(header, chainId), recovering the wrong address and
+	// returning errUnauthorizedValidator for every Clique-sealed block.
+	//
+	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
+	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
+	// The genesis snapshot already carries the correct validator set (same signers as the
+	// last Clique epoch checkpoint, parsed from genesis extraData).
+	//
+	// When the headers slice contains only pre-fork blocks, advance the snapshot's Number
+	// and Hash to the tip of that range so that apply()'s contiguity check passes for the
+	// first post-fork block. When there is a mix, filter out the pre-fork prefix.
+	if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.ParliaGenesisBlock != nil {
+		forkBlock := p.chainConfig.ParliaGenesisBlock.Uint64()
+		// headers is now in ascending order (after the reversal above).
+		// Find the index of the first post-fork header.
+		firstPost := len(headers)
+		for i, h := range headers {
+			if h.Number.Uint64() >= forkBlock {
+				firstPost = i
+				break
+			}
+		}
+		if firstPost > 0 {
+			// Advance the snapshot anchor to the last pre-fork block, skipping
+			// apply() for those Clique-sealed headers entirely.
+			last := headers[firstPost-1]
+			snap.Number = last.Number.Uint64()
+			snap.Hash = last.Hash()
+		}
+		headers = headers[firstPost:]
+	}
+
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig)
 	if err != nil {
 		return nil, err
