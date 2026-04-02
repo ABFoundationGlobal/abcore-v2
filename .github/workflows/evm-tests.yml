@@ -21,8 +21,8 @@ jobs:
     outputs:
       src: ${{ steps.filter.outputs.src }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -31,6 +31,7 @@ jobs:
               - 'go.sum'
               - 'go.mod'
               - 'tests/run-evm-tests.sh'
+              - '.github/workflows/evm-tests.yml'
 
   evm-test:
     needs: changes
@@ -57,7 +58,7 @@ jobs:
         go-version: ${{ matrix.go-version }}
 
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - uses: actions/cache@v4
       with:
