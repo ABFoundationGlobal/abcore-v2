@@ -123,6 +123,19 @@ ${ADDR3},${ADDR3},${ADDR3},0x64,${BLS_PLACEHOLDER}
 EOF
 
 # ---- Step 5: Build system contract bytecode ----
+
+# Pre-build diagnostic: run generate-validators + the node command directly
+# so any JavaScript error is visible before make swallows it.
+log "Pre-build diagnostic: generating validators.js and testing node command..."
+(
+  cd "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract"
+  cp "${PARLIAGENESIS_DIR}/validators.conf" validators.conf
+  poetry run python -m scripts.generate generate-validators 2>&1
+  log "--- node validators.js output ---"
+  node -e "const e = require('./scripts/validators.js'); console.log(e.validatorSetBytes.toString('hex').slice(0,32)+'...');" 2>&1 || true
+  log "--- end node output ---"
+) || true
+
 log "Building system contracts (CHAIN_ID=${CHAIN_ID}, MAX_ELECTED_VALIDATORS=3, BLOCK_INTERVAL=${CLIQUE_PERIOD} seconds)"
 make -C "${PARLIAGENESIS_DIR}" build \
   CHAIN_ID="${CHAIN_ID}" \
