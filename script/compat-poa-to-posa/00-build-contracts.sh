@@ -42,13 +42,23 @@ else
 fi
 
 # ---- Step 1: Ensure genesis contract deps are available ----
-# Run 'make pre' if node_modules is missing OR if poetry is not yet available.
-if [[ ! -d "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract/node_modules" ]] || \
-   ! command -v poetry >/dev/null 2>&1; then
+# Re-run 'make pre' if any of the following is true:
+#   - node_modules is missing
+#   - poetry is not in PATH
+#   - the poetry virtualenv is incomplete (e.g. lru-dict failed to build previously)
+_need_pre=0
+[[ ! -d "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract/node_modules" ]] && _need_pre=1
+! command -v poetry >/dev/null 2>&1 && _need_pre=1
+if [[ "$_need_pre" -eq 0 ]] && [[ -d "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract" ]]; then
+  (cd "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract" && \
+    poetry run python -c "import lru" 2>/dev/null) || _need_pre=1
+fi
+
+if [[ "$_need_pre" -eq 1 ]]; then
   log "Running: make pre (cloning + installing genesis contract deps)"
   make -C "${PARLIAGENESIS_DIR}" pre
 else
-  log "Genesis contract dependencies already present, skipping 'make pre'"
+  log "Genesis contract dependencies complete, skipping 'make pre'"
 fi
 
 # ---- Step 2: Create 3 test accounts (stable keystore dirs) ----
