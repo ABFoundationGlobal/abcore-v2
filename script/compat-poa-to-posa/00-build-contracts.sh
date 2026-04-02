@@ -10,8 +10,36 @@ source "${SCRIPT_DIR}/lib.sh"
 
 PARLIAGENESIS_DIR="${REPO_ROOT}/core/systemcontracts/parliagenesis"
 
-# Ensure poetry (installed by 'make pre') is on PATH.
-export PATH="${HOME}/.local/bin:${PATH}"
+# Ensure poetry and foundry (installed by 'make pre' / foundryup) are on PATH.
+export PATH="${HOME}/.local/bin:${HOME}/.foundry/bin:${PATH}"
+
+# ---- Pre-flight checks ----
+
+# Python dev headers (required to build lru-dict C extension)
+_py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")
+_python_h=$(python3 -c 'import sysconfig; print(sysconfig.get_path("include"))' 2>/dev/null || echo "")
+if [[ -z "$_python_h" ]] || [[ ! -f "${_python_h}/Python.h" ]]; then
+  log "Python.h not found — installing python3-dev"
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y "python${_py_ver}-dev" 2>/dev/null || sudo apt-get install -y python3-dev
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y "python${_py_ver}-devel" 2>/dev/null || sudo yum install -y python3-devel
+  else
+    die "Python.h not found. Install python3-dev (Debian/Ubuntu) or python3-devel (RHEL/CentOS) and retry."
+  fi
+fi
+
+# Forge (required by 'make build' to compile Solidity contracts)
+if ! command -v forge >/dev/null 2>&1; then
+  log "forge not found — installing Foundry via foundryup"
+  curl -sSL https://foundry.paradigm.xyz | bash
+  # foundryup installs into ~/.foundry/bin; it should already be on PATH above.
+  foundryup
+  command -v forge >/dev/null 2>&1 || die "forge still not found after foundryup; check Foundry installation"
+  log "forge installed: $(forge --version)"
+else
+  log "forge already available: $(forge --version)"
+fi
 
 # ---- Step 1: Ensure genesis contract deps are available ----
 # Run 'make pre' if node_modules is missing OR if poetry is not yet available.
