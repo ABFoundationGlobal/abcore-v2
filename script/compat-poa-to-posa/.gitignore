@@ -1,0 +1,8 @@
+data-*/
+genesis.json
+bin/
+config/node-clique*.toml
+config/node-posa*.toml
+validator-addrs.env
+fork-times.env
+keystore-*/
