@@ -62,7 +62,7 @@ else
 fi
 
 # ---- Step 2: Create 3 test accounts (stable keystore dirs) ----
-BLS_PLACEHOLDER="0x$(printf 'ab%.0s' {1..96})"  # 96 bytes of 0xab...
+BLS_PLACEHOLDER="0x$(printf 'ab%.0s' {1..48})"  # 48 bytes (BLS12-381 G1 compressed key length)
 
 for n in 1 2 3; do
   ksdir=$(val_keystore_dir "$n")
