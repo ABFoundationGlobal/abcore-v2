@@ -801,6 +801,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				blockInterval = defaultBlockInterval
 				epochLength   = defaultEpochLength
 			)
+			if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.Clique != nil &&
+				(p.chainConfig.ParliaGenesisBlock == nil || number < p.chainConfig.ParliaGenesisBlock.Uint64()) {
+				if p.chainConfig.Clique.Period > 0 {
+					blockInterval = p.chainConfig.Clique.Period * 1000
+				}
+				if p.chainConfig.Clique.Epoch > 0 {
+					epochLength = p.chainConfig.Clique.Epoch
+				}
+			}
 			if number == 0 {
 				checkpoint = chain.GetHeaderByNumber(0)
 				if checkpoint != nil {
@@ -927,6 +936,14 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				return nil, err
 			}
 			snap.Validators = validatorInfoMap(forkValidators)
+			if p.chainConfig.Clique != nil {
+				if p.chainConfig.Clique.Epoch > 0 {
+					snap.EpochLength = p.chainConfig.Clique.Epoch
+				}
+				if p.chainConfig.Clique.Period > 0 {
+					snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+				}
+			}
 			// Advance the snapshot anchor to the last pre-fork block, skipping
 			// apply() for those Clique-sealed headers entirely.
 			last := headers[firstPost-1]

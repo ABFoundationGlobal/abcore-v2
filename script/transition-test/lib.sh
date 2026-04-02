@@ -74,6 +74,118 @@ block_hash_at() {
   attach_exec "$1" "$2" "eth.getBlock(${3}).hash"
 }
 
+wait_for_blocks() {
+  local geth="$1" ipc="$2" min_delta="${3:-2}" timeout="${4:-60}"
+  local start
+  start=$(head_number "$geth" "$ipc")
+  local deadline=$(( $(date +%s) + timeout ))
+  while [[ $(date +%s) -lt $deadline ]]; do
+    local cur
+    cur=$(head_number "$geth" "$ipc")
+    [[ $((cur - start)) -ge "$min_delta" ]] && return 0
+    sleep 1
+  done
+  die "chain did not advance by ${min_delta} blocks (start=${start}, ipc=${ipc})"
+}
+
+assert_same_head() {
+  local ref_geth="$1" ref_ipc="$2"
+  shift 2
+
+  local target
+  target=$(head_number "$ref_geth" "$ref_ipc")
+  local args=("$@")
+  for ((i=0; i<${#args[@]}; i+=2)); do
+    local geth="${args[$i]}"
+    local ipc="${args[$((i+1))]}"
+    local n
+    n=$(head_number "$geth" "$ipc")
+    if [[ "$n" -lt "$target" ]]; then
+      target="$n"
+    fi
+  done
+
+  local ref_hash
+  ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$target")
+  [[ -n "$ref_hash" && "$ref_hash" != "null" ]] || die "ref head hash empty at height ${target}"
+
+  while [[ $# -gt 0 ]]; do
+    local geth="$1" ipc="$2"
+    shift 2
+    local h
+    h=$(block_hash_at "$geth" "$ipc" "$target")
+    [[ "$h" == "$ref_hash" ]] || die "head hash mismatch at height ${target}: ref=${ref_hash} other=${h} ipc=${ipc}"
+  done
+}
+
+check_same_head() {
+  local ref_geth="$1" ref_ipc="$2"
+  shift 2
+
+  local target
+  target=$(head_number "$ref_geth" "$ref_ipc")
+  local args=("$@")
+  for ((i=0; i<${#args[@]}; i+=2)); do
+    local geth="${args[$i]}"
+    local ipc="${args[$((i+1))]}"
+    local n
+    n=$(head_number "$geth" "$ipc" 2>/dev/null || echo 0)
+    if [[ "$n" -lt "$target" ]]; then
+      target="$n"
+    fi
+  done
+
+  local ref_hash
+  ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$target")
+  [[ -n "$ref_hash" && "$ref_hash" != "null" ]] || return 1
+
+  while [[ $# -gt 0 ]]; do
+    local geth="$1" ipc="$2"
+    shift 2
+    local h
+    h=$(block_hash_at "$geth" "$ipc" "$target")
+    [[ "$h" == "$ref_hash" ]] || return 1
+  done
+  return 0
+}
+
+wait_for_same_head() {
+  local ref_geth="$1" ref_ipc="$2" timeout="${3:-60}"
+  shift 3
+
+  local deadline=$(( $(date +%s) + timeout ))
+  while [[ $(date +%s) -lt $deadline ]]; do
+    if check_same_head "$ref_geth" "$ref_ipc" "$@"; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "nodes did not converge on the same head within ${timeout}s"
+}
+
+wait_for_block_miner() {
+  local geth="$1" ipc="$2" signer_addr="$3" lookback_n="${4:-12}" timeout="${5:-90}"
+  local addr_lower
+  addr_lower=$(echo "$signer_addr" | tr '[:upper:]' '[:lower:]')
+  local deadline=$(( $(date +%s) + timeout ))
+
+  while [[ $(date +%s) -lt $deadline ]]; do
+    local tip
+    tip=$(head_number "$geth" "$ipc" 2>/dev/null || echo 0)
+    local start=$(( tip > lookback_n ? tip - lookback_n : 0 ))
+    for ((blk=tip; blk>=start; blk--)); do
+      local blk_hex signer
+      printf -v blk_hex '0x%x' "$blk"
+      signer=$(attach_exec "$geth" "$ipc" "clique.getSigner('${blk_hex}')" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+      if [[ "$signer" == "$addr_lower" ]]; then
+        return 0
+      fi
+    done
+    sleep 1
+  done
+  die "did not observe block signed by ${signer_addr} in the last ${lookback_n} blocks"
+}
+
 peer_count() {
   attach_exec "$1" "$2" "admin.peers.length"
 }
@@ -148,7 +260,7 @@ assert_same_hash_at() {
 # find_free_port_base: pick a PORT_BASE where all test ports are free.
 # Uses a sentinel dir in /tmp to prevent races between parallel runs.
 find_free_port_base() {
-  local candidates=(30381 30382 30383 8581 8582 8583 8591 8592 8593)
+  local candidates=(30381 30382 30383 30384 8581 8582 8583 8591 8592 8593)
   for base in $(seq 0 100 9900); do
     local ok=1
     for rel in "${candidates[@]}"; do

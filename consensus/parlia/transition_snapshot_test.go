@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -132,4 +133,53 @@ func TestSnapshotSeedsForkParentFromCliqueCheckpoint(t *testing.T) {
 		t.Fatalf("cached genesis snapshot hash mutated: got %s, want %s", seed.Hash, genesisHash)
 	}
 	assertValidatorSet(t, seed.Validators, genesisValidators)
+}
+
+func TestSnapshotGenesisPathUsesCliqueCheckpointAndEpoch(t *testing.T) {
+	const (
+		forkBlock   = uint64(35)
+		cliqueEpoch = uint64(10)
+	)
+	genesisValidators := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		common.HexToAddress("0x3000000000000000000000000000000000000003"),
+	}
+	checkpointValidators := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		common.HexToAddress("0x3000000000000000000000000000000000000003"),
+		common.HexToAddress("0x4000000000000000000000000000000000000004"),
+	}
+
+	cfg := migrationChainConfig(forkBlock, cliqueEpoch)
+	cfg.Clique.Period = 1
+	db := rawdb.NewMemoryDatabase()
+	sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+	p := &Parlia{
+		chainConfig: cfg,
+		config:      cfg.Parlia,
+		db:          db,
+		recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+		signatures:  sigCache,
+	}
+	chain, forkParent := buildTransitionSnapshotChain(cfg, forkBlock, 30, genesisValidators, checkpointValidators)
+
+	snap, err := p.snapshot(chain, forkParent.Number.Uint64(), forkParent.Hash(), nil)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.Number != forkParent.Number.Uint64() {
+		t.Fatalf("snapshot number: got %d, want %d", snap.Number, forkParent.Number.Uint64())
+	}
+	if snap.Hash != forkParent.Hash() {
+		t.Fatalf("snapshot hash: got %s, want %s", snap.Hash, forkParent.Hash())
+	}
+	assertValidatorSet(t, snap.Validators, checkpointValidators)
+	if snap.EpochLength != cliqueEpoch {
+		t.Fatalf("snapshot epoch length: got %d, want %d", snap.EpochLength, cliqueEpoch)
+	}
+	if snap.BlockInterval != 1000 {
+		t.Fatalf("snapshot block interval: got %d, want %d", snap.BlockInterval, 1000)
+	}
 }
