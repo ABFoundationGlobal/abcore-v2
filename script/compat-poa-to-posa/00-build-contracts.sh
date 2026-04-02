@@ -10,8 +10,13 @@ source "${SCRIPT_DIR}/lib.sh"
 
 PARLIAGENESIS_DIR="${REPO_ROOT}/core/systemcontracts/parliagenesis"
 
+# Ensure poetry (installed by 'make pre') is on PATH.
+export PATH="${HOME}/.local/bin:${PATH}"
+
 # ---- Step 1: Ensure genesis contract deps are available ----
-if [[ ! -d "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract/node_modules" ]]; then
+# Run 'make pre' if node_modules is missing OR if poetry is not yet available.
+if [[ ! -d "${PARLIAGENESIS_DIR}/abcore-v2-genesis-contract/node_modules" ]] || \
+   ! command -v poetry >/dev/null 2>&1; then
   log "Running: make pre (cloning + installing genesis contract deps)"
   make -C "${PARLIAGENESIS_DIR}" pre
 else
