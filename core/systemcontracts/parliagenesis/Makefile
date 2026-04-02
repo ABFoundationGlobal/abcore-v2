@@ -1,4 +1,4 @@
-GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
+GENESIS_CONTRACT_REPO   ?= git@github.com:ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
 GENESIS_CONTRACT_COMMIT := 3e6b2ff8aa155452045b25bfe632805e0d1fb5a6
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
