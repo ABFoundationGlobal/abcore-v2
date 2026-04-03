@@ -223,6 +223,16 @@ log "Restarting base validators with OverrideParliaGenesisBlock=${PARLIA_GENESIS
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 start_validator4 mining
 
+# ── Phase 5b: wait for all nodes to converge post-restart ────────────────────
+# Same as 99-run-all.sh Phase 6: after stop-all-restart the re-queue loop can
+# cause a temporary fork split. Wait for all four nodes to agree on the same
+# head before the fork block fires.
+log "Waiting for all nodes to converge post-restart..."
+wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)" \
+  "$GETH" "$V4_IPC"
+
 # ── Phase 6: wait until the fork is crossed on all validators ────────────────
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
 log "Waiting for all four validators to reach block ${POST_FORK}"
