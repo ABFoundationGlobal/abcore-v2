@@ -929,6 +929,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				break
 			}
 		}
+		log.Info("snapshot headers check", "forkBlock", forkBlock, "firstPost", firstPost)
 		if firstPost > 0 {
 			snap = snap.copy()
 			forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})

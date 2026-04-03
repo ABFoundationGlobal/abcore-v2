@@ -283,6 +283,11 @@ func (s *Snapshot) getFinalizedNumber() uint64 {
 }
 
 func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderReader, parents []*types.Header, chainConfig *params.ChainConfig) (*Snapshot, error) {
+	headersJSON, err := json.Marshal(headers)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("snapshot apply ", "headersJSON", headersJSON)
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
