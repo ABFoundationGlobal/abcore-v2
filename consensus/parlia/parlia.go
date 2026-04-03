@@ -598,9 +598,12 @@ func (p *Parlia) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if err != nil {
 		return err
 	}
-	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
+	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise.
+	// ParliaGenesisBlock is treated as an epoch boundary: it must carry the seeded validator
+	// list even when its block number is not a multiple of epochLength (which is the Clique
+	// epoch in a DualConsensus migration scenario, typically 30000).
 	signersBytes := getValidatorBytesFromHeader(header, p.chainConfig, epochLength)
-	isEpoch := number%epochLength == 0
+	isEpoch := number%epochLength == 0 || p.chainConfig.IsOnParliaGenesis(header.Number)
 	if !isEpoch && len(signersBytes) != 0 {
 		return errExtraValidators
 	}
