@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end Clique→Parlia transition test.
+# End-to-end Clique→Parlia transition test (T-1).
+#
+# Scope: snapshot correctness, fork block transition, validator continuity,
+# system contract deployment, pre-fork vote-change (98-run-vote-change.sh).
+# NOT covered here: rolling/one-by-one validator restart (T-2), Parlia epoch
+# boundary at block 200 (getCurrentValidators system contract call path),
+# transaction submission after the fork. See README.md for full details.
 #
 # Steps:
 #   1. Setup: generate accounts + Clique genesis + init datadirs
@@ -7,9 +13,10 @@
 #   3. Wait until chain reaches (PARLIA_GENESIS_BLOCK - 5) to ensure a stable Clique history
 #   4. Stop all validators
 #   5. Write a TOML config with OverrideParliaGenesisBlock and restart
-#   6. Wait for the chain to cross PARLIA_GENESIS_BLOCK
-#   7. Run verification checks
-#   8. Stop and clean up
+#   6. Assert all nodes have converged on the same pre-fork chain tip
+#   7. Wait for the chain to cross PARLIA_GENESIS_BLOCK
+#   8. Run verification checks
+#   9. Stop and clean up
 #
 # Environment:
 #   PARLIA_GENESIS_BLOCK  block at which the fork fires (default: 20)
@@ -96,7 +103,19 @@ TOML
 log "Restarting validators with --config ${TOML_CONFIG} (OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK})"
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 
-# ── Phase 6: wait for the chain to cross the fork block ──────────────────────
+# ── Phase 6: assert all nodes have the same pre-fork chain tip ────────────────
+# wait_for_min_peers succeeds as soon as P2P connections are up (~1 s), but nodes
+# may still be replaying Clique history to rebuild their Parlia snapshot.  If one
+# validator finishes first it can start sealing before the others are ready,
+# causing a divergence at the fork boundary.  Assert consensus on the last
+# pre-fork block before allowing any node to advance past it.
+log "Asserting all nodes agree on pre-fork chain tip (block ${current})..."
+assert_same_hash_at "$current" \
+  "$GETH" "$(val_ipc 1)" \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)"
+
+# ── Phase 7: wait for the chain to cross the fork block ──────────────────────
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
 log "Waiting for all nodes to reach block ${POST_FORK} (post-fork)..."
 _pids=()

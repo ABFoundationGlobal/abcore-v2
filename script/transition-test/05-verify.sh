@@ -158,6 +158,19 @@ else
   fail "Post-fork block production failed (block $(( FORK_BLOCK + 1 ))=${post_hash1:-null})"
 fi
 
+# ── 8. Post-fork block has non-zero miner (proves Parlia sealed it) ─────────
+# Clique sets header.Coinbase=0x0 on non-epoch, non-vote blocks; Parlia always
+# sets header.Coinbase=p.val (the sealer's address).  A non-zero miner on the
+# first post-fork block is definitive proof that DualConsensus routed to Parlia.
+post_miner=$(attach_exec "$GETH" "$IPC1" "eth.getBlock($(( FORK_BLOCK + 1 ))).miner" 2>/dev/null || true)
+post_miner_lower=$(echo "$post_miner" | tr '[:upper:]' '[:lower:]')
+if [[ "$post_miner_lower" == "0x0000000000000000000000000000000000000000" || \
+      -z "$post_miner_lower" || "$post_miner_lower" == "null" ]]; then
+  fail "Block $(( FORK_BLOCK + 1 )) has zero/null miner — block was NOT sealed by Parlia"
+else
+  ok "Block $(( FORK_BLOCK + 1 )) miner=${post_miner} (non-zero proves Parlia sealing)"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo
 echo "===================================="
