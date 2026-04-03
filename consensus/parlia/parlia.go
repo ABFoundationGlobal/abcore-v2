@@ -1090,10 +1090,7 @@ func (p *Parlia) prepareValidators(chain consensus.ChainHeaderReader, header *ty
 	if err != nil {
 		return err
 	}
-	// IsOnParliaGenesis must be checked before the epoch boundary guard: ParliaGenesisBlock
-	// is not guaranteed to fall on an epoch boundary, but always needs validators encoded so
-	// that applyParliaGenesisUpgrade can deploy the ValidatorSet contract with the correct set.
-	if header.Number.Uint64()%epochLength != 0 && !p.chainConfig.IsOnParliaGenesis(header.Number) {
+	if header.Number.Uint64()%epochLength != 0 {
 		return nil
 	}
 
