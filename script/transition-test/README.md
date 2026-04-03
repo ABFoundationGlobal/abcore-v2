@@ -32,6 +32,7 @@ configurable `ParliaGenesisBlock`.
 |---|---|---|
 | **Rolling restart** (upgrade validators one-by-one) | T-1 all-stop-restart is sufficient to test snapshot logic; mixed-version handshake is covered by `compat-clique-v1-v2/` | T-2: mixed-version network crossing fork |
 | **Parlia epoch boundary** (block 200) | Test ends at fork+5, well before `defaultEpochLength=200`; `getCurrentValidators()` system contract call never exercised | Long-running test or separate epoch boundary unit test |
+| **StakeHub validator registration** | Validators must call `StakeHub.createValidator()` before the first Parlia epoch boundary or they lose block production rights at that epoch. T-1 ends at fork+5 and never reaches block 200. | T-2: run chain past block 200, verify epoch transition with registered vs unregistered validators |
 | **Transaction submission** after fork | Slash/reward paths not exercised | Integration test with actual txs post-fork |
 
 ## T-1 / T-2 terminology
