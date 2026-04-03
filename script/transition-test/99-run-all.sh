@@ -72,9 +72,7 @@ run "${SCRIPT_DIR}/01-setup.sh"
 run "${SCRIPT_DIR}/02-start.sh"
 
 # ── Phase 3: wait for stable Clique history before the fork block ────────────
-# Stop 10 blocks before the fork (not 5) so there is enough headroom after
-# restart for Clique's fork-choice to resolve any seal race before ParliaGenesisBlock.
-PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 10 ))
+PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$PRE_STOP" -lt 5 ]]; then PRE_STOP=5; fi
 log "Waiting for block ${PRE_STOP} (Clique history before fork)..."
 wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$PRE_STOP" 120
@@ -105,27 +103,12 @@ TOML
 log "Restarting validators with --config ${TOML_CONFIG} (OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK})"
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 
-# ── Phase 6: wait for all nodes to converge on a common post-restart head ─────
-# After restart the Clique "signed recently" in-memory state is lost, so multiple
-# validators may race to seal the first new block and produce two different
-# (current+1) hashes.  Clique's fork-choice (heaviest TD) will resolve the split,
-# but only once 2-of-3 validators agree on the longer chain.  We must wait for
-# full convergence before the fork block fires — otherwise one validator stays on
-# the minority fork and its "signed recently" state prevents anyone from sealing,
-# stalling the network permanently.
-#
-# wait_for_same_head polls until all three nodes share the same head hash at their
-# minimum common height, giving Clique's fork-choice time to settle.
-FIRST_POST_RESTART=$(( current + 1 ))
-log "Waiting for all nodes to reach block ${FIRST_POST_RESTART} after restart..."
-_pids=()
-for n in 1 2 3; do
-  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$FIRST_POST_RESTART" 120 &
-  _pids+=($!)
-done
-for p in "${_pids[@]}"; do wait "$p"; done
-
-log "Waiting for all nodes to converge on the same head (fork-choice settling)..."
+# ── Phase 6: assert all nodes have the same pre-fork chain tip ────────────────
+# After restart nodes may race to seal the first new block. Clique's fork-choice
+# (heaviest TD) resolves the split: the minority-fork node drops its block via
+# the downloader once the re-queue attempts are exhausted (see block_fetcher.go).
+# We wait for full head convergence before proceeding to the fork block.
+log "Waiting for all nodes to converge post-restart..."
 wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"

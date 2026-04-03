@@ -44,7 +44,7 @@ crossing `ParliaGenesisBlock`.
 ## Running
 
 ```bash
-# Default (PARLIA_GENESIS_BLOCK=30, CLIQUE_EPOCH=30000)
+# Default (PARLIA_GENESIS_BLOCK=20, CLIQUE_EPOCH=30000)
 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Non-genesis checkpoint (fork not on genesis epoch)
