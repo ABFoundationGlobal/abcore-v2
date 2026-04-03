@@ -19,7 +19,10 @@ CLIQUE_EPOCH=${CLIQUE_EPOCH:-30000}
 
 # Block at which ParliaGenesisBlock is set in the override config.
 # Must be > 10 so Clique produces enough history for a legible checkpoint.
-PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-20}
+# Default 30 (not 20): gives 10 post-restart Clique blocks before the fork,
+# which is enough for Clique's fork-choice to resolve any seal race that
+# occurs at the first block after the stop-all-restart.
+PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-30}
 
 GETH="${GETH:-${REPO_ROOT}/build/bin/geth}"
 
