@@ -9,7 +9,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "${SCRIPT_DIR}/lib.sh"
 
 resolve_binaries
-require_file "${GENESIS_JSON}"
+require_file "${GENESIS_CLIQUE_JSON}"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/validator-addrs.env"
 
@@ -17,7 +17,7 @@ ADDRS=("" "$VAL1_ADDR" "$VAL2_ADDR" "$VAL3_ADDR")
 
 launch_validator() {
   local n="$1"
-  local cfg="${SCRIPT_DIR}/config/node-clique-${n}.toml"
+  local cfg="${SCRIPT_DIR}/config/node-${n}.toml"
   require_file "$cfg"
 
   local dir addr pwfile logfile pidfile

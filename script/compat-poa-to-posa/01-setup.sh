@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generates genesis.json + node toml configs and initializes validator datadirs.
+# Generates genesis-clique.json + genesis-posa.json + node toml configs,
+# and initializes validator datadirs with the Clique genesis.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -26,56 +27,95 @@ log "Validator addresses: ${ADDR1} ${ADDR2} ${ADDR3}"
 
 mkdir -p "${DATADIR_ROOT}"
 
-# ---- Step 1: Generate genesis.json from testnet/genesis.json ----
-TESTNET_GENESIS="${REPO_ROOT}/script/release/configs/testnet/genesis.json"
-require_file "${TESTNET_GENESIS}"
-
-export SCRIPT_DIR
-export GENESIS_JSON
-export CHAIN_ID
-export ADDR1 ADDR2 ADDR3
-
-python3 - <<'PY'
-import json, os
-
-script_dir = os.environ['SCRIPT_DIR']
-chain_id   = int(os.environ['CHAIN_ID'])
-addr1      = os.environ['ADDR1'].lower().lstrip('0x')
-addr2      = os.environ['ADDR2'].lower().lstrip('0x')
-addr3      = os.environ['ADDR3'].lower().lstrip('0x')
-
-testnet_genesis = os.path.join(
-    script_dir, '..', '..', 'script', 'release', 'configs', 'testnet', 'genesis.json')
-testnet_genesis = os.path.normpath(testnet_genesis)
-
-with open(testnet_genesis) as f:
-    genesis = json.load(f)
-
-# Only modify chainId and extradata; keep everything else (timestamp, difficulty,
-# gasLimit, config forks, alloc) identical to testnet.
-genesis['config']['chainId'] = chain_id
-
-# Clique extradata: 32 bytes vanity + addr1 + addr2 + addr3 + 65 bytes signature
-vanity = '00' * 32
-sig    = '00' * 65
-genesis['extradata'] = '0x' + vanity + addr1 + addr2 + addr3 + sig
-
-out = os.environ.get('GENESIS_JSON') or os.path.join(script_dir, 'genesis.json')
-with open(out, 'w') as f:
-    json.dump(genesis, f, indent=2)
-    f.write('\n')
-
-print(f'Wrote {out}')
-PY
-
-require_file "${GENESIS_JSON}"
-
-# ---- Step 2: Calculate TIME_FORK_TIME and write fork-times.env ----
+# ---- Step 1: Compute TIME_FORK_TIME ----
 TIME_FORK_TIME=$(( $(date +%s) + TIME_FORK_DELTA ))
 cat >"${SCRIPT_DIR}/fork-times.env" <<EOF
 TIME_FORK_TIME=${TIME_FORK_TIME}
 EOF
 log "TIME_FORK_TIME=${TIME_FORK_TIME} (now + ${TIME_FORK_DELTA}s)"
+
+# ---- Step 2: Generate genesis-clique.json and genesis-posa.json ----
+TESTNET_GENESIS="${REPO_ROOT}/script/release/configs/testnet/genesis.json"
+require_file "${TESTNET_GENESIS}"
+
+export SCRIPT_DIR CHAIN_ID PARLIA_GENESIS_BLOCK TIME_FORK_TIME
+export ADDR1 ADDR2 ADDR3
+export GENESIS_CLIQUE_JSON GENESIS_POSA_JSON
+export TESTNET_GENESIS
+
+python3 - <<'PY'
+import json, os
+
+script_dir          = os.environ['SCRIPT_DIR']
+chain_id            = int(os.environ['CHAIN_ID'])
+parlia_genesis_block = int(os.environ['PARLIA_GENESIS_BLOCK'])
+time_fork_time      = int(os.environ['TIME_FORK_TIME'])
+addr1               = os.environ['ADDR1'].lower()[2:]
+addr2               = os.environ['ADDR2'].lower()[2:]
+addr3               = os.environ['ADDR3'].lower()[2:]
+testnet_genesis     = os.environ['TESTNET_GENESIS']
+out_clique          = os.environ['GENESIS_CLIQUE_JSON']
+out_posa            = os.environ['GENESIS_POSA_JSON']
+
+with open(testnet_genesis) as f:
+    base = json.load(f)
+
+# Clique extradata: 32 bytes vanity + addr1+addr2+addr3 + 65 bytes sig
+vanity = '00' * 32
+sig    = '00' * 65
+extradata = '0x' + vanity + addr1 + addr2 + addr3 + sig
+
+# --- genesis-clique.json: only change chainId + extradata ---
+clique = json.loads(json.dumps(base))   # deep copy
+clique['config']['chainId'] = chain_id
+clique['extradata'] = extradata
+
+with open(out_clique, 'w') as f:
+    json.dump(clique, f, indent=2)
+    f.write('\n')
+print(f'Wrote {out_clique}')
+
+# --- genesis-posa.json: same header fields + all upgrade configs in config ---
+posa = json.loads(json.dumps(clique))   # deep copy of clique genesis
+cfg  = posa['config']
+
+# Block-based forks — all activate at parliaGenesisBlock
+for key in [
+    'londonBlock', 'arrowGlacierBlock', 'grayGlacierBlock',
+    'ramanujanBlock', 'nielsBlock', 'mirrorSyncBlock',
+    'brunoBlock', 'eulerBlock', 'gibbsBlock', 'nanoBlock', 'moranBlock',
+    'planckBlock', 'lubanBlock', 'platoBlock',
+    'hertzBlock', 'hertzfixBlock', 'parliaGenesisBlock',
+]:
+    cfg[key] = parlia_genesis_block
+
+# Time-based forks — all activate at time_fork_time
+for key in [
+    'shanghaiTime', 'keplerTime', 'feynmanTime', 'feynmanFixTime',
+    'cancunTime', 'haberTime', 'haberFixTime', 'bohrTime',
+    'pascalTime', 'pragueTime', 'lorentzTime', 'maxwellTime',
+    'fermiTime', 'osakaTime', 'mendelTime',
+    'bpo1Time', 'bpo2Time', 'bpo3Time', 'bpo4Time', 'bpo5Time',
+    'amsterdamTime', 'pasteurTime',
+]:
+    cfg[key] = time_fork_time
+
+# blobSchedule: required for each time fork that introduces blobs
+_bc = {'cancun':{'target':3,'max':6,'baseFeeUpdateFraction':3338477},'prague':{'target':3,'max':6,'baseFeeUpdateFraction':3338477},'osaka':{'target':3,'max':6,'baseFeeUpdateFraction':3338477},'bpo1':{'target':10,'max':15,'baseFeeUpdateFraction':8346193},'bpo2':{'target':14,'max':21,'baseFeeUpdateFraction':11684671},'bpo3':{'target':21,'max':32,'baseFeeUpdateFraction':20609697},'bpo4':{'target':14,'max':21,'baseFeeUpdateFraction':13739630}}
+_bc['bpo5']=_bc['bpo4']
+_bc['amsterdam']=_bc['bpo4']
+cfg['blobSchedule']=_bc
+# Enable Parlia (empty config struct)
+cfg['parlia'] = {}
+
+with open(out_posa, 'w') as f:
+    json.dump(posa, f, indent=2)
+    f.write('\n')
+print(f'Wrote {out_posa}')
+PY
+
+require_file "${GENESIS_CLIQUE_JSON}"
+require_file "${GENESIS_POSA_JSON}"
 
 # ---- Step 3: Render node toml configs from templates ----
 render_toml() {
@@ -103,19 +143,15 @@ render_toml() {
 
 for n in 1 2 3; do
   render_toml \
-    "${SCRIPT_DIR}/config/node-clique.toml.tpl" \
-    "${SCRIPT_DIR}/config/node-clique-${n}.toml" \
+    "${SCRIPT_DIR}/config/node.toml.tpl" \
+    "${SCRIPT_DIR}/config/node-${n}.toml" \
     "$n"
-  log "Rendered config/node-clique-${n}.toml"
-
-  render_toml \
-    "${SCRIPT_DIR}/config/node-posa.toml.tpl" \
-    "${SCRIPT_DIR}/config/node-posa-${n}.toml" \
-    "$n"
-  log "Rendered config/node-posa-${n}.toml"
+  log "Rendered config/node-${n}.toml"
 done
 
-# ---- Step 4: Initialize datadirs ----
+log "Setup complete. Next: ./02-start-validators.sh"
+
+# ---- Step 4: Initialize datadirs with Clique genesis ----
 for n in 1 2 3; do
   dir=$(val_dir "$n")
   mkdir -p "$dir"
@@ -126,8 +162,6 @@ for n in 1 2 3; do
   mkdir -p "${dir}/keystore"
   cp -r "${ksdir}/keystore/." "${dir}/keystore/"
 
-  log "geth init validator-${n}"
-  "$ABCORE_V2_GETH" init --datadir "$dir" "${GENESIS_JSON}" 2>&1 | tail -3
+  log "geth init validator-${n} (Clique genesis)"
+  "$ABCORE_V2_GETH" init --datadir "$dir" "${GENESIS_CLIQUE_JSON}" 2>&1 | tail -3
 done
-
-log "Setup complete. Next: ./02-start-validators.sh"

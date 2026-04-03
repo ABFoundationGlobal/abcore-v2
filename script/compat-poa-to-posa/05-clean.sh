@@ -10,9 +10,8 @@ log "Stopping processes"
 
 log "Removing data directories and generated configs"
 rm -rf "${DATADIR_ROOT}"
-rm -f "${GENESIS_JSON}"
-rm -f "${SCRIPT_DIR}/config/node-clique-"*.toml
-rm -f "${SCRIPT_DIR}/config/node-posa-"*.toml
+rm -f "${GENESIS_CLIQUE_JSON}" "${GENESIS_POSA_JSON}"
+rm -f "${SCRIPT_DIR}/config/node-"*.toml
 rm -f "${SCRIPT_DIR}/fork-times.env"
 
 log "Clean complete."

@@ -54,10 +54,16 @@ if [[ ${#_live_pids[@]} -gt 0 ]]; then
 fi
 log "[scn2] All validators stopped"
 
-# ---- Step 2: Restart with node-posa-N.toml ----
+# ---- Step 2: Re-init datadirs with Parlia genesis (same block hash, updated config) ----
+log "[scn2] Running geth init with genesis-posa.json to apply upgrade config"
+for n in 1 2 3; do
+  "${ABCORE_V2_GETH}" init --datadir "$(val_dir "$n")" "${GENESIS_POSA_JSON}" 2>&1 | tail -2
+done
+
+# ---- Step 3: Restart with node-posa-N.toml ----
 launch_validator_posa() {
   local n="$1"
-  local cfg="${SCRIPT_DIR}/config/node-posa-${n}.toml"
+  local cfg="${SCRIPT_DIR}/config/node-${n}.toml"
   require_file "$cfg"
 
   local dir addr pwfile logfile pidfile

@@ -60,13 +60,3 @@ StaticNodes = []
 TrustedNodes = []
 ListenAddr = ":{{P2P_PORT}}"
 EnableMsgEvents = false
-
-# Override the genesis.json Clique config so the node uses CLIQUE_PERIOD block
-# intervals (the genesis.json inherits period=1 from testnet for fidelity, but
-# for this test suite we want CLIQUE_PERIOD-second blocks).
-[Eth.Genesis.Config]
-ChainID = {{CHAIN_ID}}
-
-[Eth.Genesis.Config.Clique]
-Period = {{CLIQUE_PERIOD}}
-Epoch = {{CLIQUE_EPOCH}}

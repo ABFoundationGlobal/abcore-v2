@@ -801,6 +801,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				blockInterval = defaultBlockInterval
 				epochLength   = defaultEpochLength
 			)
+			if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.Clique != nil &&
+				(p.chainConfig.ParliaGenesisBlock == nil || number < p.chainConfig.ParliaGenesisBlock.Uint64()) {
+				if p.chainConfig.Clique.Period > 0 {
+					blockInterval = p.chainConfig.Clique.Period * 1000
+				}
+				if p.chainConfig.Clique.Epoch > 0 {
+					epochLength = p.chainConfig.Clique.Epoch
+				}
+			}
 			if number == 0 {
 				checkpoint = chain.GetHeaderByNumber(0)
 				if checkpoint != nil {
@@ -893,6 +902,55 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+	}
+
+	// When DualConsensus is active (HasCliqueAndParlia), Parlia must not apply pre-fork
+	// Clique-sealed headers. Clique signs with SealHash(header) (no chainId) while Parlia's
+	// ecrecover uses types.SealHash(header, chainId), recovering the wrong address and
+	// returning errUnauthorizedValidator for every Clique-sealed block.
+	//
+	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
+	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
+	// Before skipping the Clique-sealed prefix, reseed the snapshot validator set from the
+	// last Clique checkpoint so fork-block Prepare/Seal/CalcDifficulty use the validator
+	// set that was actually active at the transition point.
+	//
+	// When the headers slice contains only pre-fork blocks, advance the snapshot's Number
+	// and Hash to the tip of that range so that apply()'s contiguity check passes for the
+	// first post-fork block. When there is a mix, filter out the pre-fork prefix.
+	if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.ParliaGenesisBlock != nil {
+		forkBlock := p.chainConfig.ParliaGenesisBlock.Uint64()
+		// headers is now in ascending order (after the reversal above).
+		// Find the index of the first post-fork header.
+		firstPost := len(headers)
+		for i, h := range headers {
+			if h.Number.Uint64() >= forkBlock {
+				firstPost = i
+				break
+			}
+		}
+		if firstPost > 0 {
+			snap = snap.copy()
+			forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
+			if err != nil {
+				return nil, err
+			}
+			snap.Validators = validatorInfoMap(forkValidators)
+			if p.chainConfig.Clique != nil {
+				if p.chainConfig.Clique.Epoch > 0 {
+					snap.EpochLength = p.chainConfig.Clique.Epoch
+				}
+				if p.chainConfig.Clique.Period > 0 {
+					snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+				}
+			}
+			// Advance the snapshot anchor to the last pre-fork block, skipping
+			// apply() for those Clique-sealed headers entirely.
+			last := headers[firstPost-1]
+			snap.Number = last.Number.Uint64()
+			snap.Hash = last.Hash()
+		}
+		headers = headers[firstPost:]
 	}
 
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig)
@@ -1017,12 +1075,25 @@ func (p *Parlia) getValidatorsFromCliqueCheckpoint(chain consensus.ChainHeaderRe
 	return validators, err
 }
 
+func validatorInfoMap(validators []common.Address) map[common.Address]*ValidatorInfo {
+	ordered := append([]common.Address(nil), validators...)
+	sort.Sort(validatorsAscending(ordered))
+	validatorSet := make(map[common.Address]*ValidatorInfo, len(ordered))
+	for idx, validator := range ordered {
+		validatorSet[validator] = &ValidatorInfo{Index: idx + 1}
+	}
+	return validatorSet
+}
+
 func (p *Parlia) prepareValidators(chain consensus.ChainHeaderReader, header *types.Header) error {
 	epochLength, err := p.epochLength(chain, header, nil)
 	if err != nil {
 		return err
 	}
-	if header.Number.Uint64()%epochLength != 0 {
+	// IsOnParliaGenesis must be checked before the epoch boundary guard: ParliaGenesisBlock
+	// is not guaranteed to fall on an epoch boundary, but always needs validators encoded so
+	// that applyParliaGenesisUpgrade can deploy the ValidatorSet contract with the correct set.
+	if header.Number.Uint64()%epochLength != 0 && !p.chainConfig.IsOnParliaGenesis(header.Number) {
 		return nil
 	}
 
