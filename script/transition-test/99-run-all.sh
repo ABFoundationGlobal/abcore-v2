@@ -74,11 +74,30 @@ run "${SCRIPT_DIR}/02-start.sh"
 # ── Phase 3: wait for stable Clique history before the fork block ────────────
 PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$PRE_STOP" -lt 5 ]]; then PRE_STOP=5; fi
-log "Waiting for block ${PRE_STOP} (Clique history before fork)..."
-wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$PRE_STOP" 120
+log "Waiting for all 3 nodes to reach block ${PRE_STOP} (Clique history before fork)..."
+_pids=()
+for n in 1 2 3; do
+  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$PRE_STOP" 120 &
+  _pids+=($!)
+done
+for p in "${_pids[@]}"; do wait "$p"; done
+
+# Verify all nodes agree on the same canonical head before stopping.
+# If one node is ahead (e.g. has sealed a block the others haven't yet imported),
+# stopping and restarting with --mine will cause that node to re-seal the same
+# block height with a fresh timestamp, racing with the other nodes.  This seal
+# race creates competing block N+1 hashes that put all 3 validators in
+# "signed recently" state simultaneously — permanent deadlock for block N+2.
+#
+# Use PRE_STOP (not the live head) as min-height to avoid chasing a moving target
+# while simultaneously waiting: all nodes are already at >= PRE_STOP, so we just
+# need hash agreement at the shared minimum.
+wait_for_same_head --min-height "$PRE_STOP" "$GETH" "$(val_ipc 1)" 60 \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)"
 
 current=$(head_number "$GETH" "$(val_ipc 1)")
-log "Clique chain at block ${current}. Stopping validators..."
+log "All nodes converged at block ${current}. Stopping validators..."
 
 # ── Phase 4: stop all validators ─────────────────────────────────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
@@ -103,13 +122,18 @@ TOML
 log "Restarting validators with --config ${TOML_CONFIG} (OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK})"
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 
-# ── Phase 6: assert all nodes have the same pre-fork chain tip ────────────────
+# ── Phase 6: assert all nodes have the same post-restart chain tip ────────────
 # After restart nodes may race to seal the first new block. Clique's fork-choice
 # (heaviest TD) resolves the split: the minority-fork node drops its block via
 # the downloader once the re-queue attempts are exhausted (see block_fetcher.go).
 # We wait for full head convergence before proceeding to the fork block.
-log "Waiting for all nodes to converge post-restart (min-height=${current})..."
-wait_for_same_head --min-height "$current" "$GETH" "$(val_ipc 1)" 60 \
+#
+# Use the head AFTER restart (not the pre-restart head) as min-height, so that
+# the check requires all nodes to have produced at least one new block and agree
+# on its hash — not just agree on the pre-restart canonical chain.
+post_restart_head=$(head_number "$GETH" "$(val_ipc 1)")
+log "Waiting for all nodes to converge post-restart (min-height=${post_restart_head})..."
+wait_for_same_head --min-height "$post_restart_head" "$GETH" "$(val_ipc 1)" 60 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
 
