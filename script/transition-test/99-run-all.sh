@@ -108,8 +108,8 @@ TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 # (heaviest TD) resolves the split: the minority-fork node drops its block via
 # the downloader once the re-queue attempts are exhausted (see block_fetcher.go).
 # We wait for full head convergence before proceeding to the fork block.
-log "Waiting for all nodes to converge post-restart..."
-wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
+log "Waiting for all nodes to converge post-restart (min-height=${current})..."
+wait_for_same_head --min-height "$current" "$GETH" "$(val_ipc 1)" 60 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
 

@@ -199,6 +199,8 @@ wait_for_same_head "$GETH" "$(val_ipc 1)" 120 \
   "$GETH" "$(val_ipc 3)" \
   "$GETH" "$V4_IPC"
 log "validator-4 sealed a Clique block before the fork"
+pre_restart_head=$(head_number "$GETH" "$(val_ipc 1)")
+log "Pre-restart head: ${pre_restart_head}"
 
 # ── Phase 5: stop validators and restart with Parlia override ────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
@@ -224,11 +226,11 @@ TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 start_validator4 mining
 
 # ── Phase 5b: wait for all nodes to converge post-restart ────────────────────
-# Same as 99-run-all.sh Phase 6: after stop-all-restart the re-queue loop can
-# cause a temporary fork split. Wait for all four nodes to agree on the same
-# head before the fork block fires.
-log "Waiting for all nodes to converge post-restart..."
-wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
+# After stop-all-restart the re-queue loop can cause a temporary fork split.
+# Use --min-height to prevent false-positive convergence at block 0/genesis
+# (which happens when a node that just started reports head=0).
+log "Waiting for all nodes to converge post-restart (min-height=${pre_restart_head})..."
+wait_for_same_head --min-height "$pre_restart_head" "$GETH" "$(val_ipc 1)" 120 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)" \
   "$GETH" "$V4_IPC"

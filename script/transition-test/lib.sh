@@ -118,18 +118,33 @@ assert_same_head() {
   done
 }
 
+# check_same_head [--min-height N] ref_geth ref_ipc [geth ipc ...]
+# Returns 0 only when ALL nodes have head >= N (default 1) and all agree on
+# the same block hash at their shared minimum height.  Without --min-height,
+# nodes that just restarted report head=0 (genesis), causing a false-positive
+# convergence at block 0 where everyone trivially agrees.
 check_same_head() {
+  local min_height=1
+  if [[ "${1:-}" == "--min-height" ]]; then
+    min_height="$2"
+    shift 2
+  fi
+
   local ref_geth="$1" ref_ipc="$2"
   shift 2
 
-  local target
-  target=$(head_number "$ref_geth" "$ref_ipc")
+  local ref_n
+  ref_n=$(head_number "$ref_geth" "$ref_ipc" 2>/dev/null || echo 0)
+  [[ "$ref_n" -ge "$min_height" ]] || return 1
+
+  local target="$ref_n"
   local args=("$@")
   for ((i=0; i<${#args[@]}; i+=2)); do
     local geth="${args[$i]}"
     local ipc="${args[$((i+1))]}"
     local n
     n=$(head_number "$geth" "$ipc" 2>/dev/null || echo 0)
+    [[ "$n" -ge "$min_height" ]] || return 1
     if [[ "$n" -lt "$target" ]]; then
       target="$n"
     fi
@@ -149,13 +164,20 @@ check_same_head() {
   return 0
 }
 
+# wait_for_same_head [--min-height N] ref_geth ref_ipc timeout [geth ipc ...]
 wait_for_same_head() {
+  local min_height_arg=()
+  if [[ "${1:-}" == "--min-height" ]]; then
+    min_height_arg=("--min-height" "$2")
+    shift 2
+  fi
+
   local ref_geth="$1" ref_ipc="$2" timeout="${3:-60}"
   shift 3
 
   local deadline=$(( $(date +%s) + timeout ))
   while [[ $(date +%s) -lt $deadline ]]; do
-    if check_same_head "$ref_geth" "$ref_ipc" "$@"; then
+    if check_same_head "${min_height_arg[@]}" "$ref_geth" "$ref_ipc" "$@"; then
       return 0
     fi
     sleep 1
