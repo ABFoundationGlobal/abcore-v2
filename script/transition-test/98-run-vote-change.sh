@@ -163,58 +163,6 @@ verify_checkpoint_contains_validator4() {
   log "Checkpoint ${checkpoint_block} extraData includes validator-4"
 }
 
-# wait_for_exact_same_head: waits until ALL nodes (including v4) are at the
-# SAME block number AND the same block hash.  Unlike wait_for_same_head which
-# compares at the minimum height, this requires all nodes to have advanced to
-# the same tip — preventing v4 from starting miner.start() while it is still
-# one block behind.
-wait_for_exact_same_head() {
-  local timeout="${1:-120}"
-  shift
-  # remaining args: geth ipc geth ipc ...
-
-  local deadline=$(( $(date +%s) + timeout ))
-  while [[ $(date +%s) -lt $deadline ]]; do
-    local args=("$@")
-    local ref_geth="${args[0]}" ref_ipc="${args[1]}"
-    local ref_n
-    ref_n=$(head_number "$ref_geth" "$ref_ipc" 2>/dev/null || echo -1)
-    if [[ "$ref_n" -lt 1 ]]; then sleep 1; continue; fi
-
-    local all_match=1
-    for ((i=2; i<${#args[@]}; i+=2)); do
-      local g="${args[$i]}" ipc="${args[$((i+1))]}"
-      local n
-      n=$(head_number "$g" "$ipc" 2>/dev/null || echo -1)
-      if [[ "$n" != "$ref_n" ]]; then
-        all_match=0; break
-      fi
-    done
-    if [[ "$all_match" -eq 0 ]]; then sleep 1; continue; fi
-
-    # All at same height — now verify same hash
-    local ref_hash
-    ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$ref_n")
-    [[ -n "$ref_hash" && "$ref_hash" != "null" ]] || { sleep 1; continue; }
-
-    local hash_ok=1
-    for ((i=2; i<${#args[@]}; i+=2)); do
-      local g="${args[$i]}" ipc="${args[$((i+1))]}"
-      local h
-      h=$(block_hash_at "$g" "$ipc" "$ref_n")
-      if [[ "$h" != "$ref_hash" ]]; then
-        hash_ok=0; break
-      fi
-    done
-    if [[ "$hash_ok" -eq 1 ]]; then
-      log "All nodes at identical tip: block=${ref_n} hash=${ref_hash:0:12}…"
-      return 0
-    fi
-    sleep 1
-  done
-  die "nodes did not converge on identical tip within ${timeout}s"
-}
-
 # ── Phase 1: setup ────────────────────────────────────────────────────────────
 run "${SCRIPT_DIR}/04-clean.sh"
 run "${SCRIPT_DIR}/01-setup.sh"
@@ -263,14 +211,17 @@ fi
 stop_pidfile "$V4_PID"
 start_validator4 ready-to-mine
 
-log "Waiting for validator-4 to sync to exactly the same tip as validators 1-3..."
-wait_for_exact_same_head 120 \
-  "$GETH" "$(val_ipc 1)" \
-  "$GETH" "$(val_ipc 2)" \
-  "$GETH" "$(val_ipc 3)" \
-  "$GETH" "$V4_IPC"
+# Wait for v4 to import the canonical chain before starting its miner.
+# Reading _v4_target after wait_for_ipc ensures v4 is alive; then we
+# first wait for v4 to reach that height (so it has the canonical blocks),
+# then confirm hash agreement across all 4 nodes before calling miner.start().
+# This two-step approach prevents v4 from sealing stale competing blocks while
+# it is still catching up, which would delay convergence and waste seal slots.
+_v4_target=$(head_number "$GETH" "$(val_ipc 1)")
+log "Waiting for validator-4 to import canonical chain up to block ${_v4_target}..."
+wait_for_head_at_least "$GETH" "$V4_IPC" "$_v4_target" 120
 
-log "All 4 nodes at identical tip. Starting v4 miner."
+log "validator-4 at canonical tip (block ${_v4_target}+). Starting v4 miner."
 attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
 
 # ── Phase 4: wait for a post-vote checkpoint before stopping ────────────────
@@ -323,37 +274,46 @@ TOML
 log "Restarting base validators with OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}"
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
 
-# ── Phase 5b: restart validator-4 in sync mode, wait for convergence ─────────
-# In Parlia mode only validators 1-3 mine (they were the initial genesis
-# signers and the system is set up for them).  validator-4 syncs as a full
-# non-mining node and verifies it has received the correct post-fork chain.
-start_validator4 sync
-current_base_head=$(head_number "$GETH" "$(val_ipc 1)")
-log "Waiting for all nodes to converge post-restart (min-height=${current_base_head})..."
-wait_for_same_head --min-height "$current_base_head" "$GETH" "$(val_ipc 1)" 120 \
-  "$GETH" "$(val_ipc 2)" \
-  "$GETH" "$(val_ipc 3)" \
-  "$GETH" "$V4_IPC"
+# ── Phase 5b: restart validator-4 and let it mine ────────────────────────────
+# validator-4 is in the Clique checkpoint at the last pre-fork epoch (it was
+# voted in before that checkpoint).  With 4 authorized Clique signers the
+# "signed recently" limit is ceil(4/2)=3: after v1/v2/v3 each seal one block
+# all three have "recently signed" and only v4 can advance.  If v4 is
+# sync-only the chain stalls for blocks between the restart and the fork.
+#
+# The same argument applies to the Parlia phase: Parlia seeds its validator
+# set from that same checkpoint, so all 4 are in the Parlia set.  Parlia's
+# Seal() will route block proposals to v4 in its turn.
+#
+# Fix: restart v4 in ready-to-mine mode, wait for exact-head convergence
+# with the base validators, then call miner.start().
+start_validator4 ready-to-mine
+_v4_post_target=$(head_number "$GETH" "$(val_ipc 1)")
+log "Waiting for validator-4 to import canonical chain up to block ${_v4_post_target} (post-restart)..."
+wait_for_head_at_least "$GETH" "$V4_IPC" "$_v4_post_target" 120
+log "validator-4 at canonical tip (block ${_v4_post_target}+, post-restart). Starting v4 miner."
+attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
 
-# ── Phase 6: wait for the 3 base validators to cross the fork block ───────────
-# Only base validators (1-3) mine.  v4 follows via sync.
+# ── Phase 6: wait for all 4 validators to cross the fork block ───────────────
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
-log "Waiting for base validators to reach block ${POST_FORK}"
+log "Waiting for all validators to reach block ${POST_FORK}"
 _pids=()
 for n in 1 2 3; do
   wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$POST_FORK" 180 &
   _pids+=($!)
 done
+wait_for_head_at_least "$GETH" "$V4_IPC" "$POST_FORK" 180 &
+_pids+=($!)
 for p in "${_pids[@]}"; do wait "$p"; done
 
-# ── Phase 7: verify fork checks; confirm v4 sync'd to canonical chain ────────
+# ── Phase 7: verify fork checks; confirm all nodes on canonical chain ─────────
 run "${SCRIPT_DIR}/05-verify.sh"
-# Wait for v4 to sync to POST_FORK (it will catch up via peer sync).
-wait_for_head_at_least "$GETH" "$V4_IPC" "$POST_FORK" 60
 assert_same_hash_at "$POST_FORK" \
   "$GETH" "$(val_ipc 1)" \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)" \
   "$GETH" "$V4_IPC"
-log "validator-4 synced to canonical chain at block ${POST_FORK}"
+log "All 4 validators on canonical chain at block ${POST_FORK}"
 
 # ── Phase 8: stop and clean ───────────────────────────────────────────────────
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
@@ -365,7 +325,6 @@ fi
 echo
 echo "==> Stopping nodes"
 "${SCRIPT_DIR}/03-stop.sh"
-stop_pidfile "$V4_PID"
 
 echo
 echo "PASS"
