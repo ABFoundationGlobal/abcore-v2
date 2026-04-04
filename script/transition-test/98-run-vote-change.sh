@@ -53,6 +53,7 @@ cleanup_on_exit() {
     else
       echo "FAILED (exit=${code}). Stopping nodes (logs preserved: ${DATADIR_ROOT})." >&2
       "${SCRIPT_DIR}/03-stop.sh" || true
+      stop_pidfile "$V4_PID" || true
     fi
   fi
   exit "$code"
@@ -82,6 +83,11 @@ ensure_validator4() {
 }
 
 start_validator4() {
+  # mode: "sync"          — no mining, no account unlock
+  #       "mining"        — --mine from the start (use only when chain is already at tip)
+  #       "ready-to-mine" — account unlocked, etherbase set, but mining NOT started;
+  #                         call `miner.start()` via IPC after sync to avoid sealing
+  #                         stale blocks before the node has caught up.
   local mode="$1"
   stop_pidfile "$V4_PID"
 
@@ -91,11 +97,20 @@ start_validator4() {
   fi
 
   local mining_args=()
+  local v4_addr
+  v4_addr=$(val_addr "$V4_N")
   if [[ "$mode" == "mining" ]]; then
-    local v4_addr
-    v4_addr=$(val_addr "$V4_N")
     mining_args=(
       --mine
+      --miner.etherbase "$v4_addr"
+      --unlock "$v4_addr"
+      --password "$V4_PW"
+      --allow-insecure-unlock
+    )
+  elif [[ "$mode" == "ready-to-mine" ]]; then
+    # Unlock the account and set etherbase so miner.start() works via IPC,
+    # but do NOT pass --mine so the node syncs before sealing anything.
+    mining_args=(
       --miner.etherbase "$v4_addr"
       --unlock "$v4_addr"
       --password "$V4_PW"
@@ -122,13 +137,16 @@ start_validator4() {
   )
   wait_for_ipc "$GETH" "$V4_IPC" 60
 
+  # Wire v4 into the peer mesh in both directions regardless of mode.
+  # Without the reverse peers (v1/v2/v3 → v4), blocks propagated from the
+  # base validators do not reach v4 quickly enough after restart.
   local enode1 enode4
   enode1=$(get_enode "$GETH" "$(val_ipc 1)")
+  enode4=$(get_enode "$GETH" "$V4_IPC")
   add_peer "$GETH" "$V4_IPC" "$enode1" >/dev/null || true
-  if [[ "$mode" == "mining" ]]; then
-    enode4=$(get_enode "$GETH" "$V4_IPC")
-    add_peer "$GETH" "$(val_ipc 1)" "$enode4" >/dev/null || true
-  fi
+  add_peer "$GETH" "$(val_ipc 1)" "$enode4" >/dev/null || true
+  add_peer "$GETH" "$(val_ipc 2)" "$enode4" >/dev/null || true
+  add_peer "$GETH" "$(val_ipc 3)" "$enode4" >/dev/null || true
   wait_for_min_peers "$GETH" "$V4_IPC" 1 60
 }
 
@@ -145,6 +163,58 @@ verify_checkpoint_contains_validator4() {
   log "Checkpoint ${checkpoint_block} extraData includes validator-4"
 }
 
+# wait_for_exact_same_head: waits until ALL nodes (including v4) are at the
+# SAME block number AND the same block hash.  Unlike wait_for_same_head which
+# compares at the minimum height, this requires all nodes to have advanced to
+# the same tip — preventing v4 from starting miner.start() while it is still
+# one block behind.
+wait_for_exact_same_head() {
+  local timeout="${1:-120}"
+  shift
+  # remaining args: geth ipc geth ipc ...
+
+  local deadline=$(( $(date +%s) + timeout ))
+  while [[ $(date +%s) -lt $deadline ]]; do
+    local args=("$@")
+    local ref_geth="${args[0]}" ref_ipc="${args[1]}"
+    local ref_n
+    ref_n=$(head_number "$ref_geth" "$ref_ipc" 2>/dev/null || echo -1)
+    if [[ "$ref_n" -lt 1 ]]; then sleep 1; continue; fi
+
+    local all_match=1
+    for ((i=2; i<${#args[@]}; i+=2)); do
+      local g="${args[$i]}" ipc="${args[$((i+1))]}"
+      local n
+      n=$(head_number "$g" "$ipc" 2>/dev/null || echo -1)
+      if [[ "$n" != "$ref_n" ]]; then
+        all_match=0; break
+      fi
+    done
+    if [[ "$all_match" -eq 0 ]]; then sleep 1; continue; fi
+
+    # All at same height — now verify same hash
+    local ref_hash
+    ref_hash=$(block_hash_at "$ref_geth" "$ref_ipc" "$ref_n")
+    [[ -n "$ref_hash" && "$ref_hash" != "null" ]] || { sleep 1; continue; }
+
+    local hash_ok=1
+    for ((i=2; i<${#args[@]}; i+=2)); do
+      local g="${args[$i]}" ipc="${args[$((i+1))]}"
+      local h
+      h=$(block_hash_at "$g" "$ipc" "$ref_n")
+      if [[ "$h" != "$ref_hash" ]]; then
+        hash_ok=0; break
+      fi
+    done
+    if [[ "$hash_ok" -eq 1 ]]; then
+      log "All nodes at identical tip: block=${ref_n} hash=${ref_hash:0:12}…"
+      return 0
+    fi
+    sleep 1
+  done
+  die "nodes did not converge on identical tip within ${timeout}s"
+}
+
 # ── Phase 1: setup ────────────────────────────────────────────────────────────
 run "${SCRIPT_DIR}/04-clean.sh"
 run "${SCRIPT_DIR}/01-setup.sh"
@@ -154,6 +224,9 @@ run "${SCRIPT_DIR}/02-start.sh"
 
 # ── Phase 3: vote validator-4 into Clique before the fork ────────────────────
 ensure_validator4
+
+# Start v4 in sync-only mode to get the genesis and initial chain state.
+# We don't mine yet — v4 must catch up first.
 start_validator4 sync
 
 V4_ADDR=$(val_addr "$V4_N")
@@ -176,10 +249,32 @@ if ! echo "$signers" | grep -qi "$V4_ADDR"; then
   die "validator-4 never became an authorized signer"
 fi
 
-start_validator4 mining
-auth_head=$(head_number "$GETH" "$(val_ipc 1)")
+# ── Phase 3b: start v4 in ready-to-mine mode, sync it, then start mining ────
+# With 4 authorized signers, Clique's "signed recently" limit is
+# ceil(4/2) = 3: each signer must wait for 3 other blocks after its last seal.
+# If only 3 validators mine, after v1→v2→v3, all three have "recently signed"
+# and only v4 can advance — resulting in a deadlock since v4 isn't mining.
+#
+# The fix: start v4 in ready-to-mine mode (account unlocked, etherbase set,
+# but --mine not passed), wait for v4 to sync to the EXACT same block number
+# and hash as the other validators, then call miner.start() via IPC.
+# This prevents v4 from sealing stale blocks (which would fork the chain)
+# while ensuring it participates in the 4-validator rotation.
+stop_pidfile "$V4_PID"
+start_validator4 ready-to-mine
+
+log "Waiting for validator-4 to sync to exactly the same tip as validators 1-3..."
+wait_for_exact_same_head 120 \
+  "$GETH" "$(val_ipc 1)" \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)" \
+  "$GETH" "$V4_IPC"
+
+log "All 4 nodes at identical tip. Starting v4 miner."
+attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
 
 # ── Phase 4: wait for a post-vote checkpoint before stopping ────────────────
+auth_head=$(head_number "$GETH" "$(val_ipc 1)")
 checkpoint_after_vote=$(( ((auth_head / CLIQUE_EPOCH) + 1) * CLIQUE_EPOCH ))
 pre_stop=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$pre_stop" -lt "$checkpoint_after_vote" ]]; then
@@ -193,17 +288,21 @@ log "Waiting for block ${pre_stop} so the voted-in signer reaches a pre-fork che
 wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$pre_stop" 180
 last_checkpoint=$(( pre_stop - (pre_stop % CLIQUE_EPOCH) ))
 verify_checkpoint_contains_validator4 "$last_checkpoint"
-wait_for_block_miner "$GETH" "$(val_ipc 1)" "$V4_ADDR" 20 180
-wait_for_same_head "$GETH" "$(val_ipc 1)" 120 \
+
+# Wait for all 4 nodes (including v4) to reach pre-stop.
+pre_stop_head=$(head_number "$GETH" "$(val_ipc 1)")
+log "Waiting for all nodes to reach pre-stop head (block ${pre_stop_head})..."
+wait_for_same_head --min-height "$pre_stop_head" "$GETH" "$(val_ipc 1)" 120 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)" \
   "$GETH" "$V4_IPC"
-log "validator-4 sealed a Clique block before the fork"
+log "All nodes at pre-stop head. validator-4 is an authorized signer."
 pre_restart_head=$(head_number "$GETH" "$(val_ipc 1)")
 log "Pre-restart head: ${pre_restart_head}"
 
 # ── Phase 5: stop validators and restart with Parlia override ────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
+stop_pidfile "$V4_PID"
 
 log "Writing TOML override config: ${TOML_CONFIG}"
 mkdir -p "${DATADIR_ROOT}"
@@ -223,38 +322,38 @@ TOML
 
 log "Restarting base validators with OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}"
 TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
-start_validator4 mining
 
-# ── Phase 5b: wait for all nodes to converge post-restart ────────────────────
-# After stop-all-restart the re-queue loop can cause a temporary fork split.
-# Use --min-height to prevent false-positive convergence at block 0/genesis
-# (which happens when a node that just started reports head=0).
-log "Waiting for all nodes to converge post-restart (min-height=${pre_restart_head})..."
-wait_for_same_head --min-height "$pre_restart_head" "$GETH" "$(val_ipc 1)" 120 \
+# ── Phase 5b: restart validator-4 in sync mode, wait for convergence ─────────
+# In Parlia mode only validators 1-3 mine (they were the initial genesis
+# signers and the system is set up for them).  validator-4 syncs as a full
+# non-mining node and verifies it has received the correct post-fork chain.
+start_validator4 sync
+current_base_head=$(head_number "$GETH" "$(val_ipc 1)")
+log "Waiting for all nodes to converge post-restart (min-height=${current_base_head})..."
+wait_for_same_head --min-height "$current_base_head" "$GETH" "$(val_ipc 1)" 120 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)" \
   "$GETH" "$V4_IPC"
 
-# ── Phase 6: wait until the fork is crossed on all validators ────────────────
+# ── Phase 6: wait for the 3 base validators to cross the fork block ───────────
+# Only base validators (1-3) mine.  v4 follows via sync.
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
-log "Waiting for all four validators to reach block ${POST_FORK}"
+log "Waiting for base validators to reach block ${POST_FORK}"
 _pids=()
-for n in 1 2 3 4; do
+for n in 1 2 3; do
   wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$POST_FORK" 180 &
   _pids+=($!)
 done
 for p in "${_pids[@]}"; do wait "$p"; done
 
-# ── Phase 7: verify the standard fork checks plus validator-4 convergence ───
+# ── Phase 7: verify fork checks; confirm v4 sync'd to canonical chain ────────
 run "${SCRIPT_DIR}/05-verify.sh"
+# Wait for v4 to sync to POST_FORK (it will catch up via peer sync).
+wait_for_head_at_least "$GETH" "$V4_IPC" "$POST_FORK" 60
 assert_same_hash_at "$POST_FORK" \
   "$GETH" "$(val_ipc 1)" \
   "$GETH" "$V4_IPC"
-wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
-  "$GETH" "$(val_ipc 2)" \
-  "$GETH" "$(val_ipc 3)" \
-  "$GETH" "$V4_IPC"
-log "validator-4 remained on the canonical chain after the Parlia fork"
+log "validator-4 synced to canonical chain at block ${POST_FORK}"
 
 # ── Phase 8: stop and clean ───────────────────────────────────────────────────
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
@@ -266,6 +365,7 @@ fi
 echo
 echo "==> Stopping nodes"
 "${SCRIPT_DIR}/03-stop.sh"
+stop_pidfile "$V4_PID"
 
 echo
 echo "PASS"
