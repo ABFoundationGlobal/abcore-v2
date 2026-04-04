@@ -271,28 +271,101 @@ InsecureUnlockAllowed = true
 NoUSB = true
 TOML
 
-log "Restarting base validators with OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}"
-TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
+# ── Phase 5b: restart all 4 validators simultaneously ────────────────────────
+# With 4 authorized Clique signers the "signed recently" limit is
+# ceil(4/2)=3.  If v1/v2/v3 are started first and seal 3+ blocks before v4
+# joins the network, all 3 have "recently signed" and only v4 can advance —
+# permanent deadlock.
+#
+# Fix: launch all 4 nodes in a single burst (no inter-node delay), wait for
+# all 4 IPCs, then wire the 4-node mesh.  Nodes with --nodiscover and
+# bootnodes="" cannot seal or sync until they have peers, so the simultaneous
+# launch ensures all 4 are wired before any of them can seal.
+log "Launching all 4 validators simultaneously with OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}"
+v4_addr=$(val_addr "$V4_N")
 
-# ── Phase 5b: restart validator-4 and let it mine ────────────────────────────
-# validator-4 is in the Clique checkpoint at the last pre-fork epoch (it was
-# voted in before that checkpoint).  With 4 authorized Clique signers the
-# "signed recently" limit is ceil(4/2)=3: after v1/v2/v3 each seal one block
-# all three have "recently signed" and only v4 can advance.  If v4 is
-# sync-only the chain stalls for blocks between the restart and the fork.
-#
-# The same argument applies to the Parlia phase: Parlia seeds its validator
-# set from that same checkpoint, so all 4 are in the Parlia set.  Parlia's
-# Seal() will route block proposals to v4 in its turn.
-#
-# Fix: restart v4 in ready-to-mine mode, wait for exact-head convergence
-# with the base validators, then call miner.start().
-start_validator4 ready-to-mine
-_v4_post_target=$(head_number "$GETH" "$(val_ipc 1)")
-log "Waiting for validator-4 to import canonical chain up to block ${_v4_post_target} (post-restart)..."
-wait_for_head_at_least "$GETH" "$V4_IPC" "$_v4_post_target" 120
-log "validator-4 at canonical tip (block ${_v4_post_target}+, post-restart). Starting v4 miner."
-attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
+# Launch v4 first so its pidfile is written before 02-start.sh runs.
+(
+  nohup "$GETH" \
+    --config "$TOML_CONFIG" \
+    --datadir "$V4_DIR" \
+    --networkid "$NETWORK_ID" \
+    --port "$(p2p_port "$V4_N")" \
+    --nat none \
+    --nodiscover \
+    --bootnodes "" \
+    --ipcpath geth.ipc \
+    --syncmode full \
+    --nousb \
+    --mine \
+    --miner.etherbase "$v4_addr" \
+    --unlock "$v4_addr" \
+    --password "$V4_PW" \
+    --allow-insecure-unlock \
+    >>"$V4_LOG" 2>&1 &
+  echo $! > "$V4_PID"
+)
+
+# Launch v1/v2/v3 immediately after — no waiting between.
+# 02-start.sh is NOT used here because its "head >= 3" wait allows
+# v1/v2/v3 to seal 3 blocks before v4 is wired, causing deadlock.
+for n in 1 2 3; do
+  dir=$(val_dir "$n")
+  addr=$(val_addr "$n")
+  pw=$(val_pw "$n")
+  logfile=$(val_log "$n")
+  pidfile=$(val_pid "$n")
+  (
+    nohup "$GETH" \
+      --config "$TOML_CONFIG" \
+      --datadir "$dir" \
+      --networkid "$NETWORK_ID" \
+      --port "$(p2p_port "$n")" \
+      --nat none \
+      --nodiscover \
+      --bootnodes "" \
+      --ipcpath geth.ipc \
+      --http \
+      --http.addr 127.0.0.1 \
+      --http.port "$(http_port "$n")" \
+      --http.api "eth,net,web3,clique,parlia,admin,personal,miner" \
+      --syncmode full \
+      --nousb \
+      --mine \
+      --miner.etherbase "$addr" \
+      --unlock "$addr" \
+      --password "$pw" \
+      --allow-insecure-unlock \
+      >>"$logfile" 2>&1 &
+    echo $! > "$pidfile"
+  )
+done
+
+# Wait for all 4 IPCs in parallel.
+_pids=()
+for n in 1 2 3; do wait_for_ipc "$GETH" "$(val_ipc "$n")" 60 & _pids+=($!); done
+wait_for_ipc "$GETH" "$V4_IPC" 60 & _pids+=($!)
+for p in "${_pids[@]}"; do wait "$p"; done
+
+# Wire the full 4-node mesh.
+enode1=$(get_enode "$GETH" "$(val_ipc 1)")
+enode2=$(get_enode "$GETH" "$(val_ipc 2)")
+enode3=$(get_enode "$GETH" "$(val_ipc 3)")
+enode4=$(get_enode "$GETH" "$V4_IPC")
+log "Wiring 4-node peer mesh"
+for src_ipc in "$(val_ipc 1)" "$(val_ipc 2)" "$(val_ipc 3)" "$V4_IPC"; do
+  add_peer "$GETH" "$src_ipc" "$enode1" >/dev/null || true
+  add_peer "$GETH" "$src_ipc" "$enode2" >/dev/null || true
+  add_peer "$GETH" "$src_ipc" "$enode3" >/dev/null || true
+  add_peer "$GETH" "$src_ipc" "$enode4" >/dev/null || true
+done
+
+# Wait for each node to have at least 2 peers.
+_pids=()
+for n in 1 2 3; do wait_for_min_peers "$GETH" "$(val_ipc "$n")" 2 30 & _pids+=($!); done
+wait_for_min_peers "$GETH" "$V4_IPC" 1 30 & _pids+=($!)
+for p in "${_pids[@]}"; do wait "$p"; done
+log "All 4 validators up and peered."
 
 # ── Phase 6: wait for all 4 validators to cross the fork block ───────────────
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
