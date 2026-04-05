@@ -764,6 +764,10 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 // the block with `number` and `hash` is just the last element of `parents`,
 // unlike other interfaces such as verifyCascadingFields, `parents` are real parents
 func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
+	// Save the originally requested block number before the walk-back loop mutates it.
+	// We need this later to decide whether the request crosses into Parlia territory.
+	requestedNumber := number
+
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -912,11 +916,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	// ecrecover uses types.SealHash(header, chainId), recovering the wrong address and
 	// returning errUnauthorizedValidator for every Clique-sealed block.
 	//
-	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
-	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
-	// Before skipping the Clique-sealed prefix, reseed the snapshot validator set from the
-	// last Clique checkpoint so fork-block Prepare/Seal/CalcDifficulty use the validator
-	// set that was actually active at the transition point.
+	// The firstPost scan, anchor advancement (snap.Number / snap.Hash), and the
+	// headers strip are always needed when HasCliqueAndParlia() is true: even a
+	// purely pre-fork snapshot request may have collected Clique-sealed headers that
+	// must not reach snap.apply().
+	//
+	// Only the validator/epoch/period reseed is gated behind requestedNumber+1 >= forkBlock
+	// so that pre-fork-only requests do not call getValidatorsFromCliqueCheckpoint with a
+	// checkpoint block beyond the requested height (which would return a wrong-era validator
+	// set and could require headers the node hasn't yet synced).
 	//
 	// When the headers slice contains only pre-fork blocks, advance the snapshot's Number
 	// and Hash to the tip of that range so that apply()'s contiguity check passes for the
@@ -933,18 +941,24 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 		}
 		if firstPost > 0 {
-			snap = snap.copy()
-			forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
-			if err != nil {
-				return nil, err
-			}
-			snap.Validators = validatorInfoMap(forkValidators)
-			if p.chainConfig.Clique != nil {
-				if p.chainConfig.Clique.Epoch > 0 {
-					snap.EpochLength = p.chainConfig.Clique.Epoch
+			// Only reseed from the Clique checkpoint when the requested snapshot is at or
+			// near the fork boundary. Pre-fork-only snapshot requests (requestedNumber+1 <
+			// forkBlock) must not call getValidatorsFromCliqueCheckpoint with a block beyond
+			// the requested height.
+			if requestedNumber+1 >= forkBlock {
+				snap = snap.copy()
+				forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
+				if err != nil {
+					return nil, err
 				}
-				if p.chainConfig.Clique.Period > 0 {
-					snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+				snap.Validators = validatorInfoMap(forkValidators)
+				if p.chainConfig.Clique != nil {
+					if p.chainConfig.Clique.Epoch > 0 {
+						snap.EpochLength = p.chainConfig.Clique.Epoch
+					}
+					if p.chainConfig.Clique.Period > 0 {
+						snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+					}
 				}
 			}
 			// Advance the snapshot anchor to the last pre-fork block, skipping

@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/lib.sh"
 require_exe "$GETH"
 require_file "${GENESIS_JSON}"
 
-# Optional: path to a TOML config file (used by 03-restart-fork.sh; absent on first start).
+# Optional: path to a TOML config file (used by the fork-restart flow driven by 99-run-all / 98-run-vote-change; absent on first start).
 TOML_CONFIG="${TOML_CONFIG:-}"
 
 launch_validator() {
