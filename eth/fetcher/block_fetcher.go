@@ -38,6 +38,7 @@ const (
 	gatherSlack         = 100 * time.Millisecond // Interval used to collate almost-expired announces with fetches
 	fetchTimeout        = 5 * time.Second        // Maximum allotted time to return an explicitly requested block/transaction
 	reQueueBlockTimeout = 500 * time.Millisecond // Time allowance before blocks are requeued for import
+	maxRequeueAttempts  = 10                     // Maximum re-queue attempts before giving up (lets downloader take over)
 
 )
 
@@ -145,6 +146,8 @@ type blockOrHeaderInject struct {
 
 	header *types.Header // Used for light mode fetcher which only cares about header.
 	block  *types.Block  // Used for normal mode fetcher which imports full block.
+
+	requeueCount int // Number of times this block has been re-queued due to missing parent.
 }
 
 type BlockFetchingEntry struct {
@@ -916,9 +919,20 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 	// Run the import on a new thread
 	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash, "balSize", block.BALSize())
 	go func() {
-		// If the parent's unknown, abort insertion
+		// If the parent's unknown, re-queue briefly to allow the parent to arrive
+		// via normal broadcast or announce paths. After maxRequeueAttempts give up:
+		// the downloader's forceSyncCycle (10s) will trigger a full sync that
+		// fetches the missing ancestor. Without this limit, a permanent fork split
+		// (e.g. after a stop-all-restart seal race) causes an infinite re-queue loop
+		// that prevents the downloader from ever taking over.
 		parent := f.getBlock(block.ParentHash())
 		if parent == nil {
+			op.requeueCount++
+			if op.requeueCount > maxRequeueAttempts {
+				log.Debug("Giving up re-queuing propagated block, parent not found after max attempts", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash(), "attempts", op.requeueCount)
+				f.done <- hash
+				return
+			}
 			log.Debug("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
 			// forget block first, then re-queue
 			f.done <- hash
