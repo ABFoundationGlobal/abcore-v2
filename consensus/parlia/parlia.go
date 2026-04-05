@@ -916,35 +916,36 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	// ecrecover uses types.SealHash(header, chainId), recovering the wrong address and
 	// returning errUnauthorizedValidator for every Clique-sealed block.
 	//
-	// Only do this when the requested snapshot reaches the Parlia fork. Pre-fork snapshot
-	// requests must not reseed from the fork checkpoint, because that can require headers
-	// beyond the requested height and can return a validator set for the wrong era.
-	// Specifically, reseed whenever the requested block is the fork parent or later
-	// (requestedNumber+1 >= forkBlock), which covers both the fork parent (needed to
-	// correctly seed the very first Parlia block) and all post-fork blocks.
+	// The firstPost scan, anchor advancement (snap.Number / snap.Hash), and the
+	// headers strip are always needed when HasCliqueAndParlia() is true: even a
+	// purely pre-fork snapshot request may have collected Clique-sealed headers that
+	// must not reach snap.apply().
 	//
-	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
-	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
-	// Before skipping the Clique-sealed prefix, reseed the snapshot validator set from the
-	// last Clique checkpoint so fork-block Prepare/Seal/CalcDifficulty use the validator
-	// set that was actually active at the transition point.
+	// Only the validator/epoch/period reseed is gated behind requestedNumber+1 >= forkBlock
+	// so that pre-fork-only requests do not call getValidatorsFromCliqueCheckpoint with a
+	// checkpoint block beyond the requested height (which would return a wrong-era validator
+	// set and could require headers the node hasn't yet synced).
 	//
 	// When the headers slice contains only pre-fork blocks, advance the snapshot's Number
 	// and Hash to the tip of that range so that apply()'s contiguity check passes for the
 	// first post-fork block. When there is a mix, filter out the pre-fork prefix.
 	if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.ParliaGenesisBlock != nil {
 		forkBlock := p.chainConfig.ParliaGenesisBlock.Uint64()
-		if requestedNumber+1 >= forkBlock {
-			// headers is now in ascending order (after the reversal above).
-			// Find the index of the first post-fork header.
-			firstPost := len(headers)
-			for i, h := range headers {
-				if h.Number.Uint64() >= forkBlock {
-					firstPost = i
-					break
-				}
+		// headers is now in ascending order (after the reversal above).
+		// Find the index of the first post-fork header.
+		firstPost := len(headers)
+		for i, h := range headers {
+			if h.Number.Uint64() >= forkBlock {
+				firstPost = i
+				break
 			}
-			if firstPost > 0 {
+		}
+		if firstPost > 0 {
+			// Only reseed from the Clique checkpoint when the requested snapshot is at or
+			// near the fork boundary. Pre-fork-only snapshot requests (requestedNumber+1 <
+			// forkBlock) must not call getValidatorsFromCliqueCheckpoint with a block beyond
+			// the requested height.
+			if requestedNumber+1 >= forkBlock {
 				snap = snap.copy()
 				forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
 				if err != nil {
@@ -959,14 +960,14 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 						snap.BlockInterval = p.chainConfig.Clique.Period * 1000
 					}
 				}
-				// Advance the snapshot anchor to the last pre-fork block, skipping
-				// apply() for those Clique-sealed headers entirely.
-				last := headers[firstPost-1]
-				snap.Number = last.Number.Uint64()
-				snap.Hash = last.Hash()
 			}
-			headers = headers[firstPost:]
+			// Advance the snapshot anchor to the last pre-fork block, skipping
+			// apply() for those Clique-sealed headers entirely.
+			last := headers[firstPost-1]
+			snap.Number = last.Number.Uint64()
+			snap.Hash = last.Hash()
 		}
+		headers = headers[firstPost:]
 	}
 
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig)
