@@ -764,6 +764,10 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 // the block with `number` and `hash` is just the last element of `parents`,
 // unlike other interfaces such as verifyCascadingFields, `parents` are real parents
 func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
+	// Save the originally requested block number before the walk-back loop mutates it.
+	// We need this later to decide whether the request crosses into Parlia territory.
+	requestedNumber := number
+
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -912,6 +916,13 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	// ecrecover uses types.SealHash(header, chainId), recovering the wrong address and
 	// returning errUnauthorizedValidator for every Clique-sealed block.
 	//
+	// Only do this when the requested snapshot reaches the Parlia fork. Pre-fork snapshot
+	// requests must not reseed from the fork checkpoint, because that can require headers
+	// beyond the requested height and can return a validator set for the wrong era.
+	// Specifically, reseed whenever the requested block is the fork parent or later
+	// (requestedNumber+1 >= forkBlock), which covers both the fork parent (needed to
+	// correctly seed the very first Parlia block) and all post-fork blocks.
+	//
 	// Pre-fork headers are verified by Clique via DualConsensus.VerifyHeader; Parlia only
 	// needs to process post-fork blocks for SignRecently tracking and validator set updates.
 	// Before skipping the Clique-sealed prefix, reseed the snapshot validator set from the
@@ -923,37 +934,39 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	// first post-fork block. When there is a mix, filter out the pre-fork prefix.
 	if p.chainConfig.HasCliqueAndParlia() && p.chainConfig.ParliaGenesisBlock != nil {
 		forkBlock := p.chainConfig.ParliaGenesisBlock.Uint64()
-		// headers is now in ascending order (after the reversal above).
-		// Find the index of the first post-fork header.
-		firstPost := len(headers)
-		for i, h := range headers {
-			if h.Number.Uint64() >= forkBlock {
-				firstPost = i
-				break
-			}
-		}
-		if firstPost > 0 {
-			snap = snap.copy()
-			forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
-			if err != nil {
-				return nil, err
-			}
-			snap.Validators = validatorInfoMap(forkValidators)
-			if p.chainConfig.Clique != nil {
-				if p.chainConfig.Clique.Epoch > 0 {
-					snap.EpochLength = p.chainConfig.Clique.Epoch
-				}
-				if p.chainConfig.Clique.Period > 0 {
-					snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+		if requestedNumber+1 >= forkBlock {
+			// headers is now in ascending order (after the reversal above).
+			// Find the index of the first post-fork header.
+			firstPost := len(headers)
+			for i, h := range headers {
+				if h.Number.Uint64() >= forkBlock {
+					firstPost = i
+					break
 				}
 			}
-			// Advance the snapshot anchor to the last pre-fork block, skipping
-			// apply() for those Clique-sealed headers entirely.
-			last := headers[firstPost-1]
-			snap.Number = last.Number.Uint64()
-			snap.Hash = last.Hash()
+			if firstPost > 0 {
+				snap = snap.copy()
+				forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
+				if err != nil {
+					return nil, err
+				}
+				snap.Validators = validatorInfoMap(forkValidators)
+				if p.chainConfig.Clique != nil {
+					if p.chainConfig.Clique.Epoch > 0 {
+						snap.EpochLength = p.chainConfig.Clique.Epoch
+					}
+					if p.chainConfig.Clique.Period > 0 {
+						snap.BlockInterval = p.chainConfig.Clique.Period * 1000
+					}
+				}
+				// Advance the snapshot anchor to the last pre-fork block, skipping
+				// apply() for those Clique-sealed headers entirely.
+				last := headers[firstPost-1]
+				snap.Number = last.Number.Uint64()
+				snap.Hash = last.Hash()
+			}
+			headers = headers[firstPost:]
 		}
-		headers = headers[firstPost:]
 	}
 
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig)
