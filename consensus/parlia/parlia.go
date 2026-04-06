@@ -941,12 +941,13 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 		}
 		if firstPost > 0 {
+			// Always copy before mutating: snap may be a cached object shared across callers.
+			snap = snap.copy()
 			// Only reseed from the Clique checkpoint when the requested snapshot is at or
 			// near the fork boundary. Pre-fork-only snapshot requests (requestedNumber+1 <
 			// forkBlock) must not call getValidatorsFromCliqueCheckpoint with a block beyond
 			// the requested height.
 			if requestedNumber+1 >= forkBlock {
-				snap = snap.copy()
 				forkValidators, err := p.getValidatorsFromCliqueCheckpoint(chain, &types.Header{Number: new(big.Int).SetUint64(forkBlock)})
 				if err != nil {
 					return nil, err
