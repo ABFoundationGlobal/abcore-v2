@@ -235,11 +235,27 @@ attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
 # ── Phase 4: wait for a post-vote checkpoint before stopping ────────────────
 # PARLIA_GENESIS_BLOCK was set dynamically (two epochs past the next checkpoint
 # after the vote), so there is guaranteed room here — no need for a die check.
+# Note: pre_stop is capped at PGB-1 below to prevent block PGB from being
+# produced while validators are still running pure Clique (no TOML override).
 auth_head=$(head_number "$GETH" "$(val_ipc 1)")
 checkpoint_after_vote=$(( ((auth_head / CLIQUE_EPOCH) + 1) * CLIQUE_EPOCH ))
 pre_stop=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$pre_stop" -lt "$checkpoint_after_vote" ]]; then
   pre_stop="$checkpoint_after_vote"
+fi
+# pre_stop must stay strictly below PARLIA_GENESIS_BLOCK.  Nodes are still
+# running pure Clique here (no TOML override yet), so if the chain reaches
+# PGB before the TOML restart, block PGB gets sealed as a Clique block.
+# After the restart DualConsensus routes block PGB to Parlia.VerifyHeader,
+# which uses chainID-aware ecrecover — recovering a garbage address from the
+# Clique signature and permanently blocking the snapshot computation.
+#
+# The cap is PGB-1 (not PGB-2) to minimise extra wait time.  The subsequent
+# wait_for_same_head adds at most a few seconds; blocks produced there are
+# still safely below PGB because PARLIA_GENESIS_BLOCK is always at least
+# 2*CLIQUE_EPOCH above the checkpoint we're about to verify.
+if [[ "$pre_stop" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
+  pre_stop=$(( PARLIA_GENESIS_BLOCK - CLIQUE_EPOCH ))
 fi
 
 log "Waiting for block ${pre_stop} so the voted-in signer reaches a pre-fork checkpoint"
