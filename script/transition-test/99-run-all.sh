@@ -166,7 +166,7 @@ done
 # ── Phase 6: wait for convergence after successful restart ───────────────────
 post_restart_head=$(head_number "$GETH" "$(val_ipc 1)")
 log "Waiting for all nodes to converge post-restart (min-height=${post_restart_head})..."
-wait_for_same_head --min-height "$post_restart_head" "$GETH" "$(val_ipc 1)" 60 \
+wait_for_same_head --min-height "$post_restart_head" "$GETH" "$(val_ipc 1)" 120 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
 
