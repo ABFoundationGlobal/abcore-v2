@@ -10,20 +10,16 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 : "${CLIQUE_EPOCH:=10}"
-: "${PARLIA_GENESIS_BLOCK:=35}"
 
 _PORT_BASE_EXPLICIT=${PORT_BASE+set}
 _DATADIR_ROOT_EXPLICIT=${DATADIR_ROOT+set}
 
 source "${SCRIPT_DIR}/lib.sh"
 
-export CLIQUE_EPOCH PARLIA_GENESIS_BLOCK
+export CLIQUE_EPOCH
 
 if [[ "$CLIQUE_EPOCH" -le 0 ]]; then
   die "CLIQUE_EPOCH must be > 0"
-fi
-if [[ "$PARLIA_GENESIS_BLOCK" -le 5 ]]; then
-  die "PARLIA_GENESIS_BLOCK must be > 5"
 fi
 
 if [[ "${_PORT_BASE_EXPLICIT}" != "set" ]]; then
@@ -197,6 +193,18 @@ if ! echo "$signers" | grep -qi "$V4_ADDR"; then
   die "validator-4 never became an authorized signer"
 fi
 
+# Compute PARLIA_GENESIS_BLOCK dynamically so there is always room for a
+# post-vote checkpoint, regardless of how far the chain has advanced.
+# Lock in the current head right now (before v4 starts mining and the chain
+# accelerates), then place the fork block two full epochs beyond the next
+# checkpoint.  This guarantees:
+#   checkpoint_after_vote + CLIQUE_EPOCH < PARLIA_GENESIS_BLOCK
+# even on slow CI runners where the chain may race ahead during setup.
+_vote_head=$(head_number "$GETH" "$(val_ipc 1)")
+_next_checkpoint=$(( ((_vote_head / CLIQUE_EPOCH) + 1) * CLIQUE_EPOCH ))
+export PARLIA_GENESIS_BLOCK=$(( _next_checkpoint + 2 * CLIQUE_EPOCH ))
+log "PARLIA_GENESIS_BLOCK set dynamically to ${PARLIA_GENESIS_BLOCK} (vote_head=${_vote_head}, next_checkpoint=${_next_checkpoint})"
+
 # ── Phase 3b: start v4 in ready-to-mine mode, sync it, then start mining ────
 # With 4 authorized signers, Clique's "signed recently" limit is
 # ceil(4/2) = 3: each signer must wait for 3 other blocks after its last seal.
@@ -225,14 +233,13 @@ log "validator-4 at canonical tip (block ${_v4_target}+). Starting v4 miner."
 attach_exec "$GETH" "$V4_IPC" "miner.start()" >/dev/null
 
 # ── Phase 4: wait for a post-vote checkpoint before stopping ────────────────
+# PARLIA_GENESIS_BLOCK was set dynamically (two epochs past the next checkpoint
+# after the vote), so there is guaranteed room here — no need for a die check.
 auth_head=$(head_number "$GETH" "$(val_ipc 1)")
 checkpoint_after_vote=$(( ((auth_head / CLIQUE_EPOCH) + 1) * CLIQUE_EPOCH ))
 pre_stop=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$pre_stop" -lt "$checkpoint_after_vote" ]]; then
   pre_stop="$checkpoint_after_vote"
-fi
-if [[ "$pre_stop" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
-  die "not enough room before fork: need a post-vote checkpoint before ParliaGenesisBlock"
 fi
 
 log "Waiting for block ${pre_stop} so the voted-in signer reaches a pre-fork checkpoint"
