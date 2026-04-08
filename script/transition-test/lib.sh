@@ -287,7 +287,7 @@ find_free_port_base() {
     local ok=1
     for rel in "${candidates[@]}"; do
       local port=$((rel + base))
-      if ss -tunlp 2>/dev/null | grep -q ":${port}[[:space:]]" || nc -z 127.0.0.1 "$port" 2>/dev/null; then
+      if ss -tunlp 2>/dev/null | grep -q ":${port}[[:space:]]" || nc -z 127.0.0.1 "$port" 2>/dev/null || nc -uz 127.0.0.1 "$port" 2>/dev/null; then
         ok=0; break
       fi
     done

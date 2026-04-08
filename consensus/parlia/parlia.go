@@ -390,7 +390,7 @@ func getValidatorBytesFromHeader(header *types.Header, chainConfig *params.Chain
 		return header.Extra[extraVanity : len(header.Extra)-extraSeal]
 	}
 
-	if header.Number.Uint64()%epochLength != 0 {
+	if header.Number.Uint64()%epochLength != 0 && !chainConfig.IsOnParliaGenesis(header.Number) {
 		return nil
 	}
 	num := int(header.Extra[extraVanity])

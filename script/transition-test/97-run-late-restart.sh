@@ -87,7 +87,9 @@ NoUSB = true
 TOML
 
 log "Starting 3 validators with ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}"
-TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
+echo
+echo "==> ${SCRIPT_DIR}/02-start.sh"
+TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
 
 # ── Phase 3: wait for a few Clique blocks, then stop val-3 BEFORE the fork ───
 # The scenario: val-3 goes offline while the chain is still in Clique mode.

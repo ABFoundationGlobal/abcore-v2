@@ -128,7 +128,7 @@ TOML
 # restart again; the new head height shifts the Clique round-robin so a
 # different validator is in-turn, breaking the deadlock.
 #
-# The outer loop retries the full stop→start→converge cycle up to 3 times.
+# The outer loop retries the full stop→start→converge cycle up to 5 times.
 # In practice, a single retry always suffices; the retry cap is a safety net.
 _restart_attempt=0
 while true; do
