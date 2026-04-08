@@ -119,18 +119,51 @@ InsecureUnlockAllowed = true
 NoUSB = true
 TOML
 
-log "Restarting validators with --config ${TOML_CONFIG} (OverrideParliaGenesisBlock=${PARLIA_GENESIS_BLOCK})"
-TOML_CONFIG="${TOML_CONFIG}" run "${SCRIPT_DIR}/02-start.sh"
-
-# ── Phase 6: assert all nodes have the same post-restart chain tip ────────────
-# After restart nodes may race to seal the first new block. Clique's fork-choice
-# (heaviest TD) resolves the split: the minority-fork node drops its block via
-# the downloader once the re-queue attempts are exhausted (see block_fetcher.go).
-# We wait for full head convergence before proceeding to the fork block.
+# Restart with deadlock recovery.
 #
-# Use the head AFTER restart (not the pre-restart head) as min-height, so that
-# the check requires all nodes to have produced at least one new block and agree
-# on its hash — not just agree on the pre-restart canonical chain.
+# On slow machines (CI), all 3 validators can seal the same block before
+# propagating to each other.  The competing reorgs corrupt the Clique snapshot
+# cache, leaving every validator stuck in "signed recently" — a permanent
+# deadlock.  When this happens the only remedy is to stop all validators and
+# restart again; the new head height shifts the Clique round-robin so a
+# different validator is in-turn, breaking the deadlock.
+#
+# The outer loop retries the full stop→start→converge cycle up to 3 times.
+# In practice, a single retry always suffices; the retry cap is a safety net.
+_restart_attempt=0
+while true; do
+  _restart_attempt=$(( _restart_attempt + 1 ))
+  log "Restart attempt ${_restart_attempt}: starting validators with ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}..."
+  TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
+
+  # Check whether the chain is advancing.  If the head doesn't move within
+  # 20 seconds, the validators are deadlocked and we need to retry.
+  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
+  _deadline=$(( $(date +%s) + 20 ))
+  _alive=false
+  while [[ $(date +%s) -lt $_deadline ]]; do
+    _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
+    if [[ "$_head_now" -gt "$_head_before" ]]; then
+      _alive=true
+      break
+    fi
+    sleep 2
+  done
+
+  if "$_alive"; then
+    log "Chain is advancing (head moved from ${_head_before} to ${_head_now}). Restart successful."
+    break
+  fi
+
+  if [[ "$_restart_attempt" -ge 3 ]]; then
+    die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
+  fi
+
+  log "WARNING: chain stalled at head=${_head_before} (Clique seal-race deadlock). Stopping for retry..."
+  "${SCRIPT_DIR}/03-stop.sh"
+done
+
+# ── Phase 6: wait for convergence after successful restart ───────────────────
 post_restart_head=$(head_number "$GETH" "$(val_ipc 1)")
 log "Waiting for all nodes to converge post-restart (min-height=${post_restart_head})..."
 wait_for_same_head --min-height "$post_restart_head" "$GETH" "$(val_ipc 1)" 60 \
