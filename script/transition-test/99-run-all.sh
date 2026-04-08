@@ -136,19 +136,17 @@ while true; do
   log "Restart attempt ${_restart_attempt}: starting validators with ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}..."
   TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
 
-  # Wait for the chain to cross the fork block.  We need the chain to advance
-  # past PARLIA_GENESIS_BLOCK (not just move by one block), because:
-  #   1. The deadlock can recur just before the fork (e.g. the chain advances
-  #      1-2 blocks and then stalls again due to a second seal-race at a
-  #      different height).
-  #   2. "Head moved" by one block is a necessary but not sufficient condition
-  #      for a healthy restart — we need the fork transition to complete.
-  #
-  # Give 60 seconds for the chain to cross the fork; if it doesn't, retry.
-  _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  # Require the chain to advance at least 2 blocks from the current tip AND
+  # past ParliaGenesisBlock+2 (so the fork transition has completed).
+  # Using current_head+2 rather than a fixed PGB+2 target ensures that even
+  # if on-disk data is already past the fork, a retry still detects liveness.
+  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
+  _target=$(( _head_before + 2 ))
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  fi
   _deadline=$(( $(date +%s) + 60 ))
   _alive=false
-  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
     if [[ "$_head_now" -ge "$_target" ]]; then
@@ -159,16 +157,16 @@ while true; do
   done
 
   if "$_alive"; then
-    log "Chain crossed fork block (head=${_head_now}, PGB=${PARLIA_GENESIS_BLOCK}). Restart successful."
+    log "Chain is advancing (head=${_head_now} >= target=${_target}). Restart successful."
     break
   fi
 
   if [[ "$_restart_attempt" -ge 5 ]]; then
-    die "chain did not cross fork block after ${_restart_attempt} restart attempts — giving up"
+    die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
   fi
 
   _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
-  log "WARNING: chain stalled at head=${_head_now} (Clique seal-race deadlock). Stopping for retry..."
+  log "WARNING: chain stalled at head=${_head_now} (seal-race deadlock). Stopping for retry..."
   "${SCRIPT_DIR}/03-stop.sh"
 done
 

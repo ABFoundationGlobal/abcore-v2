@@ -380,17 +380,24 @@ _launch_all_4() {
 }
 
 _restart_attempt=0
-_target=$(( PARLIA_GENESIS_BLOCK + 2 ))
 while true; do
   _restart_attempt=$(( _restart_attempt + 1 ))
   _launch_all_4
 
-  # Wait up to 60 s for the chain to cross the fork block.  A deadlocked
-  # 4-validator Clique can advance 1-2 blocks and then stall; we need to
-  # confirm the fork transition completed, not just that head moved.
+  # Snapshot current head immediately after all 4 nodes are up and peered.
+  # We require the chain to advance at least 2 blocks from here (not just
+  # past ParliaGenesisBlock) because on retry attempts the chain may already
+  # be past the fork in the on-disk data; the liveness check must be relative
+  # to the actual current tip, not to a fixed fork-block target.
+  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
+  _target=$(( _head_before + 2 ))
+  # Also require the fork transition to have completed.
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  fi
+
   _deadline=$(( $(date +%s) + 60 ))
   _alive=false
-  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
     if [[ "$_head_now" -ge "$_target" ]]; then
@@ -400,16 +407,16 @@ while true; do
   done
 
   if "$_alive"; then
-    log "Chain crossed fork block (head=${_head_now}, PGB=${PARLIA_GENESIS_BLOCK}). Restart successful."
+    log "Chain is advancing (head=${_head_now} >= target=${_target}). Restart successful."
     break
   fi
 
   if [[ "$_restart_attempt" -ge 5 ]]; then
-    die "chain did not cross fork block after ${_restart_attempt} restart attempts — giving up"
+    die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
   fi
 
   _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
-  log "WARNING: chain stalled at head=${_head_now} (Clique seal-race deadlock). Stopping for retry..."
+  log "WARNING: chain stalled at head=${_head_now} (seal-race deadlock). Stopping for retry..."
   stop_pidfile "$V4_PID" || true
   "${SCRIPT_DIR}/03-stop.sh"
 done
