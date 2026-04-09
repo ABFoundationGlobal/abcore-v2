@@ -43,8 +43,8 @@ func (s *transitionSnapshotChain) GenesisHeader() *types.Header {
 }
 
 func buildTransitionSnapshotChain(cfg *params.ChainConfig, forkBlock, checkpointNumber uint64, genesisValidators, checkpointValidators []common.Address) (*transitionSnapshotChain, *types.Header) {
-	headersByNumber := make(map[uint64]*types.Header, forkBlock)
-	headersByHash := make(map[common.Hash]*types.Header, forkBlock)
+	headersByNumber := make(map[uint64]*types.Header, int(forkBlock))
+	headersByHash := make(map[common.Hash]*types.Header, int(forkBlock))
 	var parentHash common.Hash
 	for number := uint64(0); number < forkBlock; number++ {
 		header := &types.Header{

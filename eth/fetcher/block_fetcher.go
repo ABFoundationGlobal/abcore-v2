@@ -470,17 +470,23 @@ func (f *BlockFetcher) loop() {
 		case op := <-f.requeue:
 			// Re-queue blocks that have not been written due to fork block competition
 			number := int64(0)
-			hash := ""
+			blockHash := common.Hash{}
 			if op.header != nil {
 				number = op.header.Number.Int64()
-				hash = op.header.Hash().String()
+				blockHash = op.header.Hash()
 			} else if op.block != nil {
 				number = op.block.Number().Int64()
-				hash = op.block.Hash().String()
+				blockHash = op.block.Hash()
 			}
 
-			log.Info("Re-queue blocks", "number", number, "hash", hash)
+			log.Info("Re-queue blocks", "number", number, "hash", blockHash)
 			f.enqueue(op.origin, op.header, op.block)
+			// Preserve requeueCount so the cap in importBlocks remains effective.
+			// enqueue() creates a fresh blockOrHeaderInject (requeueCount=0), so we
+			// copy the count back onto the newly queued entry.
+			if queued, ok := f.queued[blockHash]; ok {
+				queued.requeueCount = op.requeueCount
+			}
 
 		case op := <-f.inject:
 			// A direct block insertion was requested, try and fill any pending gaps

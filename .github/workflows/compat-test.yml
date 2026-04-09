@@ -99,6 +99,11 @@ jobs:
         PARLIA_GENESIS_BLOCK: 25
       run: bash script/transition-test/99-run-all.sh
 
+    - name: Run transition test (late restart past fork block)
+      env:
+        GETH: ${{ github.workspace }}/build/bin/geth
+      run: bash script/transition-test/97-run-late-restart.sh
+
     - name: Run transition test (pre-fork vote change)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
