@@ -1722,9 +1722,10 @@ func TestPrepareValidatorsAtParliaGenesis(t *testing.T) {
 		}
 	})
 
-	t.Run("nonEpochBlock_isNoOp", func(t *testing.T) {
-		// Block 201 with epoch=200: 201%200=1 → prepareValidators returns early, Extra unchanged.
-		cfg := migrationChainConfig(201, cliqueEpoch)
+	t.Run("nonEpochNonForkBlock_isNoOp", func(t *testing.T) {
+		// Block 201: epoch=200, ParliaGenesisBlock=300.
+		// 201%200=1 (not epoch boundary) AND 201≠300 (not fork block) → returns early, Extra unchanged.
+		cfg := migrationChainConfig(300, cliqueEpoch)
 		sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
 		p := &Parlia{
 			chainConfig: cfg,
@@ -1746,7 +1747,49 @@ func TestPrepareValidatorsAtParliaGenesis(t *testing.T) {
 			t.Fatalf("prepareValidators: %v", err)
 		}
 		if len(header.Extra) != len(origExtra) {
-			t.Errorf("Extra was modified on non-epoch block: len %d → %d", len(origExtra), len(header.Extra))
+			t.Errorf("Extra was modified on non-epoch non-fork block: len %d → %d", len(origExtra), len(header.Extra))
+		}
+	})
+
+	t.Run("nonEpochForkBlock_encodesValidators", func(t *testing.T) {
+		// Block 201: epoch=200, ParliaGenesisBlock=201.
+		// 201%200=1 (not epoch boundary) BUT 201==ParliaGenesisBlock (fork block) →
+		// epoch guard is bypassed and validators are encoded into Extra.
+		const forkBlock = uint64(201)
+		cfg := migrationChainConfig(forkBlock, cliqueEpoch)
+		checkpointAddrs := []common.Address{
+			common.HexToAddress("0x1000000000000000000000000000000000000001"),
+			common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		}
+		// Clique checkpoint is at block 200 (parentNum - parentNum%epoch = 200-0 = 200).
+		checkpointHeader := &types.Header{
+			Number: big.NewInt(200),
+			Extra:  cliqueEpochExtra(checkpointAddrs),
+		}
+		chain := &stubChainByNumber{headers: map[uint64]*types.Header{200: checkpointHeader}}
+		sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+		p := &Parlia{
+			chainConfig: cfg,
+			config:      cfg.Parlia,
+			recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+			signatures:  sigCache,
+		}
+		parentSnap := newSnapshot(cfg.Parlia, sigCache, 200, parentHash, nil, nil, nil)
+		parentSnap.EpochLength = cliqueEpoch
+		p.recentSnaps.Add(parentHash, parentSnap)
+
+		header := &types.Header{
+			Number:     big.NewInt(int64(forkBlock)),
+			ParentHash: parentHash,
+			Extra:      make([]byte, extraVanity),
+		}
+		if err := p.prepareValidators(chain, header); err != nil {
+			t.Fatalf("prepareValidators: %v", err)
+		}
+		// Extra must have grown: vanity + N*20-byte addrs + seal placeholder.
+		wantMinLen := extraVanity + len(checkpointAddrs)*validatorBytesLengthBeforeLuban
+		if len(header.Extra) < wantMinLen {
+			t.Fatalf("Extra too short: got %d, want >= %d", len(header.Extra), wantMinLen)
 		}
 	})
 }
