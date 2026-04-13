@@ -130,8 +130,108 @@ for N in "${REMAINING_V1[@]}"; do
   log "validator-${N} upgraded to v2 and peered"
 done
 
-log "Waiting for chain to advance on fully-v2 network"
-wait_for_blocks "$ABCORE_V2_GETH" "$(val_ipc "$UPGRADE_N")" 3 90
+# Deadlock-recovery retry loop.
+#
+# On slow machines (CI), all 3 validators can seal the same block before
+# propagating to each other.  The competing reorgs corrupt the Clique snapshot
+# cache, leaving every validator stuck in "signed recently" — a permanent
+# deadlock.  When this happens the only remedy is to stop all validators and
+# restart again; the new head height shifts the Clique round-robin so a
+# different validator is in-turn, breaking the deadlock.
+#
+# See also: script/transition-test/99-run-all.sh (same pattern).
+_restart_attempt=0
+while true; do
+  _restart_attempt=$(( _restart_attempt + 1 ))
+  _ref_ipc=$(val_ipc "$UPGRADE_N")
+  _head_before=$(head_number "$ABCORE_V2_GETH" "$_ref_ipc")
+  _target=$(( _head_before + 3 ))
+  _deadline=$(( $(date +%s) + 60 ))
+  _alive=false
+
+  log "Waiting for chain to advance on fully-v2 network (attempt ${_restart_attempt}, head=${_head_before}, target=${_target})..."
+  while [[ $(date +%s) -lt $_deadline ]]; do
+    _head_now=$(head_number "$ABCORE_V2_GETH" "$_ref_ipc" 2>/dev/null || echo "$_head_before")
+    if [[ "$_head_now" -ge "$_target" ]]; then
+      _alive=true
+      break
+    fi
+    sleep 2
+  done
+
+  if "$_alive"; then
+    break
+  fi
+
+  if [[ "$_restart_attempt" -ge 3 ]]; then
+    die "chain did not advance after ${_restart_attempt} attempts — seal-race deadlock unrecoverable"
+  fi
+
+  _head_now=$(head_number "$ABCORE_V2_GETH" "$_ref_ipc" 2>/dev/null || echo "$_head_before")
+  log "WARNING: chain stalled at head=${_head_now} (seal-race deadlock). Stopping all validators for retry..."
+
+  # Stop all validators.
+  for _n in 1 2 3; do
+    stop_pidfile "$(val_pid "$_n")"
+  done
+
+  # Restart all validators with v2 binary.
+  for _n in 1 2 3; do
+    _addr=$(val_addr "$_n")
+    _pwfile=$(val_pw "$_n")
+    _p2p=$(p2p_port "$_n")
+    _logfile=$(val_log "$_n")
+    _dir=$(val_dir "$_n")
+    _pidfile=$(val_pid "$_n")
+    (
+      cd "$REPO_ROOT"
+      nohup "$ABCORE_V2_GETH" \
+        --datadir "$_dir" \
+        --networkid "$CLIQUE_NETWORK_ID" \
+        --port "$_p2p" \
+        --nat none \
+        --nodiscover \
+        --bootnodes "" \
+        --ipcpath geth.ipc \
+        --syncmode full \
+        --mine \
+        --miner.etherbase "$_addr" \
+        --unlock "$_addr" \
+        --password "$_pwfile" \
+        --nousb \
+        >>"$_logfile" 2>&1 &
+      echo $! >"$_pidfile"
+    )
+  done
+
+  # Wait for IPC on all nodes.
+  _ipc_pids=()
+  for _n in 1 2 3; do
+    wait_for_ipc "$ABCORE_V2_GETH" "$(val_ipc "$_n")" &
+    _ipc_pids+=($!)
+  done
+  for _pid in "${_ipc_pids[@]}"; do wait "$_pid"; done
+
+  # Re-peer all nodes.
+  for _n in 1 2 3; do
+    for _peer in 1 2 3; do
+      [[ "$_peer" -eq "$_n" ]] && continue
+      _peer_ipc=$(val_ipc "$_peer")
+      [[ -S "$_peer_ipc" ]] || continue
+      _enode=$(get_enode "$ABCORE_V2_GETH" "$_peer_ipc" 2>/dev/null || true)
+      [[ -n "$_enode" ]] || continue
+      add_peer "$ABCORE_V2_GETH" "$(val_ipc "$_n")" "$_enode" >/dev/null || true
+    done
+  done
+
+  # Wait for min peers on all nodes.
+  _peer_pids=()
+  for _n in 1 2 3; do
+    wait_for_min_peers "$ABCORE_V2_GETH" "$(val_ipc "$_n")" 1 60 &
+    _peer_pids+=($!)
+  done
+  for _pid in "${_peer_pids[@]}"; do wait "$_pid"; done
+done
 
 log "Waiting for all 3 v2 validators to converge on same head"
 wait_for_same_head "$ABCORE_V2_GETH" "$(val_ipc 1)" 120 \
