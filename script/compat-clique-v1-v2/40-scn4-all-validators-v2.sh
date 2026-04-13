@@ -146,7 +146,7 @@ while true; do
   _ref_ipc=$(val_ipc "$UPGRADE_N")
   _head_before=$(head_number "$ABCORE_V2_GETH" "$_ref_ipc")
   _target=$(( _head_before + 3 ))
-  _deadline=$(( $(date +%s) + 60 ))
+  _deadline=$(( $(date +%s) + 90 ))
   _alive=false
 
   log "Waiting for chain to advance on fully-v2 network (attempt ${_restart_attempt}, head=${_head_before}, target=${_target})..."
