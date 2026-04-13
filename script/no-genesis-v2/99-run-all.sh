@@ -2,6 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+_REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+
+# Build v2 binary if no explicit path provided (local dev workflow).
+# In CI, ABCORE_V2_GETH is set to the pre-built binary and this is skipped.
+if [[ -z "${ABCORE_V2_GETH:-}" ]]; then
+  echo "[$(date +'%H:%M:%S')] Building v2 binary (set ABCORE_V2_GETH=... to skip)..."
+  (cd "${_REPO_ROOT}" && CGO_CFLAGS="-O -D__BLST_PORTABLE__" CGO_CFLAGS_ALLOW="-O -D__BLST_PORTABLE__" make geth)
+fi
 
 # Capture whether PORT_BASE / DATADIR_ROOT were explicitly set by the caller
 # before lib.sh applies its defaults.
