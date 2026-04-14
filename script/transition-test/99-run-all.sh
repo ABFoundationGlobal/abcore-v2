@@ -25,6 +25,14 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+_REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+
+# Build v2 binary if no explicit path provided (local dev workflow).
+# In CI, GETH is set to the pre-built binary and this is skipped.
+if [[ -z "${GETH:-}" ]]; then
+  echo "[$(date +'%H:%M:%S')] Building v2 binary (set GETH=... to skip)..."
+  (cd "${_REPO_ROOT}" && CGO_CFLAGS="-O -D__BLST_PORTABLE__" CGO_CFLAGS_ALLOW="-O -D__BLST_PORTABLE__" make geth)
+fi
 
 _PORT_BASE_EXPLICIT=${PORT_BASE+set}
 _DATADIR_ROOT_EXPLICIT=${DATADIR_ROOT+set}
