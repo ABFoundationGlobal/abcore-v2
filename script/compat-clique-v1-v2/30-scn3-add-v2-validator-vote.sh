@@ -153,7 +153,11 @@ attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "clique.propose('${V4_ADDR}', false
 attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "clique.propose('${V4_ADDR}', false)" >/dev/null
 
 log "Waiting for validator-4 to be removed from clique.getSigners() on all nodes"
+# Poll all three nodes together.  Only break when all agree that validator-4 is gone.
+# If the deadline expires without agreement, die here rather than falling through to
+# an assertion that would produce a misleading error message.
 _deadline=$(( $(date +%s) + 120 ))
+_removed=false
 while [[ $(date +%s) -lt $_deadline ]]; do
   # Check all three nodes that will be asserted on; only break when all agree.
   # Polling only one node and asserting others immediately after can race: one
@@ -165,10 +169,12 @@ while [[ $(date +%s) -lt $_deadline ]]; do
      ! echo "$s3" | grep -qi "$V4_ADDR" && \
      ! echo "$s2" | grep -qi "$V4_ADDR"; then
     log "validator-4 has been removed from the signer set"
+    _removed=true
     break
   fi
   sleep 0.3
 done
+"$_removed" || die "validator-4 never removed from clique.getSigners() after 120s"
 
 # Propagation guard: wait for all validators to converge on the same head before
 # asserting the signer set.  The loop above already checks all three nodes, but
@@ -178,15 +184,22 @@ wait_for_same_head "$ABCORE_V1_GETH" "$(val_ipc 1)" 30 \
   "$ABCORE_V1_GETH" "$(val_ipc 3)"
 
 # Assert absence on both a v1 node and a v2 node independently.
-signers_v1=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "JSON.stringify(clique.getSigners())" || true)
-if echo "$signers_v1" | grep -qi "$V4_ADDR"; then
-  die "validator-4 still present in clique.getSigners() on v1 node (validator-3)"
-fi
-
-signers_v2=$(attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "JSON.stringify(clique.getSigners())" || true)
-if echo "$signers_v2" | grep -qi "$V4_ADDR"; then
-  die "validator-4 still present in clique.getSigners() on v2 node (validator-2)"
-fi
+# Retry a few times: wait_for_same_head can advance the chain, and the snapshot
+# may be briefly stale on a node that just processed a reorg.
+for _attempt in 1 2 3; do
+  signers_v1=$(attach_exec "$ABCORE_V1_GETH" "$(val_ipc 3)" "JSON.stringify(clique.getSigners())" || true)
+  signers_v2=$(attach_exec "$ABCORE_V2_GETH" "$(val_ipc 2)" "JSON.stringify(clique.getSigners())" || true)
+  if ! echo "$signers_v1" | grep -qi "$V4_ADDR" && \
+     ! echo "$signers_v2" | grep -qi "$V4_ADDR"; then
+    break
+  fi
+  if [[ "$_attempt" -eq 3 ]]; then
+    echo "$signers_v1" | grep -qi "$V4_ADDR" && \
+      die "validator-4 still present in clique.getSigners() on v1 node (validator-3)"
+    die "validator-4 still present in clique.getSigners() on v2 node (validator-2)"
+  fi
+  sleep 1
+done
 
 # Stop the evicted validator.
 log "Stopping validator-4"
