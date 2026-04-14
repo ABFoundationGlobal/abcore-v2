@@ -72,17 +72,22 @@
 推荐记录命令：
 
 ```bash
+# 先填写本次切换配置中的 ParliaGenesisBlock 高度
+N=<实际ParliaGenesisBlock高度>
+TARGET=$((N-1))
+TARGET_HEX="0x$(printf '%x' "$TARGET")"
+
 # 记录当前 head
 docker exec -it abcore-validator geth attach \
   --exec 'eth.blockNumber' /data/geth.ipc
 
 # 记录 N-1 的块哈希
 docker exec -it abcore-validator geth attach \
-  --exec 'eth.getBlock(N-1).hash' /data/geth.ipc
+  --exec "eth.getBlock(${TARGET}).hash" /data/geth.ipc
 
 # 记录当前 Clique signer 集合（若节点仍能正确响应）
 docker exec -it abcore-validator geth attach \
-  --exec 'JSON.stringify(clique.getSigners("0x$(printf "%x" $((N-1)))"))' \
+  --exec "JSON.stringify(clique.getSigners(\"${TARGET_HEX}\"))" \
   /data/geth.ipc
 ```
 
@@ -180,7 +185,7 @@ docker exec -it abcore-maintenance geth attach \
   --exec 'eth.blockNumber' /data/geth.ipc
 
 docker exec -it abcore-maintenance geth attach \
-  --exec 'eth.getBlock(TARGET).hash' /data/geth.ipc
+  --exec "eth.getBlock(${TARGET}).hash" /data/geth.ipc
 ```
 
 对**所有验证节点**和**所有关键 RPC 节点**重复此步骤，直到全部回到同一高度。
@@ -189,14 +194,14 @@ docker exec -it abcore-maintenance geth attach \
 
 ### 步骤 5：确认所有节点回到了同一个 canonical anchor
 
-在每个节点上确认：
+在每个节点上确认（`TARGET` 沿用步骤 4 中定义的变量）：
 
 ```bash
 docker exec -it abcore-maintenance geth attach \
   --exec 'eth.blockNumber' /data/geth.ipc
 
 docker exec -it abcore-maintenance geth attach \
-  --exec 'eth.getBlock(TARGET).hash' /data/geth.ipc
+  --exec "eth.getBlock(${TARGET}).hash" /data/geth.ipc
 ```
 
 要求：
@@ -253,7 +258,7 @@ docker run -d \
 
 ## 5. 回滚后验证清单
 
-所有验证节点恢复后，执行以下检查：
+所有验证节点恢复后，执行以下检查（`N` 和 `TARGET` 沿用第 3 节中定义的变量）：
 
 ```bash
 # 1. 当前 head 持续增长
@@ -262,11 +267,11 @@ docker exec -it abcore-validator geth attach \
 
 # 2. N-1 哈希保持不变
 docker exec -it abcore-validator geth attach \
-  --exec 'eth.getBlock(N-1).hash' /data/geth.ipc
+  --exec "eth.getBlock(${TARGET}).hash" /data/geth.ipc
 
 # 3. block N 已被重新产出
 docker exec -it abcore-validator geth attach \
-  --exec 'eth.getBlock(N).hash' /data/geth.ipc
+  --exec "eth.getBlock(${N}).hash" /data/geth.ipc
 
 # 4. Clique signer 集合正确
 docker exec -it abcore-validator geth attach \
@@ -274,7 +279,7 @@ docker exec -it abcore-validator geth attach \
 
 # 5. 回滚后的 block N 不应存在 ValidatorSet 合约代码
 docker exec -it abcore-validator geth attach \
-  --exec 'eth.getCode("0x0000000000000000000000000000000000001000", N)' \
+  --exec "eth.getCode(\"0x0000000000000000000000000000000000001000\", ${N})" \
   /data/geth.ipc
 ```
 

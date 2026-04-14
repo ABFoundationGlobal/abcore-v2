@@ -124,7 +124,7 @@ rewind_validator() {
   local ipc current deadline
   local target_hex
   ipc=$(val_ipc "$n")
-  current=$(head_number "$GETH" "$ipc" 2>/dev/null || echo 0)
+  current=$(head_number "$GETH" "$ipc" || echo 0)
   [[ "$current" -gt "$target" ]] || die "validator-${n} head ${current} is not above rollback target ${target}"
   target_hex=$(printf '0x%x' "$target")
 
@@ -133,7 +133,7 @@ rewind_validator() {
 
   deadline=$(( $(date +%s) + 30 ))
   while [[ $(date +%s) -lt $deadline ]]; do
-    current=$(head_number "$GETH" "$ipc" 2>/dev/null || echo 0)
+    current=$(head_number "$GETH" "$ipc" || echo 0)
     if [[ "$current" -eq "$target" ]]; then
       return 0
     fi
@@ -176,6 +176,9 @@ log "Clique validator set at rollback anchor: $(echo "$pre_signers" | tr ',' ' '
 
 # ── Phase 2: coordinated rewind to N-1 ──────────────────────────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
+# Re-acquire the PORT_BASE sentinel released by 03-stop.sh so a parallel
+# transition-test run cannot claim the same ports while the drill continues.
+mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 require_file "$TOML_CONFIG"
 start_maintenance_cluster
 
@@ -194,6 +197,8 @@ log "All validators rewound to block ${ROLLBACK_TO} with preserved canonical has
 
 # ── Phase 3: restart in pure Clique mode ─────────────────────────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
+# Re-acquire sentinel again after the second internal stop.
+mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 
 log "Restarting validators in pure Clique mode (no Parlia override)..."
 TOML_CONFIG="" "${SCRIPT_DIR}/02-start.sh"
