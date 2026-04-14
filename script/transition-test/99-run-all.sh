@@ -212,3 +212,15 @@ echo "==> Stopping nodes"
 
 echo
 echo "PASS"
+
+# ── T-2: Parlia epoch boundary (opt-in; ~3 minutes) ───────────────────────────
+if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
+  echo
+  log "Running T-2 epoch boundary test (RUN_EPOCH_TEST=1)..."
+  EPOCH_LENGTH=50 \
+  PORT_BASE="$PORT_BASE" \
+  DATADIR_ROOT="${DATADIR_ROOT}-epoch" \
+  GETH="$GETH" \
+  PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+  "${SCRIPT_DIR}/95-run-epoch-test.sh"
+fi
