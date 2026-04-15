@@ -38,6 +38,7 @@ const (
 	gatherSlack         = 100 * time.Millisecond // Interval used to collate almost-expired announces with fetches
 	fetchTimeout        = 5 * time.Second        // Maximum allotted time to return an explicitly requested block/transaction
 	reQueueBlockTimeout = 500 * time.Millisecond // Time allowance before blocks are requeued for import
+	maxRequeueAttempts  = 10                     // Maximum re-queue attempts before giving up (lets downloader take over)
 
 )
 
@@ -145,6 +146,8 @@ type blockOrHeaderInject struct {
 
 	header *types.Header // Used for light mode fetcher which only cares about header.
 	block  *types.Block  // Used for normal mode fetcher which imports full block.
+
+	requeueCount int // Number of times this block has been re-queued due to missing parent.
 }
 
 type BlockFetchingEntry struct {
@@ -467,17 +470,23 @@ func (f *BlockFetcher) loop() {
 		case op := <-f.requeue:
 			// Re-queue blocks that have not been written due to fork block competition
 			number := int64(0)
-			hash := ""
+			blockHash := common.Hash{}
 			if op.header != nil {
 				number = op.header.Number.Int64()
-				hash = op.header.Hash().String()
+				blockHash = op.header.Hash()
 			} else if op.block != nil {
 				number = op.block.Number().Int64()
-				hash = op.block.Hash().String()
+				blockHash = op.block.Hash()
 			}
 
-			log.Info("Re-queue blocks", "number", number, "hash", hash)
+			log.Info("Re-queue blocks", "number", number, "hash", blockHash)
 			f.enqueue(op.origin, op.header, op.block)
+			// Preserve requeueCount so the cap in importBlocks remains effective.
+			// enqueue() creates a fresh blockOrHeaderInject (requeueCount=0), so we
+			// copy the count back onto the newly queued entry.
+			if queued, ok := f.queued[blockHash]; ok {
+				queued.requeueCount = op.requeueCount
+			}
 
 		case op := <-f.inject:
 			// A direct block insertion was requested, try and fill any pending gaps
@@ -916,9 +925,20 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 	// Run the import on a new thread
 	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash, "balSize", block.BALSize())
 	go func() {
-		// If the parent's unknown, abort insertion
+		// If the parent's unknown, re-queue briefly to allow the parent to arrive
+		// via normal broadcast or announce paths. After maxRequeueAttempts give up:
+		// the downloader's forceSyncCycle (10s) will trigger a full sync that
+		// fetches the missing ancestor. Without this limit, a permanent fork split
+		// (e.g. after a stop-all-restart seal race) causes an infinite re-queue loop
+		// that prevents the downloader from ever taking over.
 		parent := f.getBlock(block.ParentHash())
 		if parent == nil {
+			op.requeueCount++
+			if op.requeueCount > maxRequeueAttempts {
+				log.Debug("Giving up re-queuing propagated block, parent not found after max attempts", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash(), "attempts", op.requeueCount)
+				f.done <- hash
+				return
+			}
 			log.Debug("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
 			// forget block first, then re-queue
 			f.done <- hash
