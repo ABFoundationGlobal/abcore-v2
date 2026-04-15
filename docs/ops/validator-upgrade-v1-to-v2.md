@@ -36,6 +36,10 @@ source ~/.bashrc
 
 v2 二进制与 v1 **数据目录完全兼容**——同一个 datadir 可以直接被 v2 读取，无需数据迁移或重新同步。这是滚动升级的基础。
 
+> **补充说明**：本手册处理的是“链仍处于 Clique 阶段”的 v1 → v2 二进制/部署升级。
+> 若已经启用 `ParliaGenesisBlock = N` 且链在共识切换时或切换后失败，需要使用
+> [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) 中的协调式回滚流程。
+
 ### 1.3 Clique 滚动升级约束
 
 Clique PoA 要求超过半数签名者（`floor(N/2) + 1`）在线才能继续出块。升级策略必须确保**任何时刻在线验证节点数量不低于出块门槛**。
@@ -423,7 +427,7 @@ done
 
 ---
 
-## 7. 回滚方案
+## 7. 回滚方案（仅适用于仍处于 Clique 阶段的 v1 ↔ v2 部署回退）
 
 若 v2 容器启动后出现同步异常或停止出块：
 
@@ -449,6 +453,11 @@ $NODE_DIR/bin/geth attach --exec \
 ```
 
 > v2 与 v1 使用同一 datadir 格式，v2 写入的块数据对 v1 完全可读，回滚后 v1 会从当前 head 继续同步。
+
+> **重要**：若链已经跨过 `ParliaGenesisBlock`，不要直接套用本章节。
+> 此时应停下所有验证节点与关键 RPC 节点，按
+> [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md)
+> 执行“回退到 `N-1` 并恢复 pure Clique”的协调式回滚。
 
 ---
 
