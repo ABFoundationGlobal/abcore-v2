@@ -78,8 +78,8 @@ curl -fsSL https://get.docker.com | sh
 ### 方式 A：从 GitHub Release 加载（推荐）
 
 ```bash
-gh release download $TAG -R abfoundationglobal/abcore-v2 \
-  --pattern "abcore-v2-${TAG}-linux-amd64.tar.gz" -D /tmp/
+curl -L -o /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz \
+  https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${TAG}/abcore-v2-${TAG}-linux-amd64.tar.gz
 
 docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
 ```
