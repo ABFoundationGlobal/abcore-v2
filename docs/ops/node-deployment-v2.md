@@ -41,6 +41,8 @@ Bootstrap 节点、创世区块、链配置均已**硬编码进二进制**（`--
 | 8546 | WS | WebSocket RPC | 按需（默认仅本机） |
 | 33333 | TCP+UDP | P2P 节点发现与同步 | **必须** |
 
+> **安全提示**：`debug` RPC 命名空间包含 `debug_setHead`（可远程回滚链头）等高危接口，**不得对外网暴露**。默认启动命令不包含 `debug`；仅归档节点在内网/受信环境下按需开启（见 4.1 节说明）。
+
 ### 1.2 宿主机数据目录布局
 
 ```
@@ -127,12 +129,14 @@ docker run -d \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \
-         --http.api 'debug,txpool,net,web3,eth' \
+         --http.api 'txpool,net,web3,eth' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
-         --ws.api 'debug,txpool,net,web3,eth' \
+         --ws.api 'txpool,net,web3,eth' \
   --syncmode full \
   --gcmode archive
 ```
+
+> **如需 `debug_traceTransaction` 等调试接口**（区块链浏览器、链上分析等场景）：确认 8545/8546 端口**不对外网暴露**后，将上述命令中的 `--http.api` 和 `--ws.api` 改为 `'debug,txpool,net,web3,eth'`。`debug` 命名空间包含 `debug_setHead` 等高危接口，对外暴露将允许任意方远程回滚节点链头。
 
 ### 4.2 同步节点（snap sync，剪枝模式）
 
@@ -155,9 +159,9 @@ docker run -d \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \
-         --http.api 'debug,txpool,net,web3,eth' \
+         --http.api 'txpool,net,web3,eth' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
-         --ws.api 'debug,txpool,net,web3,eth'
+         --ws.api 'txpool,net,web3,eth'
 ```
 
 ### 4.3 验证同步
@@ -257,9 +261,9 @@ docker run -d \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \
-         --http.api 'debug,txpool,net,web3,eth' \
+         --http.api 'txpool,net,web3,eth' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
-         --ws.api 'debug,txpool,net,web3,eth' \
+         --ws.api 'txpool,net,web3,eth' \
   --syncmode full \
   --gcmode archive
 ```
