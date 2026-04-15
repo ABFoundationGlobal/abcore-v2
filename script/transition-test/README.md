@@ -1,7 +1,8 @@
-# transition-test — Clique→Parlia fork transition test suite
+# transition-test — Clique→Parlia transition and rollback drill suite
 
-End-to-end tests proving the Clique→Parlia transition works correctly at a
-configurable `ParliaGenesisBlock`, including epoch boundary validator set transitions.
+End-to-end scenarios for the ABCore Clique→Parlia migration, including the
+baseline fork path, late restart handling, coordinated rollback drill, and
+Parlia epoch boundary validator set transitions.
 
 ## Scripts
 
@@ -28,7 +29,7 @@ configurable `ParliaGenesisBlock`, including epoch boundary validator set transi
 | T-1.6 | Coordinated rollback drill (Parlia→Clique) | `96-run-rollback-drill.sh` | ✅ |
 | T-2 | Parlia epoch boundary validator set transition | `95-run-epoch-test.sh` | ✅ |
 
-## What T-1 covers
+### T-1 — Baseline fork transition
 
 - Parlia snapshot seeded from last Clique epoch checkpoint (not genesis)
 - Pre-fork Clique-sealed headers skipped in Parlia's `snapshot.apply()`
@@ -39,7 +40,22 @@ configurable `ParliaGenesisBlock`, including epoch boundary validator set transi
 - Post-fork blocks have non-zero `miner` field (proves Parlia, not Clique, is sealing)
 - Pre-fork `clique_propose` vote-in: 4th validator appears in post-fork Parlia set
 
-## What T-2 covers
+### T-1.5 — Late restart after the fork
+
+- One validator stops while the network is still in Clique mode
+- The remaining validators cross `ParliaGenesisBlock` and continue in Parlia
+- The stopped validator restarts with only pre-fork Clique history in its DB
+- DualConsensus walks the missing Clique range, crosses the fork, reseeds from the checkpoint, and catches up
+
+### T-1.6 — Coordinated rollback drill
+
+- The network first follows the proven T-1 path and crosses into Parlia
+- Operators stop all validators and restart them in maintenance mode with the same PGB config
+- Each node performs `debug.setHead(N-1)` to rewind the local canonical head to the last Clique block
+- Validators restart without the Parlia override and resume sealing pure Clique blocks from block `N`
+- The rollback verifies that block `N-1` is preserved, block `N` is replaced, the Clique validator set is restored, and the `ValidatorSet` system contract is absent on the rolled-back chain
+
+### T-2 — Parlia epoch boundary validator set transition
 
 - Chain crosses first Parlia epoch boundary (`block % epochLength == 0`)
 - `prepareValidators()` calls `BSCValidatorSet.getValidators()` at epoch boundary
@@ -73,7 +89,7 @@ which match the addresses baked into `parliagenesis/default/ValidatorContract`. 
 # T-1: default fork transition (PARLIA_GENESIS_BLOCK=20)
 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
-# T-1: non-genesis checkpoint
+# T-1: non-genesis checkpoint (fork not on genesis epoch)
 GETH=./build/bin/geth CLIQUE_EPOCH=10 PARLIA_GENESIS_BLOCK=25 \
   bash script/transition-test/99-run-all.sh
 
@@ -97,4 +113,8 @@ RUN_EPOCH_TEST=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Leave nodes running for manual inspection after PASS
 KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/95-run-epoch-test.sh
+KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
+
+# Leave the rolled-back Clique network running after the drill
+KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
 ```
