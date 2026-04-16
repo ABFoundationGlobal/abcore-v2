@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
-GENESIS_CONTRACT_COMMIT := 3e6b2ff8aa155452045b25bfe632805e0d1fb5a6
+GENESIS_CONTRACT_COMMIT := 2775d16f2b56f3302fcc0a77f1d51f974dc8f6e7
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -26,7 +26,7 @@ FELONY_JAIL_TIME               ?= 3 minutes
 MISDEMEANOR_THRESHOLD          ?= 50
 FELONY_THRESHOLD               ?= 150
 FELONY_SLASH_SCOPE             ?= 60
-INIT_BURN_RATIO                ?= 1000
+INIT_BURN_RATIO                ?= 0
 STAKE_HUB_PROTECTOR            ?= address(0xdEaD)
 GOVERNOR_PROTECTOR             ?= address(0xdEaD)
 TOKEN_RECOVER_PORTAL_PROTECTOR ?= address(0xdEaD)
