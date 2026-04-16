@@ -283,6 +283,9 @@ assert_same_hash_at() {
 # that validator addresses remain consistent with baked-in bytecodes.
 partial_clean() {
   "${SCRIPT_DIR}/03-stop.sh" || true
+  # 03-stop.sh removes the PORT_BASE sentinel; re-acquire it so parallel runs
+  # cannot steal this port base while we are still using it.
+  mkdir -p "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
   for n in 1 2 3; do
     local d; d=$(val_dir "$n")
     rm -rf "${d}/geth" "${d}/geth.ipc" "${d}/geth.log" "${d}/geth.pid"

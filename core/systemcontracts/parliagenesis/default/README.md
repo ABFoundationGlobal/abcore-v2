@@ -19,6 +19,16 @@ The `INIT_VALIDATORSET_BYTES` in the compiled `ValidatorContract` bytecode conta
 
 Keystores are in `keystores/` with password `password`.
 
+> **WARNING: These keystores are public test fixtures.**
+> The private keys and password are committed to this repository and are therefore **not secret** —
+> treat them as permanently compromised.
+> **Never reuse these keys or fund these addresses on any network with real value** (including
+> public testnets, shared devnets, or mainnet).
+>
+> Committing them here is acceptable only because they are disposable fixtures for the throwaway
+> local transition-test chain and exist solely to keep the compiled bytecode and test keystores
+> aligned.
+
 ## Why Fixed Addresses Are Required
 
 At `ParliaGenesisBlock`, `initContract()` calls `BSCValidatorSet.init()` which reads
