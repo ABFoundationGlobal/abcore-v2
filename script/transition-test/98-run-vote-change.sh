@@ -406,6 +406,7 @@ _launch_all_4() {
 _restart_attempt=0
 while true; do
   _restart_attempt=$(( _restart_attempt + 1 ))
+  # _launch_all_4 stops any running nodes internally before starting fresh ones.
   _launch_all_4
 
   # Snapshot current head immediately after all 4 nodes are up and peered.
@@ -420,7 +421,11 @@ while true; do
     _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
   fi
 
-  _deadline=$(( $(date +%s) + 60 ))
+  # 4-node Parlia fork block seal-race takes longer to recover than 3-node
+  # Clique: all 4 validators can simultaneously enter "signed recently" state
+  # at the fork block. Use 90s (vs 60s for 3-node) to give the round-robin
+  # enough time to self-heal after a restart.
+  _deadline=$(( $(date +%s) + 90 ))
   _alive=false
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
@@ -435,14 +440,17 @@ while true; do
     break
   fi
 
-  if [[ "$_restart_attempt" -ge 5 ]]; then
+  if [[ "$_restart_attempt" -ge 8 ]]; then
     die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
   fi
 
   _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
   log "WARNING: chain stalled at head=${_head_now} (seal-race deadlock). Stopping for retry..."
+  # Brief pause to let the OS fully release IPC sockets and ports before the
+  # next _launch_all_4 call restarts all 4 nodes.
   stop_pidfile "$V4_PID" || true
-  "${SCRIPT_DIR}/03-stop.sh"
+  "${SCRIPT_DIR}/03-stop.sh" || true
+  sleep 3
 done
 
 # ── Phase 6: wait for all 4 validators to cross the fork block ───────────────
