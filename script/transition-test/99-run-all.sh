@@ -230,3 +230,14 @@ if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
     "${SCRIPT_DIR}/95-run-epoch-test.sh"
   fi
 fi
+
+# ── Clique-epoch-fork: fork block == Clique epoch boundary (opt-in) ───────────
+if [[ "${RUN_CLIQUE_EPOCH_FORK_TEST:-0}" -eq 1 ]]; then
+  echo
+  log "Running Clique-epoch-fork test (RUN_CLIQUE_EPOCH_FORK_TEST=1)..."
+  EPOCH_LENGTH=20 \
+  PORT_BASE="$PORT_BASE" \
+  DATADIR_ROOT="${DATADIR_ROOT}-clique-epoch-fork" \
+  GETH="$GETH" \
+  "${SCRIPT_DIR}/93-run-clique-epoch-fork-test.sh"
+fi
