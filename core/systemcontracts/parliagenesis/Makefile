@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
-GENESIS_CONTRACT_COMMIT := 3e6b2ff8aa155452045b25bfe632805e0d1fb5a6
+GENESIS_CONTRACT_COMMIT := 2775d16f2b56f3302fcc0a77f1d51f974dc8f6e7
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -26,7 +26,7 @@ FELONY_JAIL_TIME               ?= 3 minutes
 MISDEMEANOR_THRESHOLD          ?= 50
 FELONY_THRESHOLD               ?= 150
 FELONY_SLASH_SCOPE             ?= 60
-INIT_BURN_RATIO                ?= 1000
+INIT_BURN_RATIO                ?= 0
 STAKE_HUB_PROTECTOR            ?= address(0xdEaD)
 GOVERNOR_PROTECTOR             ?= address(0xdEaD)
 TOKEN_RECOVER_PORTAL_PROTECTOR ?= address(0xdEaD)
@@ -160,7 +160,40 @@ _build:
 		}; \
 		printf '%s' "$$bytecode" > "$(PARLIA_DIR)$(OUTDIR)/$${file}"; \
 		echo "Written $(OUTDIR)/$${file}"; \
-	done
+	done; \
+	{ \
+		echo "genesis_contract_repo:   $(GENESIS_CONTRACT_REPO)"; \
+		echo "genesis_contract_commit: $(GENESIS_CONTRACT_COMMIT)"; \
+		echo "generated_at:            $$(date -u '+%Y-%m-%dT%H:%M:%SZ')"; \
+		echo ""; \
+		echo "# Build parameters"; \
+		echo "OUTDIR:                        $(OUTDIR)"; \
+		echo "CHAIN_ID:                      $(CHAIN_ID)"; \
+		echo "MAX_ELECTED_VALIDATORS:        $(MAX_ELECTED_VALIDATORS)"; \
+		echo "BLOCK_INTERVAL:                $(BLOCK_INTERVAL)"; \
+		echo "BREATHE_BLOCK_INTERVAL:        $(BREATHE_BLOCK_INTERVAL)"; \
+		echo "UNBOND_PERIOD:                 $(UNBOND_PERIOD)"; \
+		echo "DOWNTIME_JAIL_TIME:            $(DOWNTIME_JAIL_TIME)"; \
+		echo "FELONY_JAIL_TIME:              $(FELONY_JAIL_TIME)"; \
+		echo "MISDEMEANOR_THRESHOLD:         $(MISDEMEANOR_THRESHOLD)"; \
+		echo "FELONY_THRESHOLD:              $(FELONY_THRESHOLD)"; \
+		echo "FELONY_SLASH_SCOPE:            $(FELONY_SLASH_SCOPE)"; \
+		echo "INIT_BURN_RATIO:               $(INIT_BURN_RATIO)"; \
+		echo "STAKE_HUB_PROTECTOR:           $(STAKE_HUB_PROTECTOR)"; \
+		echo "GOVERNOR_PROTECTOR:            $(GOVERNOR_PROTECTOR)"; \
+		echo "TOKEN_RECOVER_PORTAL_PROTECTOR: $(TOKEN_RECOVER_PORTAL_PROTECTOR)"; \
+		echo "SOURCE_CHAIN_ID:               $(SOURCE_CHAIN_ID)"; \
+		echo "INIT_VOTING_PERIOD:            $(INIT_VOTING_PERIOD)"; \
+		echo "INIT_MIN_PERIOD_AFTER_QUORUM:  $(INIT_MIN_PERIOD_AFTER_QUORUM)"; \
+		echo "INIT_MINIMAL_DELAY:            $(INIT_MINIMAL_DELAY)"; \
+		echo ""; \
+		echo "# SHA-256 checksums"; \
+		for pair in $$pairs; do \
+			file=$${pair%%:*}; \
+			printf '%-38s %s\n' "$${file}" "$$(sha256sum "$(PARLIA_DIR)$(OUTDIR)/$${file}" | cut -d' ' -f1)"; \
+		done; \
+	} > "$(PARLIA_DIR)$(OUTDIR)/MANIFEST"; \
+	echo "Written $(OUTDIR)/MANIFEST"
 
 ## Restore contract source files if a previous build was interrupted
 recover:

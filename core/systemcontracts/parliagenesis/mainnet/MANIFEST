@@ -1,0 +1,43 @@
+genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
+genesis_contract_commit: 3e6b2ff8aa155452045b25bfe632805e0d1fb5a6
+# note: bytecodes generated in commit 42429cdc8; MANIFEST backfilled from git history
+
+# Build parameters
+OUTDIR:                        mainnet
+CHAIN_ID:                      36888
+MAX_ELECTED_VALIDATORS:        21
+BLOCK_INTERVAL:                3 seconds
+BREATHE_BLOCK_INTERVAL:        10 minutes
+UNBOND_PERIOD:                 2 minutes
+DOWNTIME_JAIL_TIME:            2 minutes
+FELONY_JAIL_TIME:              3 minutes
+MISDEMEANOR_THRESHOLD:         50
+FELONY_THRESHOLD:              150
+FELONY_SLASH_SCOPE:            60
+INIT_BURN_RATIO:               1000
+STAKE_HUB_PROTECTOR:           address(0xdEaD)
+GOVERNOR_PROTECTOR:            address(0xdEaD)
+TOKEN_RECOVER_PORTAL_PROTECTOR: address(0xdEaD)
+SOURCE_CHAIN_ID:               Binance-Chain-Ganges
+INIT_VOTING_PERIOD:            2 minutes / BLOCK_INTERVAL
+INIT_MIN_PERIOD_AFTER_QUORUM:  uint64(1 minutes / BLOCK_INTERVAL)
+INIT_MINIMAL_DELAY:            1 minutes
+
+# SHA-256 checksums
+ValidatorContract                      f4465f9e35626c25a0d5a3a6cefa6c6495e245c7962afc7f91acb062cf155be3
+SlashContract                          d5bbe67c092789c5440190ec6bcae7505d142d5fbba1738e3b19cdb1e8702533
+SystemRewardContract                   7492f071069b0c898fcea603a07599e7ca7fbb9ac4e67b39434bf9209b3ca453
+LightClientContract                    3ace5b4472e3d133cac2b0112130d5a27c9af95f82d1fe35cbf1de4507fed840
+TokenHubContract                       17b0dea7fc57b58d7bb4ac1d80ece6127ccb4b4aab561cf9617ca0bfe989ebf7
+RelayerIncentivizeContract             17ea0b71f513843ea912fdcf1108914c151484f41003f7fe0ca5e38b711135f2
+RelayerHubContract                     003869c85a635ee5f5837a7777509ec512815e49c64ade76291decb7fa70632a
+GovHubContract                         c9850f6751c53b23ac44f1f11b800607a0cf9bad70aebb9e19361c5f0af7672f
+TokenManagerContract                   3898eef4645ad5d8284014066e4ab09e521dfff9b3bb9393a9af1953985e09fc
+CrossChainContract                     fb5d37c964307654a464ee82820eae42db9997da0daa87319b601193eab84a4b
+StakingContract                        fc753bc0f50ab7531c98196584c183cbbd45023cc08362c8ce5fd4166a583102
+StakeHubContract                       f7e3bf6f884c6a56a2b6d555281e1f2d58da9c0e600de5bca3b65ec95ad77e8b
+StakeCreditContract                    529987cdd19ff32e40af3bad8882e94f7ed2f7d590ed1594b91f4ac8083988d7
+GovernorContract                       3472ae9d6733deb0aed77ead87695f4d31e59b4986addcadd1b37663ecd276ae
+GovTokenContract                       a1a83ef239ad6e0ae86101025ff72a6f6d8cfedc3ee9df7107e8a17c219578d8
+TimelockContract                       6be7c1317a3c10178ad0f4d19bdf2ac5c205d31dbe03d7abc748ac8a2a50b704
+TokenRecoverPortalContract             2b78c54478b6499aa3baff4f3535d90f30cf4b27e39358d63001d571a5ee8480

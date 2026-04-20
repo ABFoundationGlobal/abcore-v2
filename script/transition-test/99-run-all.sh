@@ -212,3 +212,21 @@ echo "==> Stopping nodes"
 
 echo
 echo "PASS"
+
+# ── T-2: Parlia epoch boundary (opt-in; ~3 minutes) ───────────────────────────
+if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
+  # T-2 uses EPOCH_LENGTH=50 and requires PARLIA_GENESIS_BLOCK < 50.
+  # Skip with a clear message if the caller has set a larger fork block.
+  if [[ "${PARLIA_GENESIS_BLOCK:-20}" -ge 50 ]]; then
+    log "Skipping T-2: PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-20} >= EPOCH_LENGTH=50; run 95-run-epoch-test.sh directly with a compatible fork block"
+  else
+    echo
+    log "Running T-2 epoch boundary test (RUN_EPOCH_TEST=1)..."
+    EPOCH_LENGTH=50 \
+    PORT_BASE="$PORT_BASE" \
+    DATADIR_ROOT="${DATADIR_ROOT}-epoch" \
+    GETH="$GETH" \
+    PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+    "${SCRIPT_DIR}/95-run-epoch-test.sh"
+  fi
+fi
