@@ -213,6 +213,26 @@ echo "==> Stopping nodes"
 echo
 echo "PASS"
 
+# ── T-3: transaction across fork boundary (opt-in) ────────────────────────────
+if [[ "${RUN_TX_TEST:-0}" -eq 1 ]]; then
+  echo
+  log "Running T-3 tx-across-fork test (RUN_TX_TEST=1)..."
+  PORT_BASE="$PORT_BASE" \
+  DATADIR_ROOT="${DATADIR_ROOT}-tx" \
+  GETH="$GETH" \
+  PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+  "${SCRIPT_DIR}/94-run-tx-test.sh"
+fi
+
+# ── T-3: transaction across fork boundary ─────────────────────────────────────
+echo
+log "Running T-3 tx-across-fork test..."
+PORT_BASE="$PORT_BASE" \
+DATADIR_ROOT="${DATADIR_ROOT}-tx" \
+GETH="$GETH" \
+PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+"${SCRIPT_DIR}/94-run-tx-test.sh"
+
 # ── T-2: Parlia epoch boundary (opt-in; ~3 minutes) ───────────────────────────
 if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
   # T-2 uses EPOCH_LENGTH=50 and requires PARLIA_GENESIS_BLOCK < 50.

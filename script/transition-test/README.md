@@ -200,7 +200,7 @@ GETH=./build/bin/geth bash script/transition-test/95-run-epoch-test.sh
 # T-2: custom epoch length
 GETH=./build/bin/geth EPOCH_LENGTH=100 bash script/transition-test/95-run-epoch-test.sh
 
-# T-1 + T-2 combined (adds ~3 minutes)
+# T-1 + T-3 (always included) + T-2 (opt-in, adds ~3 minutes)
 RUN_EPOCH_TEST=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Leave nodes running for manual inspection after PASS
