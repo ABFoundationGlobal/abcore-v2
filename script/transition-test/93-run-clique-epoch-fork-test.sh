@@ -227,11 +227,13 @@ fork_hash=$(attach_exec "$GETH" "$IPC1" "eth.getBlock(${PARLIA_GENESIS_BLOCK}).h
 pass "fork/epoch block ${PARLIA_GENESIS_BLOCK} exists: ${fork_hash:0:14}..."
 
 # 2. Fork/epoch block extraData contains full signer list
-# pre-Luban: 32B vanity + 3×20B addrs + 65B seal = 117 bytes = 234 hex chars (+ "0x" = 236 total)
+# Clique non-epoch extraData is 32B vanity + 65B seal = 97 bytes = 194 hex chars
+# (excluding the "0x" prefix). An epoch checkpoint includes the signer list, so
+# its extraData must be longer than 194 hex chars.
 fork_extra=$(attach_exec "$GETH" "$IPC1" "eth.getBlock(${PARLIA_GENESIS_BLOCK}).extraData")
 fork_hex="${fork_extra#0x}"
 [[ "${#fork_hex}" -gt 194 ]] || \
-  fail "fork/epoch block extraData too short (${#fork_hex} hex chars); expected > 194 for 3 validators"
+  fail "fork/epoch block extraData too short to include signer list (${#fork_hex} hex chars); expected > 194"
 pass "fork/epoch block extraData length OK: ${#fork_hex} hex chars (contains signer list)"
 
 # 3. Fork/epoch block miner is non-zero (Parlia is sealing, not Clique)
