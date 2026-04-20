@@ -165,7 +165,7 @@ log "val-2 balance before transfer: ${V2_BALANCE_BEFORE} wei"
 log "Submitting transaction: ${V1_ADDR} → ${V2_ADDR} (1 ETH)"
 TX_HASH=$(attach_exec "$GETH" "$(val_ipc 1)" \
   "eth.sendTransaction({from:'${V1_ADDR}',to:'${V2_ADDR}',value:web3.toWei('1','ether'),gas:21000,gasPrice:1000000000})")
-[[ -n "$TX_HASH" && "$TX_HASH" != "null" ]] || die "failed to submit transaction"
+[[ "$TX_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "failed to submit transaction: ${TX_HASH}"
 log "Transaction submitted: ${TX_HASH}"
 
 # Confirm the tx is pending (blockNumber should be null since no block can be produced)
@@ -178,15 +178,31 @@ fi
 log "Transaction is pending in val-1 txpool (blockNumber=null, as expected)"
 
 # ── Phase 7: stop val-1 (SIGTERM flushes txpool journal to disk) ─────────────
+# Must be strictly-graceful: SIGKILL prevents geth from flushing the txpool
+# journal, which is the exact artifact this test is verifying.
 log "Stopping val-1 (txpool journal written on graceful shutdown)..."
-stop_pidfile "$(val_pid 1)"
-mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
-JOURNAL_PATH="$(val_dir 1)/geth/transactions.rlp"
-if [[ -f "$JOURNAL_PATH" ]]; then
-  log "Txpool journal written: ${JOURNAL_PATH}"
-else
-  log "WARNING: txpool journal not found at ${JOURNAL_PATH} (geth may not have flushed it yet)"
+_val1_pid=""
+[[ -f "$(val_pid 1)" ]] && _val1_pid=$(cat "$(val_pid 1)" 2>/dev/null || true)
+if [[ -n "$_val1_pid" ]] && kill -0 "$_val1_pid" 2>/dev/null; then
+  kill "$_val1_pid"
+  _stop_deadline=$(( $(date +%s) + 30 ))
+  while kill -0 "$_val1_pid" 2>/dev/null && [[ $(date +%s) -lt $_stop_deadline ]]; do
+    sleep 0.5
+  done
+  kill -0 "$_val1_pid" 2>/dev/null && \
+    die "val-1 (pid=${_val1_pid}) did not exit within 30s after SIGTERM — txpool journal may be incomplete"
 fi
+rm -f "$(val_pid 1)"
+mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
+
+JOURNAL_PATH="$(val_dir 1)/geth/transactions.rlp"
+_journal_deadline=$(( $(date +%s) + 5 ))
+while [[ ! -f "$JOURNAL_PATH" ]] && [[ $(date +%s) -lt $_journal_deadline ]]; do
+  sleep 0.5
+done
+[[ -f "$JOURNAL_PATH" ]] || \
+  die "txpool journal not found at ${JOURNAL_PATH} after graceful shutdown — geth did not flush it"
+log "Txpool journal written: ${JOURNAL_PATH}"
 
 # ── Phase 8: write TOML override and restart all with ParliaGenesisBlock ──────
 # Val-1 reloads the txpool journal on startup; the pending transaction will be
