@@ -252,11 +252,35 @@ done
 for p in "${_pids[@]}"; do wait "$p"; done
 
 # ── Phase 10: wait for the pending transaction to be mined ───────────────────
+# Strategy: wait for val-1 to mine at least one post-fork block, then poll for
+# the receipt.  Val-1 holds the tx in its txpool (loaded from the journal) and
+# will include it the first time it is in-turn.  With 3 validators at 1s blocks,
+# val-1 is in-turn every ~3 blocks, so this normally completes in < 30s.
+log "Waiting for val-1 to mine a post-fork block (ensures txpool tx is included)..."
+V1_ADDR_LOWER=$(echo "$V1_ADDR" | tr '[:upper:]' '[:lower:]')
+_val1_mined=false
+_val1_deadline=$(( $(date +%s) + 180 ))
+while [[ $(date +%s) -lt $_val1_deadline ]]; do
+  _tip=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
+  _start=$(( _tip > 10 ? _tip - 10 : 0 ))
+  for (( _blk=_tip; _blk>=_start && _blk>=PARLIA_GENESIS_BLOCK; _blk-- )); do
+    _miner=$(attach_exec "$GETH" "$(val_ipc 1)" \
+      "eth.getBlock(${_blk}).miner" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+    if [[ "$_miner" == "$V1_ADDR_LOWER" ]]; then
+      log "Val-1 mined block ${_blk}."
+      _val1_mined=true
+      break 2
+    fi
+  done
+  sleep 2
+done
+"$_val1_mined" || log "WARNING: val-1 did not mine a post-fork block within 180s; proceeding anyway"
+
 log "Waiting for transaction ${TX_HASH} to be mined in a Parlia block..."
 HTTP1="http://127.0.0.1:$(http_port 1)"
 TX_RECEIPT=""
 TX_BLOCK_HEX=""
-deadline=$(( $(date +%s) + 120 ))
+deadline=$(( $(date +%s) + 60 ))
 while [[ $(date +%s) -lt $deadline ]]; do
   TX_RECEIPT=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
