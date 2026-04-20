@@ -13,6 +13,7 @@ Parlia epoch boundary validator set transitions.
 | `97-run-late-restart.sh` | T-1.5: late-restart (chain already past fork block when node starts) |
 | `96-run-rollback-drill.sh` | T-1.6: coordinated rollback (Parlia→Clique rewind via debug.setHead) |
 | `95-run-epoch-test.sh` | T-2: Parlia epoch boundary; validator set transition at first and second epoch |
+| `94-run-tx-test.sh` | T-3: user transaction submitted pre-fork, mined in first post-fork Parlia blocks |
 | `01-setup.sh` | Generate accounts + Clique genesis + init datadirs |
 | `02-start.sh` | Start validators (Clique or DualConsensus via TOML config) |
 | `03-stop.sh` | Gracefully stop all running validators |
@@ -28,6 +29,10 @@ Parlia epoch boundary validator set transitions.
 | T-1.5 | Late restart (chain already past fork) | `97-run-late-restart.sh` | ✅ |
 | T-1.6 | Coordinated rollback drill (Parlia→Clique) | `96-run-rollback-drill.sh` | ✅ |
 | T-2 | Parlia epoch boundary validator set transition | `95-run-epoch-test.sh` | ✅ |
+| T-3 | User transaction crossing the fork boundary | `94-run-tx-test.sh` | ✅ |
+| T-4 | Fork block coincides with Clique epoch boundary | planned | 🔲 |
+| T-5 | Single-node rolling restart while chain is in Parlia | planned | 🔲 |
+| T-6 | AB-chain system contract parameter and logic verification after fork | planned | 🔲 |
 
 ### T-1 — Baseline fork transition
 
@@ -55,6 +60,90 @@ Parlia epoch boundary validator set transitions.
 - Validators restart without the Parlia override and resume sealing pure Clique blocks from block `N`
 - The rollback verifies that block `N-1` is preserved, block `N` is replaced, the Clique validator set is restored, and the `ValidatorSet` system contract is absent on the rolled-back chain
 
+### T-3 — User transaction crossing the fork boundary
+
+- All validators stop at `PRE_STOP` (5 blocks before the fork); chain is frozen
+- Val-1 restarts in sync-only mode (no `--mine`, no live peers) so no block can
+  be produced
+- A user transaction is submitted via val-1's IPC endpoint; it enters the txpool
+  but cannot be mined while the chain is stalled
+- Val-1 is stopped gracefully (SIGTERM); geth flushes the txpool journal to
+  `<datadir>/geth/transactions.rlp`
+- All 3 validators restart with `OverrideParliaGenesisBlock`; val-1 reloads the
+  journal on startup and re-broadcasts the pending transaction to peers
+- The chain crosses `ParliaGenesisBlock` and enters Parlia mode; the transaction
+  is included in one of the first post-fork Parlia blocks
+- Verifies: `receipt.blockNumber >= ParliaGenesisBlock`, `receipt.status == 0x1`,
+  and the recipient balance increased by the transferred amount
+- Confirms that `IsSystemTransaction()` does not incorrectly filter out a regular
+  user transaction in `FinalizeAndAssemble`
+
+### T-4 — Fork block coincides with Clique epoch boundary
+
+- `CLIQUE_EPOCH` and `PARLIA_GENESIS_BLOCK` are set to the same value (e.g. 20)
+  so the fork fires exactly on a Clique epoch block
+- The epoch block carries a full Clique signer list in `extraData`; the Parlia
+  snapshot seeding path must treat this block as both an epoch checkpoint and
+  the fork origin
+- Verifies: `parlia_getValidators` at the fork/epoch block returns the correct
+  signer set, the chain continues without `errUnauthorizedValidator`, and the
+  validator set encodes correctly into the first post-fork epoch block
+- Covers the code path excluded by T-2's `die` guard
+  (`PARLIA_GENESIS_BLOCK >= EPOCH_LENGTH`)
+
+### T-5 — Single-node rolling restart while chain is in Parlia
+
+- All 3 validators run normally in Parlia mode; chain advances well past the fork
+- Val-2 is stopped while val-1 and val-3 continue sealing; the 2-of-3 quorum is
+  maintained
+- Val-1 and val-3 produce 10 or more Parlia blocks while val-2 is offline
+- Val-2 restarts with the same TOML config; it syncs the missed Parlia blocks
+  from peers and resumes participation
+- Verifies: val-2 catches up to the canonical tip within the timeout, all 3
+  nodes agree on the same hash, and val-2's miner address appears in the sealer
+  rotation within a few blocks of the catch-up
+
+### T-6 — AB-chain system contract parameter and logic verification after fork
+
+Covers the parameter and logic changes introduced by
+[abcore-v2-genesis-contract#5](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/5).
+PR #7 uses the same generated data, so a single on-chain verification covers both.
+
+#### Parameter assertions (read on-chain state after fork)
+
+All reads use `eth.call` or `eth_call` via the HTTP JSON-RPC after the chain has
+crossed `ParliaGenesisBlock`.
+
+| Contract | Getter / Slot | Expected value (PR #5) |
+|---|---|---|
+| `BSCValidatorSet` | `numOfCabinets()` | `15` |
+| `BSCValidatorSet` | `burnRatio()` | `0` (`INIT_BURN_RATIO = 0`) |
+| `BSCValidatorSet` | `systemRewardBaseRatio()` | `0` (`INIT_SYSTEM_REWARD_RATIO = 0`) |
+| `System` | `FOUNDATION_ADDR` constant | `0x000000000000000000000000000000000000f000` |
+| `GovToken` | `name()` | `"AB Governance Token"` |
+| `GovToken` | `symbol()` | `"govAB"` |
+| `StakeHub` | `minSelfDelegationBNB()` | `2_000_000_000 ether` (2 B AB) |
+| `StakeHub` | `minDelegationBNBChange()` | `100_000_000 ether` (100 M AB) |
+| `BSCGovernor` | `proposalThreshold()` | `2_000_000_000 ether` (2 B govAB) |
+| `BSCGovernor` | `quorumNumerator()` (current) | `50` |
+
+#### Logic assertions
+
+- **Foundation fee routing**: send transactions in several post-fork blocks and
+  confirm `FOUNDATION_ADDR` (`0x...f000`) balance grows by 15 % of the total fees
+  paid; confirm no ETH is burned (burn address balance unchanged); confirm
+  `systemRewardBaseRatio == 0` means the `SystemReward` contract receives nothing
+- **Fast-finality gate**: call `BSCValidatorSet.systemRewardBaseRatio()` and assert
+  it is `0`; confirm no reward is forwarded to `SystemReward` on breathe-block
+  settlement; after a governance `updateParam("systemRewardBaseRatio", <nonzero>)`
+  the reward path is re-enabled (can be simulated by mining past a breathe block
+  after the param change)
+- **`updateParam` bounds in StakeHub**: call `updateParam` with a value just below
+  the new `min_self_delegation_max` ceiling → accepted; call with a value one wei
+  above → rejected with `InvalidValue`
+- **`updateParam` bounds in BSCGovernor**: call with `proposalThreshold` at
+  `10_000_000_000 ether` → accepted; one wei above → rejected
+
 ### T-2 — Parlia epoch boundary validator set transition
 
 - Chain crosses first Parlia epoch boundary (`block % epochLength == 0`)
@@ -80,7 +169,10 @@ which match the addresses baked into `parliagenesis/default/ValidatorContract`. 
 | Gap | Status |
 |---|---|
 | Parlia epoch boundary | Covered by T-2 (`95-run-epoch-test.sh`) |
-| Transaction submission after fork | Not yet covered |
+| Transaction submission across fork boundary | Covered by T-3 (`94-run-tx-test.sh`) |
+| Fork block coincides with Clique epoch boundary | Planned as T-4 |
+| Single-node rolling restart in Parlia mode | Planned as T-5 |
+| AB-chain system contract parameters and logic (PR #5 + PR #7) | Planned as T-6 |
 | StakeHub validator registration (production mainnet, Luban+ path) | E-2/S-1 cloud testnet scope |
 
 ## Running
@@ -117,4 +209,10 @@ KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Leave the rolled-back Clique network running after the drill
 KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+
+# T-3: user transaction crossing the fork boundary
+GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
+
+# T-3: non-default fork block
+GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 ```
