@@ -121,8 +121,10 @@ run "${SCRIPT_DIR}/01-setup.sh"
 run "${SCRIPT_DIR}/02-start.sh"
 
 # ── Phase 3: wait for stable Clique history ──────────────────────────────────
-PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 5 ))
-if [[ "$PRE_STOP" -lt 5 ]]; then PRE_STOP=5; fi
+# Stop at PGB-1 so that after the Parlia restart the very first new block is
+# PGB (a Parlia block), leaving no Clique blocks that could mine the pending tx.
+PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 1 ))
+if [[ "$PRE_STOP" -lt 3 ]]; then PRE_STOP=3; fi
 log "Waiting for all 3 nodes to reach block ${PRE_STOP}..."
 _pids=()
 for n in 1 2 3; do
@@ -149,7 +151,13 @@ start_sync_validator 1
 
 V1_ADDR=$(val_addr 1)
 V2_ADDR=$(val_addr 2)
-V2_BALANCE_BEFORE=$(attach_exec "$GETH" "$(val_ipc 1)" "eth.getBalance('${V2_ADDR}').toString()")
+# Use HTTP JSON-RPC to get exact hex balance; avoid geth console scientific notation
+# (e.g. "1e+24") which causes int() precision loss in Python3.
+HTTP1="http://127.0.0.1:$(http_port 1)"
+V2_BALANCE_BEFORE=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"${V2_ADDR}\",\"latest\"],\"id\":1}" \
+  | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
 log "val-2 balance before transfer: ${V2_BALANCE_BEFORE} wei"
 
 # ── Phase 6: submit user transaction (enters txpool, cannot be mined) ─────────
@@ -290,7 +298,10 @@ fi
 
 # 3. Recipient balance increased by at least TRANSFER_WEI
 # Using >= to tolerate any Parlia block rewards val-2 may have earned.
-V2_BALANCE_AFTER=$(attach_exec "$GETH" "$(val_ipc 1)" "eth.getBalance('${V2_ADDR}').toString()")
+V2_BALANCE_AFTER=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"${V2_ADDR}\",\"latest\"],\"id\":1}" \
+  | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
 balance_ok=$(python3 -c \
   "print('ok' if int('${V2_BALANCE_AFTER}') >= int('${V2_BALANCE_BEFORE}') + int('${TRANSFER_WEI}') else 'fail')" \
   2>/dev/null || echo fail)
