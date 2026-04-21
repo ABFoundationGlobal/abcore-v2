@@ -197,13 +197,13 @@ mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 start_sync_validator 1
 
 # Read the exact frozen head now that the chain is completely still (val-1 has
-# no peers and is not mining; vals 2/3 are stopped).  Use frozen_head + 1 as
-# the effective fork block: the very next block produced after the full restart
-# will be the first Parlia block, leaving zero Clique blocks that could mine
-# the pending tx.
+# no peers and is not mining; vals 2/3 are stopped).  Set ParliaGenesisBlock to
+# frozen_head + 1: the very next block produced after the full restart will be
+# the first Parlia block, leaving zero Clique blocks that could mine the pending tx.
 _frozen_head=$(head_number "$GETH" "$(val_ipc 1)")
-_FORK_BLOCK=$(( _frozen_head + 1 ))
-log "Frozen head: ${_frozen_head}. Effective ParliaGenesisBlock: ${_FORK_BLOCK}"
+_ORIG_PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK"
+PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
+log "Frozen head: ${_frozen_head}. ParliaGenesisBlock adjusted to ${PARLIA_GENESIS_BLOCK}"
 
 V1_ADDR=$(val_addr 1)
 V2_ADDR=$(val_addr 2)
@@ -289,7 +289,7 @@ cat > "${TOML_CONFIG}" <<TOML
 [Eth]
 NetworkId = ${NETWORK_ID}
 SyncMode = "full"
-OverrideParliaGenesisBlock = ${_FORK_BLOCK}
+OverrideParliaGenesisBlock = ${PARLIA_GENESIS_BLOCK}
 
 [Eth.Miner]
 GasPrice = 1000000000
@@ -302,13 +302,13 @@ TOML
 _restart_attempt=0
 while true; do
   _restart_attempt=$(( _restart_attempt + 1 ))
-  log "Restart attempt ${_restart_attempt} with ParliaGenesisBlock=${_FORK_BLOCK}..."
+  log "Restart attempt ${_restart_attempt} with ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}..."
   TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
 
   _head_before=$(head_number "$GETH" "$(val_ipc 1)")
   _target=$(( _head_before + 2 ))
-  if [[ "$(( _FORK_BLOCK + 2 ))" -gt "$_target" ]]; then
-    _target=$(( _FORK_BLOCK + 2 ))
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
   fi
   _deadline=$(( $(date +%s) + 60 ))
   _alive=false
@@ -359,7 +359,7 @@ done
   die "transaction ${TX_HASH} not found in val-1 30s after restart — txpool journal did not reload (journal: ${JOURNAL_PATH})"
 
 # ── Phase 10: wait for all nodes to cross the fork ───────────────────────────
-POST_FORK=$(( _FORK_BLOCK + 5 ))
+POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
 log "Waiting for all nodes to reach block ${POST_FORK}..."
 _pids=()
 for n in 1 2 3; do
@@ -396,10 +396,10 @@ ok()   { log "  PASS: $*"; PASS=$(( PASS + 1 )); }
 fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
 
 # 1. Mined in a post-fork Parlia block
-if [[ "$TX_BLOCK_DEC" -ge "$_FORK_BLOCK" ]]; then
-  ok "Transaction mined at Parlia block ${TX_BLOCK_DEC} (>= ParliaGenesisBlock ${_FORK_BLOCK})"
+if [[ "$TX_BLOCK_DEC" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
+  ok "Transaction mined at Parlia block ${TX_BLOCK_DEC} (>= ParliaGenesisBlock ${PARLIA_GENESIS_BLOCK})"
 else
-  fail "Transaction mined at Clique block ${TX_BLOCK_DEC} (expected >= ${_FORK_BLOCK})"
+  fail "Transaction mined at Clique block ${TX_BLOCK_DEC} (expected >= ${PARLIA_GENESIS_BLOCK})"
 fi
 
 # 2. Receipt status = success
@@ -429,6 +429,7 @@ fi
 
 # 4. Standard fork transition checks (snapshot, contract deployment, miner field)
 run "${SCRIPT_DIR}/05-verify.sh"
+PARLIA_GENESIS_BLOCK="$_ORIG_PARLIA_GENESIS_BLOCK"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
