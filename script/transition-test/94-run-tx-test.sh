@@ -103,7 +103,7 @@ start_sync_validator() {
       --http.port "$http" \
       --http.api "eth,net,web3,admin,personal,miner" \
       --syncmode full \
-      --unlock "${addr}${USER_ADDR:+,${USER_ADDR}}" \
+      --unlock "$addr" \
       --password "$pw" \
       --allow-insecure-unlock \
       --nousb \
@@ -111,6 +111,19 @@ start_sync_validator() {
     echo $! > "$pidfile"
   )
   wait_for_ipc "$GETH" "$(val_ipc "$n")" 60
+
+  # Unlock the non-validator user account via IPC personal API.
+  # --unlock flag uses password-file lines 1:1 with accounts; a single-line
+  # password file would leave USER_ADDR locked.  IPC unlockAccount is simpler.
+  if [[ -n "${USER_ADDR:-}" ]]; then
+    local _user_pw _unlock
+    _user_pw=$(cat "$pw")
+    _unlock=$("$GETH" attach \
+      --exec "personal.unlockAccount('${USER_ADDR}','${_user_pw}',0)" \
+      "$(val_ipc "$n")" 2>/dev/null | tr -d '\r\n [:space:]')
+    [[ "$_unlock" == "true" ]] || die "failed to unlock user account ${USER_ADDR} (got: ${_unlock})"
+    log "User account ${USER_ADDR} unlocked."
+  fi
 }
 
 # ── Phase 1: setup ────────────────────────────────────────────────────────────
