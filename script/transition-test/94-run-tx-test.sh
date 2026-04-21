@@ -101,7 +101,7 @@ start_sync_validator() {
       --http \
       --http.addr 127.0.0.1 \
       --http.port "$http" \
-      --http.api "eth,net,web3,admin,personal,miner" \
+      --http.api "eth,net,web3,admin,miner" \
       --syncmode full \
       --unlock "$addr" \
       --password "$pw" \
@@ -111,19 +111,6 @@ start_sync_validator() {
     echo $! > "$pidfile"
   )
   wait_for_ipc "$GETH" "$(val_ipc "$n")" 60
-
-  # Unlock the non-validator user account via IPC personal API.
-  # --unlock flag uses password-file lines 1:1 with accounts; a single-line
-  # password file would leave USER_ADDR locked.  IPC unlockAccount is simpler.
-  if [[ -n "${USER_ADDR:-}" ]]; then
-    local _user_pw _unlock
-    _user_pw=$(cat "$pw")
-    _unlock=$("$GETH" attach \
-      --exec "personal.unlockAccount('${USER_ADDR}','${_user_pw}',0)" \
-      "$(val_ipc "$n")" 2>/dev/null | tr -d '\r\n [:space:]')
-    [[ "$_unlock" == "true" ]] || die "failed to unlock user account ${USER_ADDR} (got: ${_unlock})"
-    log "User account ${USER_ADDR} unlocked."
-  fi
 }
 
 # ── Phase 1: setup ────────────────────────────────────────────────────────────
@@ -139,12 +126,14 @@ run "${SCRIPT_DIR}/02-start.sh"
 # After the fork the journal tx (nonce=0) becomes stale and is dropped by the
 # TxTracker before it is ever added to the txpool.  A dedicated non-validator
 # account is unaffected by system-transaction nonce increments.
-log "Creating non-validator user account in val-1 keystore (same password as val-1)..."
-USER_ADDR=$("$GETH" account new \
-  --datadir "$(val_dir 1)" \
-  --password "$(val_pw 1)" 2>&1 \
-  | grep -oE '0x[0-9a-fA-F]{40}' | head -1)
-[[ "$USER_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "failed to create user account"
+log "Generating ephemeral non-validator user account (local signing, no geth keystore)..."
+read -r USER_ADDR USER_KEY < <(python3 -c "
+from eth_account import Account
+acct = Account.create()
+print(acct.address, acct.key.hex())
+")
+[[ "$USER_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]] || \
+  die "failed to generate user account (eth_account missing? pip install eth-account)"
 log "User account: ${USER_ADDR}"
 
 _fund_http="http://127.0.0.1:$(http_port 1)"
@@ -206,11 +195,32 @@ V2_BALANCE_BEFORE=$(curl -sS -X POST "$HTTP1" \
   | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
 log "val-2 balance before transfer: ${V2_BALANCE_BEFORE} wei"
 
-# ── Phase 6: submit user transaction (enters txpool, cannot be mined) ─────────
-# web3.toWei returns a BigNumber, avoiding JS integer precision loss for 1 ETH.
-log "Submitting transaction: ${USER_ADDR} → ${V2_ADDR} (1 ETH)"
-TX_HASH=$(attach_exec "$GETH" "$(val_ipc 1)" \
-  "eth.sendTransaction({from:'${USER_ADDR}',to:'${V2_ADDR}',value:web3.toWei('1','ether'),gas:21000,gasPrice:1000000000})")
+# ── Phase 6: sign and submit user transaction (enters txpool, cannot be mined) ─
+# Sign locally with eth_account; submit via eth_sendRawTransaction over HTTP.
+# No geth account unlock needed — the private key never touches the keystore.
+log "Signing transaction locally: ${USER_ADDR} → ${V2_ADDR} (1 ETH)"
+USER_NONCE=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionCount\",\"params\":[\"${USER_ADDR}\",\"latest\"],\"id\":1}" \
+  | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
+RAW_TX=$(python3 -c "
+from eth_account import Account
+signed = Account.from_key('${USER_KEY}').sign_transaction({
+    'nonce': ${USER_NONCE},
+    'to': '${V2_ADDR}',
+    'value': 10**18,
+    'gas': 21000,
+    'gasPrice': 10**9,
+    'chainId': ${CHAIN_ID},
+    'type': 0,
+})
+raw = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
+print('0x' + raw.hex())
+")
+TX_HASH=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendRawTransaction\",\"params\":[\"${RAW_TX}\"],\"id\":1}" \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('result') or d.get('error',{}).get('message',''))")
 [[ "$TX_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "failed to submit transaction: ${TX_HASH}"
 log "Transaction submitted: ${TX_HASH}"
 
