@@ -39,6 +39,8 @@ _DATADIR_ROOT_EXPLICIT=${DATADIR_ROOT+set}
 
 source "${SCRIPT_DIR}/lib.sh"
 
+ensure_python_deps eth-account
+
 if [[ "${_PORT_BASE_EXPLICIT}" != "set" ]]; then
   PORT_BASE=$(find_free_port_base)
   log "Auto-selected PORT_BASE=${PORT_BASE}"
