@@ -40,35 +40,6 @@ require_exe() {
   [[ -x "$1" ]] || die "missing executable: $1"
 }
 
-# ensure_python_deps <pip-package> [<pip-package> ...]
-# Checks each package with `python3 -c "import <import_name>"` and installs
-# any that are missing via pip3.  The import name is derived by replacing
-# hyphens with underscores in the package name (e.g. eth-account → eth_account).
-ensure_python_deps() {
-  local missing=()
-  for pkg in "$@"; do
-    local mod="${pkg//-/_}"
-    if ! python3 -c "import ${mod}" 2>/dev/null; then
-      missing+=("$pkg")
-    fi
-  done
-  [[ "${#missing[@]}" -eq 0 ]] && return 0
-
-  log "Installing missing Python packages: ${missing[*]}"
-  if ! python3 -m pip install --quiet "${missing[@]}"; then
-    log "pip install failed, retrying with --user..."
-    python3 -m pip install --quiet --user "${missing[@]}" \
-      || die "Failed to install Python packages: ${missing[*]}"
-  fi
-
-  for pkg in "$@"; do
-    local mod="${pkg//-/_}"
-    python3 -c "import ${mod}" 2>/dev/null \
-      || die "Package installed but import still fails: ${mod}"
-  done
-  log "Python packages ready: $*"
-}
-
 val_dir() { echo "${DATADIR_ROOT}/validator-${1}"; }
 val_ipc()  { echo "$(val_dir "$1")/geth.ipc"; }
 val_log()  { echo "$(val_dir "$1")/geth.log"; }
