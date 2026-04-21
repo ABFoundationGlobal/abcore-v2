@@ -39,6 +39,14 @@ _DATADIR_ROOT_EXPLICIT=${DATADIR_ROOT+set}
 
 source "${SCRIPT_DIR}/lib.sh"
 
+# Create a shared venv for test dependencies so pip installs are isolated from
+# the system Python (works on Debian PEP-668 environments and any other distro).
+# The venv is stored alongside the scripts and reused across runs.
+_VENV="${SCRIPT_DIR}/.venv"
+[[ -d "$_VENV" ]] || python3 -m venv "$_VENV"
+# shellcheck source=/dev/null
+source "${_VENV}/bin/activate"
+
 ensure_python_deps eth-account
 
 if [[ "${_PORT_BASE_EXPLICIT}" != "set" ]]; then
