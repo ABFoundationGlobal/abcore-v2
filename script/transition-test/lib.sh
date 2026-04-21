@@ -279,6 +279,22 @@ assert_same_hash_at() {
   log "All nodes agree on hash at height ${height}: ${ref_hash}"
 }
 
+# partial_clean: wipe chain data but preserve keystores and address.txt so
+# that validator addresses remain consistent with baked-in bytecodes.
+partial_clean() {
+  "${SCRIPT_DIR}/03-stop.sh" || true
+  # 03-stop.sh removes the PORT_BASE sentinel; re-acquire it so parallel runs
+  # cannot steal this port base while we are still using it.
+  mkdir -p "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
+  for n in 1 2 3; do
+    local d; d=$(val_dir "$n")
+    rm -rf "${d}/geth" "${d}/geth.ipc" "${d}/geth.log" "${d}/geth.pid"
+  done
+  rm -f "${DATADIR_ROOT}/override.toml"
+  rm -f "${GENESIS_JSON}"
+  log "partial_clean: chain data removed, keystores preserved"
+}
+
 # find_free_port_base: pick a PORT_BASE where all test ports are free.
 # Uses a sentinel dir in /tmp to prevent races between parallel runs.
 find_free_port_base() {
