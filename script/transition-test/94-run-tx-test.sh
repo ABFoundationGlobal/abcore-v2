@@ -221,7 +221,6 @@ signed = Account.from_key('${USER_KEY}').sign_transaction({
     'gas': 21000,
     'gasPrice': 10**9,
     'chainId': ${CHAIN_ID},
-    'type': 0,
 })
 raw = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
 print('0x' + raw.hex())
