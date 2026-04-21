@@ -40,6 +40,39 @@ require_exe() {
   [[ -x "$1" ]] || die "missing executable: $1"
 }
 
+# ensure_python_deps <pip-package> [...]
+# Installs any listed packages that are not already importable.
+# Bootstraps pip via ensurepip if the pip module is missing.
+ensure_python_deps() {
+  local missing=()
+  for pkg in "$@"; do
+    local mod="${pkg//-/_}"
+    python3 -c "import ${mod}" 2>/dev/null || missing+=("$pkg")
+  done
+  [[ "${#missing[@]}" -eq 0 ]] && return 0
+
+  if ! python3 -m pip --version >/dev/null 2>&1; then
+    log "pip unavailable — bootstrapping via ensurepip..."
+    python3 -m ensurepip --upgrade --user 2>/dev/null || \
+      python3 -m ensurepip --user 2>/dev/null || \
+      python3 -m ensurepip --upgrade 2>/dev/null || \
+      python3 -m ensurepip 2>/dev/null || \
+      die "Cannot bootstrap pip. Install python3-pip manually (e.g. apt-get install python3-pip)."
+  fi
+
+  log "Installing missing Python packages: ${missing[*]}"
+  python3 -m pip install --quiet "${missing[@]}" 2>/dev/null || \
+    python3 -m pip install --quiet --user "${missing[@]}" || \
+    die "Failed to install Python packages: ${missing[*]}"
+
+  for pkg in "$@"; do
+    local mod="${pkg//-/_}"
+    python3 -c "import ${mod}" 2>/dev/null \
+      || die "Package installed but import still fails: ${mod}"
+  done
+  log "Python packages ready: $*"
+}
+
 val_dir() { echo "${DATADIR_ROOT}/validator-${1}"; }
 val_ipc()  { echo "$(val_dir "$1")/geth.ipc"; }
 val_log()  { echo "$(val_dir "$1")/geth.log"; }

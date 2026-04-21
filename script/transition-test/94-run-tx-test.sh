@@ -39,6 +39,8 @@ _DATADIR_ROOT_EXPLICIT=${DATADIR_ROOT+set}
 
 source "${SCRIPT_DIR}/lib.sh"
 
+ensure_python_deps eth-account
+
 if [[ "${_PORT_BASE_EXPLICIT}" != "set" ]]; then
   PORT_BASE=$(find_free_port_base)
   log "Auto-selected PORT_BASE=${PORT_BASE}"
@@ -88,17 +90,6 @@ start_sync_validator() {
 
   stop_pidfile "$pidfile"
 
-  # geth --unlock matches password-file lines 1:1 with the comma-separated
-  # account list.  If USER_ADDR is set, write a two-line file so both the
-  # validator and the user account are unlocked at startup.
-  local unlock_list="$addr"
-  local pw_file="$pw"
-  if [[ -n "${USER_ADDR:-}" ]]; then
-    unlock_list="${addr},${USER_ADDR}"
-    pw_file="${dir}/unlock-passwords.txt"
-    { cat "$pw"; cat "$pw"; } > "$pw_file"
-  fi
-
   log "Starting validator-${n} in sync-only mode (no mining)"
   (
     nohup "$GETH" \
@@ -114,8 +105,8 @@ start_sync_validator() {
       --http.port "$http" \
       --http.api "eth,net,web3,admin,miner" \
       --syncmode full \
-      --unlock "$unlock_list" \
-      --password "$pw_file" \
+      --unlock "$addr" \
+      --password "$pw" \
       --allow-insecure-unlock \
       --nousb \
       >>"$logfile" 2>&1 &
@@ -137,12 +128,13 @@ run "${SCRIPT_DIR}/02-start.sh"
 # After the fork the journal tx (nonce=0) becomes stale and is dropped by the
 # TxTracker before it is ever added to the txpool.  A dedicated non-validator
 # account is unaffected by system-transaction nonce increments.
-log "Creating non-validator user account in val-1 keystore (same password as val-1)..."
-USER_ADDR=$("$GETH" account new \
-  --datadir "$(val_dir 1)" \
-  --password "$(val_pw 1)" 2>&1 \
-  | grep -oE '0x[0-9a-fA-F]{40}' | head -1)
-[[ "$USER_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "failed to create user account"
+log "Generating ephemeral non-validator user account (Python eth_account)..."
+read -r USER_ADDR USER_KEY < <(python3 -c "
+from eth_account import Account
+acct = Account.create()
+print(acct.address, acct.key.hex())
+")
+[[ "$USER_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "failed to generate user account"
 log "User account: ${USER_ADDR}"
 
 _fund_http="http://127.0.0.1:$(http_port 1)"
@@ -204,13 +196,32 @@ V2_BALANCE_BEFORE=$(curl -sS -X POST "$HTTP1" \
   | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
 log "val-2 balance before transfer: ${V2_BALANCE_BEFORE} wei"
 
-# ── Phase 6: submit user transaction (enters txpool, cannot be mined) ─────────
-# USER_ADDR is unlocked in geth via --unlock flag in start_sync_validator.
-# eth.sendTransaction works without the personal namespace as long as the
-# sender account is already unlocked at startup.
-log "Submitting transaction: ${USER_ADDR} → ${V2_ADDR} (1 ETH)"
-TX_HASH=$(attach_exec "$GETH" "$(val_ipc 1)" \
-  "eth.sendTransaction({from:'${USER_ADDR}',to:'${V2_ADDR}',value:web3.toWei('1','ether'),gas:21000,gasPrice:1000000000})")
+# ── Phase 6: sign and submit user transaction (enters txpool, cannot be mined) ─
+# Sign locally with eth_account; submit via eth_sendRawTransaction over HTTP.
+# No geth account unlock needed — the private key never touches the keystore.
+log "Signing transaction locally: ${USER_ADDR} → ${V2_ADDR} (1 ETH)"
+USER_NONCE=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionCount\",\"params\":[\"${USER_ADDR}\",\"latest\"],\"id\":1}" \
+  | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result'],16))")
+RAW_TX=$(python3 -c "
+from eth_account import Account
+signed = Account.from_key('${USER_KEY}').sign_transaction({
+    'nonce': ${USER_NONCE},
+    'to': '${V2_ADDR}',
+    'value': 10**18,
+    'gas': 21000,
+    'gasPrice': 10**9,
+    'chainId': ${CHAIN_ID},
+    'type': 0,
+})
+raw = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
+print('0x' + raw.hex())
+")
+TX_HASH=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendRawTransaction\",\"params\":[\"${RAW_TX}\"],\"id\":1}" \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('result') or d.get('error',{}).get('message',''))")
 [[ "$TX_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "failed to submit transaction: ${TX_HASH}"
 log "Transaction submitted: ${TX_HASH}"
 
