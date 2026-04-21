@@ -257,7 +257,32 @@ while true; do
   mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 done
 
-# ── Phase 9: wait for all nodes to cross the fork ────────────────────────────
+# ── Phase 9: verify transaction is in val-1's txpool after restart ────────────
+# The journal (transactions.rlp) must be reloaded by geth on startup.  Verifying
+# this immediately gives a clear error instead of a misleading receipt timeout.
+log "Verifying transaction ${TX_HASH} is pending in val-1 txpool after restart..."
+HTTP1="http://127.0.0.1:$(http_port 1)"
+_txpool_deadline=$(( $(date +%s) + 30 ))
+_tx_in_pool=false
+while [[ $(date +%s) -lt $_txpool_deadline ]]; do
+  _tx_result=$(curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionByHash\",\"params\":[\"${TX_HASH}\"],\"id\":1}" \
+    2>/dev/null || true)
+  _tx_status=$(echo "$_tx_result" | python3 -c \
+    "import json,sys; d=json.load(sys.stdin); r=d.get('result'); print('pending' if r and r.get('blockNumber') is None else 'found' if r else 'missing')" \
+    2>/dev/null || echo missing)
+  if [[ "$_tx_status" != "missing" ]]; then
+    log "Transaction ${_tx_status} in val-1 after restart (txpool journal reloaded)."
+    _tx_in_pool=true
+    break
+  fi
+  sleep 1
+done
+"$_tx_in_pool" || \
+  die "transaction ${TX_HASH} not found in val-1 30s after restart — txpool journal did not reload (journal: ${JOURNAL_PATH})"
+
+# ── Phase 10: wait for all nodes to cross the fork ───────────────────────────
 POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
 log "Waiting for all nodes to reach block ${POST_FORK}..."
 _pids=()
@@ -267,36 +292,11 @@ for n in 1 2 3; do
 done
 for p in "${_pids[@]}"; do wait "$p"; done
 
-# ── Phase 10: wait for the pending transaction to be mined ───────────────────
-# Strategy: wait for val-1 to mine at least one post-fork block, then poll for
-# the receipt.  Val-1 holds the tx in its txpool (loaded from the journal) and
-# will include it the first time it is in-turn.  With 3 validators at 1s blocks,
-# val-1 is in-turn every ~3 blocks, so this normally completes in < 30s.
-log "Waiting for val-1 to mine a post-fork block (ensures txpool tx is included)..."
-V1_ADDR_LOWER=$(echo "$V1_ADDR" | tr '[:upper:]' '[:lower:]')
-_val1_mined=false
-_val1_deadline=$(( $(date +%s) + 180 ))
-while [[ $(date +%s) -lt $_val1_deadline ]]; do
-  _tip=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
-  _start=$(( _tip > 10 ? _tip - 10 : 0 ))
-  for (( _blk=_tip; _blk>=_start && _blk>=PARLIA_GENESIS_BLOCK; _blk-- )); do
-    _miner=$(attach_exec "$GETH" "$(val_ipc 1)" \
-      "eth.getBlock(${_blk}).miner" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
-    if [[ "$_miner" == "$V1_ADDR_LOWER" ]]; then
-      log "Val-1 mined block ${_blk}."
-      _val1_mined=true
-      break 2
-    fi
-  done
-  sleep 2
-done
-"$_val1_mined" || log "WARNING: val-1 did not mine a post-fork block within 180s; proceeding anyway"
-
+# ── Phase 11: wait for the pending transaction to be mined ───────────────────
 log "Waiting for transaction ${TX_HASH} to be mined in a Parlia block..."
-HTTP1="http://127.0.0.1:$(http_port 1)"
 TX_RECEIPT=""
 TX_BLOCK_HEX=""
-deadline=$(( $(date +%s) + 60 ))
+deadline=$(( $(date +%s) + 120 ))
 while [[ $(date +%s) -lt $deadline ]]; do
   TX_RECEIPT=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
@@ -309,12 +309,12 @@ while [[ $(date +%s) -lt $deadline ]]; do
   sleep 2
 done
 [[ -n "$TX_BLOCK_HEX" ]] || \
-  die "transaction ${TX_HASH} not mined within timeout (txpool journal may not have survived restart)"
+  die "transaction ${TX_HASH} not mined within timeout (tx was in txpool but not included — check FinalizeAndAssemble / IsSystemTransaction)"
 
 TX_BLOCK_DEC=$(( TX_BLOCK_HEX ))
 log "Transaction mined at block ${TX_BLOCK_DEC}"
 
-# ── Phase 11: verification ────────────────────────────────────────────────────
+# ── Phase 12: verification ────────────────────────────────────────────────────
 PASS=0; FAIL=0
 ok()   { log "  PASS: $*"; PASS=$(( PASS + 1 )); }
 fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
