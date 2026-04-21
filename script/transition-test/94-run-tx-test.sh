@@ -103,7 +103,7 @@ start_sync_validator() {
       --http.port "$http" \
       --http.api "eth,net,web3,admin,personal,miner" \
       --syncmode full \
-      --unlock "$addr" \
+      --unlock "${addr}${USER_ADDR:+,${USER_ADDR}}" \
       --password "$pw" \
       --allow-insecure-unlock \
       --nousb \
@@ -119,6 +119,39 @@ run "${SCRIPT_DIR}/01-setup.sh"
 
 # ── Phase 2: start Clique network ────────────────────────────────────────────
 run "${SCRIPT_DIR}/02-start.sh"
+
+# ── Phase 2.5: create a non-validator user account and fund it ────────────────
+# A validator address CANNOT be used as the tx sender: Parlia increments the
+# coinbase nonce via system transactions in every block that validator mines.
+# After the fork the journal tx (nonce=0) becomes stale and is dropped by the
+# TxTracker before it is ever added to the txpool.  A dedicated non-validator
+# account is unaffected by system-transaction nonce increments.
+log "Creating non-validator user account in val-1 keystore (same password as val-1)..."
+USER_ADDR=$("$GETH" account new \
+  --datadir "$(val_dir 1)" \
+  --password "$(val_pw 1)" 2>&1 \
+  | grep -oE '0x[0-9a-fA-F]{40}' | head -1)
+[[ "$USER_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "failed to create user account"
+log "User account: ${USER_ADDR}"
+
+_fund_http="http://127.0.0.1:$(http_port 1)"
+_v1_early=$(val_addr 1)
+_fund_tx=$(attach_exec "$GETH" "$(val_ipc 1)" \
+  "eth.sendTransaction({from:'${_v1_early}',to:'${USER_ADDR}',value:web3.toWei('2','ether'),gas:21000,gasPrice:1000000000})")
+[[ "$_fund_tx" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "failed to fund user account: ${_fund_tx}"
+_fund_deadline=$(( $(date +%s) + 30 ))
+while [[ $(date +%s) -lt $_fund_deadline ]]; do
+  _fund_blk=$(curl -sS -X POST "$_fund_http" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"${_fund_tx}\"],\"id\":1}" \
+    2>/dev/null | python3 -c \
+    "import json,sys; d=json.load(sys.stdin); r=d.get('result'); print(r.get('blockNumber','') if r else '')" \
+    2>/dev/null || true)
+  [[ -n "$_fund_blk" ]] && break
+  sleep 1
+done
+[[ -n "$_fund_blk" ]] || die "funding tx ${_fund_tx} not mined within 30s"
+log "User account funded with 2 ETH (mined at block ${_fund_blk})."
 
 # ── Phase 3: wait for stable Clique history ──────────────────────────────────
 # Stop at PGB-1 so that after the Parlia restart the very first new block is
@@ -162,9 +195,9 @@ log "val-2 balance before transfer: ${V2_BALANCE_BEFORE} wei"
 
 # ── Phase 6: submit user transaction (enters txpool, cannot be mined) ─────────
 # web3.toWei returns a BigNumber, avoiding JS integer precision loss for 1 ETH.
-log "Submitting transaction: ${V1_ADDR} → ${V2_ADDR} (1 ETH)"
+log "Submitting transaction: ${USER_ADDR} → ${V2_ADDR} (1 ETH)"
 TX_HASH=$(attach_exec "$GETH" "$(val_ipc 1)" \
-  "eth.sendTransaction({from:'${V1_ADDR}',to:'${V2_ADDR}',value:web3.toWei('1','ether'),gas:21000,gasPrice:1000000000})")
+  "eth.sendTransaction({from:'${USER_ADDR}',to:'${V2_ADDR}',value:web3.toWei('1','ether'),gas:21000,gasPrice:1000000000})")
 [[ "$TX_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "failed to submit transaction: ${TX_HASH}"
 log "Transaction submitted: ${TX_HASH}"
 
