@@ -230,6 +230,8 @@ KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback
 # T-3: user transaction crossing the fork boundary
 GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
 
-# T-3: non-default fork block
+# T-3: run Clique chain to block ~30 before stopping (pre-stop target).
+# The script always sets the effective fork block to frozen_head+1 at runtime,
+# so PARLIA_GENESIS_BLOCK here controls how far Clique runs, not the exact fork height.
 GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 ```

@@ -197,13 +197,21 @@ mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 start_sync_validator 1
 
 # Read the exact frozen head now that the chain is completely still (val-1 has
-# no peers and is not mining; vals 2/3 are stopped).  Set ParliaGenesisBlock to
-# frozen_head + 1: the very next block produced after the full restart will be
-# the first Parlia block, leaving zero Clique blocks that could mine the pending tx.
+# no peers and is not mining; vals 2/3 are stopped).
+#
+# PARLIA_GENESIS_BLOCK is treated as a *pre-stop target* by the caller (how far
+# to run the Clique chain before this test begins).  The *effective* fork block
+# used for the Parlia restart is always frozen_head+1, regardless of the
+# caller's value.  This is necessary to guarantee zero Clique blocks exist
+# between the chain stop and the fork: any Clique block in that window could
+# mine the pending tx before Parlia is active, breaking the test invariant.
+#
+# The original value is saved and restored after 05-verify.sh so that callers
+# inspecting PARLIA_GENESIS_BLOCK after this script exits see what they set.
 _frozen_head=$(head_number "$GETH" "$(val_ipc 1)")
 _ORIG_PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK"
 PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
-log "Frozen head: ${_frozen_head}. ParliaGenesisBlock adjusted to ${PARLIA_GENESIS_BLOCK}"
+log "Frozen head: ${_frozen_head}. Effective ParliaGenesisBlock: ${PARLIA_GENESIS_BLOCK} (caller value: ${_ORIG_PARLIA_GENESIS_BLOCK})"
 
 V1_ADDR=$(val_addr 1)
 V2_ADDR=$(val_addr 2)

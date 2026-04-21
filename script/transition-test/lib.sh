@@ -42,8 +42,11 @@ require_exe() {
 
 # ensure_python_deps <pip-package> [...]
 # Installs any listed packages that are not already importable.
-# Expects to run inside an activated venv (python3 and pip point to the venv).
+# Must be called from an activated venv; fails fast to avoid polluting the
+# system Python on PEP-668 systems.
 ensure_python_deps() {
+  [[ -n "${VIRTUAL_ENV:-}" ]] || \
+    die "ensure_python_deps: no active venv detected (VIRTUAL_ENV is unset). Activate a venv before calling this function."
   local missing=()
   for pkg in "$@"; do
     local mod="${pkg//-/_}"

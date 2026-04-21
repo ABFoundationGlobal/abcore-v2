@@ -199,19 +199,16 @@ log "All nodes past fork block."
 # ── Phase 7: verify ───────────────────────────────────────────────────────────
 run "${SCRIPT_DIR}/05-verify.sh"
 
-# ── Phase 8: stop and clean ───────────────────────────────────────────────────
+# ── Phase 8: stop T-1 nodes ───────────────────────────────────────────────────
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo
-  echo "PASS. KEEP_RUNNING=1 — nodes remain running."
+  echo "PASS (T-1). KEEP_RUNNING=1 — nodes remain running; sub-tests skipped."
   exit 0
 fi
 
 echo
 echo "==> Stopping nodes"
 "${SCRIPT_DIR}/03-stop.sh"
-
-echo
-echo "PASS"
 
 # ── T-3: transaction across fork boundary ─────────────────────────────────────
 echo
@@ -255,3 +252,6 @@ if [[ "${RUN_CLIQUE_EPOCH_FORK_TEST:-0}" -eq 1 ]]; then
   bash -c 'unset PARLIA_GENESIS_BLOCK; exec "$0" "$@"' \
     "${SCRIPT_DIR}/93-run-clique-epoch-fork-test.sh"
 fi
+
+echo
+echo "PASS"
