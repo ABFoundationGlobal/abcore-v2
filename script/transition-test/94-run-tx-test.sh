@@ -165,9 +165,11 @@ done
 log "User account funded with 2 ETH (mined at block ${_fund_blk})."
 
 # ── Phase 3: wait for stable Clique history ──────────────────────────────────
-# Stop at PGB-1 so that after the Parlia restart the very first new block is
-# PGB (a Parlia block), leaving no Clique blocks that could mine the pending tx.
-PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 1 ))
+# Stop 5 blocks before the fork so there is room for the chain to race ahead
+# without crossing ParliaGenesisBlock before 03-stop.sh fires.  Val-1 runs
+# sync-only (no mining) after the stop, so no Clique blocks will be produced
+# between tx submission and the full Parlia restart regardless of the gap.
+PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 5 ))
 if [[ "$PRE_STOP" -lt 3 ]]; then PRE_STOP=3; fi
 log "Waiting for all 3 nodes to reach block ${PRE_STOP}..."
 _pids=()
@@ -181,7 +183,16 @@ wait_for_same_head --min-height "$PRE_STOP" "$GETH" "$(val_ipc 1)" 60 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
 
-log "All nodes converged at block $(head_number "$GETH" "$(val_ipc 1)"). Stopping all validators."
+# 1-second Clique blocks can advance the chain by several blocks between the
+# wait_for_head check and 03-stop.sh.  If the chain has already crossed
+# ParliaGenesisBlock, push the fork block forward so Parlia never tries to
+# validate a Clique-sealed block as a post-fork block.
+_current=$(head_number "$GETH" "$(val_ipc 1)")
+if [[ "$_current" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
+  PARLIA_GENESIS_BLOCK=$(( _current + 2 ))
+  log "Chain at ${_current} >= original ParliaGenesisBlock; adjusting to ${PARLIA_GENESIS_BLOCK}"
+fi
+log "All nodes converged at block ${_current}. ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}. Stopping all validators."
 
 # ── Phase 4: stop all validators (chain frozen at PRE_STOP) ──────────────────
 run "${SCRIPT_DIR}/03-stop.sh"
