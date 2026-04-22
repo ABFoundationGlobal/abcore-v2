@@ -97,20 +97,21 @@ confirms that the fee-routing logic routes 15 % of transaction fees to
 
 #### T-6.a — implemented (`06-verify-contracts.sh`)
 
-Assertions via `eth_call` on `BSCValidatorSet` (0x1000) plus balance checks:
+Assertions via `eth_call` on `BSCValidatorSet` (0x1000), deployment checks, and post-tx balance verification:
 
 | Contract | What is checked | Expected |
 |---|---|---|
-| BSCValidatorSet | `FOUNDATION_ADDR()` constant | `0x000000000000000000000000000000000000f000` |
-| BSCValidatorSet | `INIT_NUM_OF_CABINETS()` constant | `15` (BSC default is 21) |
+| BSCValidatorSet | `INIT_NUM_OF_CABINETS()` constant | `21` (source default; `defaultNet` bytecode is compiled without `--init-num-of-cabinets` override — AB-chain mainnet/testnet use 15) |
 | BSCValidatorSet | `FOUNDATION_RATIO()` constant | `1500` (15 %) |
 | BSCValidatorSet | `burnRatio()` | `0` |
 | BSCValidatorSet | `systemRewardBaseRatio()` | `0` |
+| BSCValidatorSet | `systemRewardAntiMEVRatio()` | `0` |
 | GovToken (0x2005) | bytecode deployed | code length > 10 bytes |
 | StakeHub (0x2002) | bytecode deployed | code length > 10 bytes |
 | BSCGovernor (0x2004) | bytecode deployed | code length > 10 bytes |
-| FOUNDATION_ADDR | balance after test tx | increases (15 % fee routed) |
-| SystemReward (0x1002) | balance after test tx | unchanged (ratio == 0) |
+| `0x000000000000000000000000000000000000f000` | balance after test tx | increases (15 % fee routed) |
+
+Note: `FOUNDATION_ADDR` is `address public constant` in `System.sol` (inherited by BSCValidatorSet); the inherited getter is not reachable through BSCValidatorSet's ABI dispatch table in the compiled bytecode, so fee routing to `0xf000` is verified via balance check.
 
 #### T-6.b — planned: Feynman-initialized contract parameters
 

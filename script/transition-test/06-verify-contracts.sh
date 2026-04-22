@@ -49,20 +49,41 @@ FAIL=0
 ok()   { log "  PASS: $*"; PASS=$(( PASS + 1 )); }
 fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
 
-# eth_call via HTTP JSON-RPC; returns 0x-prefixed hex result
+# eth_call via HTTP JSON-RPC; returns 0x-prefixed hex result.
+# Exits non-zero and prints to stderr on JSON-RPC error or missing result.
 eth_call_raw() {
   local to="$1" data="$2"
   curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
     --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${to}\",\"data\":\"${data}\"},\"latest\"],\"id\":1}" \
-    | python3 -c "import json,sys; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo ""
+    2>/dev/null \
+  | python3 -c '
+import json, sys
+try:
+    resp = json.load(sys.stdin)
+except Exception as exc:
+    print(f"eth_call_raw: failed to parse JSON-RPC response: {exc}", file=sys.stderr)
+    sys.exit(1)
+if "error" in resp:
+    print(f"eth_call_raw: JSON-RPC error: {resp[\"error\"]}", file=sys.stderr)
+    sys.exit(1)
+if "result" not in resp:
+    print("eth_call_raw: JSON-RPC response missing result", file=sys.stderr)
+    sys.exit(1)
+print(resp["result"])
+' || return 1
 }
 
 decode_uint256() {
+  local raw="${1:-}"
   python3 -c "
-h='${1}'.strip().lstrip('0x')
-print(int(h, 16) if h else 0)
-" 2>/dev/null || echo "0"
+import sys
+h = '${raw}'.strip().lstrip('0x')
+if not h:
+    print('decode_uint256: empty hex input', file=sys.stderr)
+    sys.exit(1)
+print(int(h, 16))
+"
 }
 
 # 4-byte function selector via geth's built-in keccak256
@@ -150,23 +171,37 @@ VAL1_ADDR=$(val_addr 1)
 VAL2_ADDR=$(val_addr 2)
 TX_HASH=$(curl -sS -X POST "$HTTP1" \
   -H 'Content-Type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"${VAL1_ADDR}\",\"to\":\"${VAL2_ADDR}\",\"value\":\"0xde0b6b3a7640000\",\"gasPrice\":\"0x3B9ACA00\"}],\"id\":1}" \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"${VAL1_ADDR}\",\"to\":\"${VAL2_ADDR}\",\"value\":\"0x0\",\"gas\":\"0x5208\",\"gasPrice\":\"0x3B9ACA00\"}],\"id\":1}" \
   | python3 -c "import json,sys; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo "")
 
 if [[ -n "$TX_HASH" && "$TX_HASH" != "null" ]]; then
   log "  Test tx sent: ${TX_HASH}"
-  wait_for_blocks "$GETH" "$IPC1" 2 30
 
-  balance_after=$(attach_exec "$GETH" "$IPC1" \
-    "eth.getBalance('${EXPECTED_FOUNDATION}').toString(10)" 2>/dev/null || echo "0")
+  # Poll for receipt to ensure the tx is mined before checking balances.
+  _receipt_deadline=$(( $(date +%s) + 60 ))
+  _mined=false
+  while [[ $(date +%s) -lt $_receipt_deadline ]]; do
+    _receipt=$(curl -sS -X POST "$HTTP1" \
+      -H 'Content-Type: application/json' \
+      --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"${TX_HASH}\"],\"id\":1}" \
+      | python3 -c "import json,sys; print('1' if json.load(sys.stdin).get('result') else '0')" 2>/dev/null || echo "0")
+    if [[ "$_receipt" == "1" ]]; then _mined=true; break; fi
+    sleep 1
+  done
 
-  if python3 -c "
+  if "$_mined"; then
+    balance_after=$(attach_exec "$GETH" "$IPC1" \
+      "eth.getBalance('${EXPECTED_FOUNDATION}').toString(10)" 2>/dev/null || echo "0")
+    if python3 -c "
 before=int('${balance_before}' or '0'); after=int('${balance_after}' or '0')
 assert after > before, f'balance did not increase: {before} -> {after}'
 " 2>/dev/null; then
-    ok "FOUNDATION_ADDR balance increased (15 % fee routing confirmed)"
+      ok "FOUNDATION_ADDR balance increased (15 % fee routing confirmed)"
+    else
+      fail "FOUNDATION_ADDR balance did not increase (before=${balance_before} after=${balance_after})"
+    fi
   else
-    fail "FOUNDATION_ADDR balance did not increase (before=${balance_before} after=${balance_after})"
+    fail "Test transaction not mined within 60 s — fee routing check skipped"
   fi
 else
   fail "Test transaction not accepted — fee routing check skipped"
