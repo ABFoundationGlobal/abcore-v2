@@ -75,6 +75,9 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: bash script/compat-clique-v1-v2/00-get-v1-geth.sh
 
+    - name: Install Python venv support
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-venv
+
     - name: Run no-genesis-v2 tests
       env:
         ABCORE_V2_GETH: ${{ github.workspace }}/build/bin/geth
