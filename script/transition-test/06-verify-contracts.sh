@@ -65,7 +65,7 @@ except Exception as exc:
     print(f"eth_call_raw: failed to parse JSON-RPC response: {exc}", file=sys.stderr)
     sys.exit(1)
 if "error" in resp:
-    print(f"eth_call_raw: JSON-RPC error: {resp[\"error\"]}", file=sys.stderr)
+    print("eth_call_raw: JSON-RPC error: " + str(resp["error"]), file=sys.stderr)
     sys.exit(1)
 if "result" not in resp:
     print("eth_call_raw: JSON-RPC response missing result", file=sys.stderr)
