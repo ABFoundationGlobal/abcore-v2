@@ -19,9 +19,11 @@
 #   9. Stop and clean up
 #
 # Environment:
-#   PARLIA_GENESIS_BLOCK  block at which the fork fires (default: 20)
-#   PORT_BASE             base port offset; auto-selected if unset
-#   KEEP_RUNNING=1        leave nodes up after PASS (for manual inspection)
+#   PARLIA_GENESIS_BLOCK          block at which the fork fires (default: 20)
+#   PORT_BASE                     base port offset; auto-selected if unset
+#   KEEP_RUNNING=1                leave nodes up after PASS (for manual inspection)
+#   RUN_EPOCH_TEST=1              also run T-2 epoch boundary test (~3 min)
+#   RUN_CLIQUE_EPOCH_FORK_TEST=1  also run Clique-epoch-fork boundary test
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

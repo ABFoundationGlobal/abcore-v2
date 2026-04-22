@@ -14,6 +14,7 @@ Parlia epoch boundary validator set transitions.
 | `96-run-rollback-drill.sh` | T-1.6: coordinated rollback (Parlia→Clique rewind via debug.setHead) |
 | `95-run-epoch-test.sh` | T-2: Parlia epoch boundary; validator set transition at first and second epoch |
 | `93-run-clique-epoch-fork-test.sh` | Clique epoch boundary coincides with fork block (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) |
+| `06-verify-contracts.sh` | T-6: AB-chain system contract parameter and fee-routing assertions (runs on live nodes; called by 05-verify.sh) |
 | `01-setup.sh` | Generate accounts + Clique genesis + init datadirs |
 | `02-start.sh` | Start validators (Clique or DualConsensus via TOML config) |
 | `03-stop.sh` | Gracefully stop all running validators |
@@ -30,6 +31,9 @@ Parlia epoch boundary validator set transitions.
 | T-1.6 | Coordinated rollback drill (Parlia→Clique) | `96-run-rollback-drill.sh` | ✅ |
 | T-2 | Parlia epoch boundary validator set transition | `95-run-epoch-test.sh` | ✅ |
 | — | Fork block coincides with Clique epoch boundary | `93-run-clique-epoch-fork-test.sh` | ✅ |
+| T-6 | AB-chain system contract parameter + fee routing | `06-verify-contracts.sh` | ✅ (T-6.a) |
+| T-6.b | Feynman-initialized contract parameters | — | 📋 Planned |
+| T-6.c | `updateParam` governance bounds testing | — | 📋 Planned |
 
 ### T-1 — Baseline fork transition
 
@@ -84,15 +88,82 @@ T-2 uses fixed dev keystores from `core/systemcontracts/parliagenesis/default/ke
 which match the addresses baked into `parliagenesis/default/ValidatorContract`. See
 `core/systemcontracts/parliagenesis/default/README.md` for details.
 
+### T-6 — AB-chain system contract parameter and logic verification after fork
+
+`06-verify-contracts.sh` is the first implementation of T-6.
+It verifies ABcore-specific values compiled into the `defaultNet` bytecodes and
+confirms that the fee-routing logic routes 15 % of transaction fees to
+`FOUNDATION_ADDR` with zero burn and zero system-reward distribution.
+
+#### T-6.a — implemented (`06-verify-contracts.sh`)
+
+Assertions via `eth_call` on `BSCValidatorSet` (0x1000) plus balance checks:
+
+| Contract | What is checked | Expected |
+|---|---|---|
+| BSCValidatorSet | `FOUNDATION_ADDR()` constant | `0x000000000000000000000000000000000000f000` |
+| BSCValidatorSet | `INIT_NUM_OF_CABINETS()` constant | `15` (BSC default is 21) |
+| BSCValidatorSet | `FOUNDATION_RATIO()` constant | `1500` (15 %) |
+| BSCValidatorSet | `burnRatio()` | `0` |
+| BSCValidatorSet | `systemRewardBaseRatio()` | `0` |
+| GovToken (0x2005) | bytecode deployed | code length > 10 bytes |
+| StakeHub (0x2002) | bytecode deployed | code length > 10 bytes |
+| BSCGovernor (0x2004) | bytecode deployed | code length > 10 bytes |
+| FOUNDATION_ADDR | balance after test tx | increases (15 % fee routed) |
+| SystemReward (0x1002) | balance after test tx | unchanged (ratio == 0) |
+
+#### T-6.b — planned: Feynman-initialized contract parameters
+
+The following parameters are storage variables written by `initialize()` inside
+`initializeFeynmanContract()`, which only fires when the Feynman fork is active.
+The default transition-test genesis (`01-setup.sh`) does not set `feynmanTime` or
+`londonBlock`, so `initializeFeynmanContract()` is never called and these values
+remain zero.
+
+**Implementation steps:**
+1. Add `"londonBlock": 0` and `"feynmanTime": <N>` to the genesis config written
+   by `01-setup.sh`, where N is a Unix timestamp guaranteed to be reached at or
+   after `ParliaGenesisBlock` (e.g. `PARLIA_GENESIS_BLOCK` seconds after the
+   genesis timestamp).
+2. Verify that `TryUpdateBuildInSystemContract` does not overwrite the AB-chain
+   bytecodes via `feynmanUpgrade[defaultNet]` (confirm that entry is nil or a
+   no-op for the default network).
+3. Add assertions in the script for:
+
+| Contract | Method | Expected value |
+|---|---|---|
+| GovToken (0x2005) | `name()` | `"AB Governance Token"` |
+| GovToken (0x2005) | `symbol()` | `"govAB"` |
+| StakeHub (0x2002) | `minSelfDelegationBNB()` | `2_000_000_000 ether` |
+| StakeHub (0x2002) | `minDelegationBNBChange()` | `100_000_000 ether` |
+| BSCGovernor (0x2004) | `proposalThreshold()` | `2_000_000_000 ether` |
+| BSCGovernor (0x2004) | `quorumNumerator()` | `50` |
+
+#### T-6.c — planned: `updateParam` governance bounds testing
+
+`updateParam` calls on StakeHub and BSCGovernor must be submitted through the
+GovHub system-call path (caller must be `GovHub`), which requires a governance
+test harness not yet available in this suite.
+
+**Implementation steps:**
+1. Build a helper that crafts and submits `updateParam` as a system transaction
+   (from `SystemAddress` to `GovHub`, which forwards to the target contract).
+2. For StakeHub: submit at `min_self_delegation_max = 10_000_000_000 ether`
+   (accept) and at `10_000_000_000 ether + 1` (expect revert).
+3. For BSCGovernor: submit at `proposal_threshold_max = 10_000_000_000 ether`
+   (accept) and beyond (expect revert).
+
 ## Remaining gaps
 
 | Gap | Status |
 |---|---|
 | Parlia epoch boundary | Covered by T-2 (`95-run-epoch-test.sh`) |
 | Fork block coincides with Clique epoch boundary | Covered by `93-run-clique-epoch-fork-test.sh` |
+| AB-chain system contract constants + fee routing (T-6.a) | Covered by `06-verify-contracts.sh` |
+| Feynman-initialized contract parameters (T-6.b) | Planned — see T-6.b section above |
+| `updateParam` governance bounds testing (T-6.c) | Planned — see T-6.c section above |
 | Transaction submission across fork boundary | Planned (T-3, `94-run-tx-test.sh`) |
 | Single-node rolling restart while chain is in Parlia | Planned |
-| AB-chain system contract parameter verification after fork | Planned |
 | StakeHub validator registration (production mainnet, Luban+ path) | E-2/S-1 cloud testnet scope |
 
 ## Running
@@ -138,4 +209,8 @@ KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Leave the rolled-back Clique network running after the drill
 KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+
+# T-6 assertions run automatically as part of T-1 and T-2; no extra flag needed.
+# To run T-6 assertions standalone on already-live nodes:
+GETH=./build/bin/geth bash script/transition-test/06-verify-contracts.sh
 ```

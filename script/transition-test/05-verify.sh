@@ -182,3 +182,6 @@ if [[ "$FAIL" -gt 0 ]]; then
   exit 1
 fi
 echo "PASSED"
+
+# ── T-6: system contract parameter and fee-routing assertions ────────────────
+"${SCRIPT_DIR}/06-verify-contracts.sh"
