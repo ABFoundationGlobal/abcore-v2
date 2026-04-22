@@ -78,11 +78,15 @@ decode_uint256() {
   local raw="${1:-}"
   python3 -c "
 import sys
-h = '${raw}'.strip().lstrip('0x')
-if not h:
+raw = '${raw}'.strip()
+if not raw:
     print('decode_uint256: empty hex input', file=sys.stderr)
     sys.exit(1)
-print(int(h, 16))
+try:
+    print(int(raw, 16))
+except ValueError:
+    print('decode_uint256: invalid hex: ' + raw, file=sys.stderr)
+    sys.exit(1)
 "
 }
 
