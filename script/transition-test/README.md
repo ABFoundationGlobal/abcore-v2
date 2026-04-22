@@ -61,9 +61,38 @@ Parlia epoch boundary validator set transitions.
 - Validators restart without the Parlia override and resume sealing pure Clique blocks from block `N`
 - The rollback verifies that block `N-1` is preserved, block `N` is replaced, the Clique validator set is restored, and the `ValidatorSet` system contract is absent on the rolled-back chain
 
+### T-2 — Parlia epoch boundary validator set transition
+
+- Chain crosses first Parlia epoch boundary (`block % epochLength == 0`)
+- `prepareValidators()` calls `BSCValidatorSet.getValidators()` at epoch boundary
+- Validator set from contract storage encodes correctly into `header.Extra`
+- Snapshot switches signer set at `epoch+1`; chain continues without `errUnauthorizedValidator`
+- Chain crosses second epoch boundary; all 3 nodes remain in consensus
+- `parlia_getValidators` at epoch boundary returns the correct 3 validators
+
+### Address consistency requirement (T-2)
+
+At `ParliaGenesisBlock`, `initContract()` calls `BSCValidatorSet.init()` which reads
+`INIT_VALIDATORSET_BYTES` from the compiled bytecode and writes those addresses into contract
+storage. At each epoch boundary, `getValidators()` returns those addresses. If they differ from
+the actual sealing node addresses, the chain halts at `epoch+1`.
+
+T-2 uses fixed dev keystores from `core/systemcontracts/parliagenesis/default/keystores/`,
+which match the addresses baked into `parliagenesis/default/ValidatorContract`. See
+`core/systemcontracts/parliagenesis/default/README.md` for details.
+
+### Clique epoch boundary coincides with fork block
+
+- `CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK == N`: fork fires exactly on a Clique epoch checkpoint
+- The epoch block carries a full signer list in `extraData`; Parlia snapshot seeding must treat this block as both an epoch checkpoint and the fork origin
+- Covers the code path excluded by T-2's `PARLIA_GENESIS_BLOCK >= EPOCH_LENGTH` guard
+- 7 assertions: block existence, extraData length, non-zero miner, `parlia_getValidators` count, block `PGB+1` existence (chain did not stall at epoch/fork boundary), first Parlia epoch boundary, 3-node hash agreement
+
 ### T-3 — User transaction crossing the fork boundary
 
-- All validators stop at `PRE_STOP` (5 blocks before the fork); chain is frozen
+- All validators stop at `PRE_STOP` (`PARLIA_GENESIS_BLOCK − 5`); the effective fork
+  block is set to `frozen_head + 1` at runtime, so the chain is stalled exactly one
+  block before the fork regardless of the input `PARLIA_GENESIS_BLOCK`
 - Val-1 restarts in sync-only mode (no `--mine`, no live peers) so no block can
   be produced
 - A user transaction is submitted via val-1's IPC endpoint; it enters the txpool
@@ -145,33 +174,6 @@ crossed `ParliaGenesisBlock`.
 - **`updateParam` bounds in BSCGovernor**: call with `proposalThreshold` at
   `10_000_000_000 ether` → accepted; one wei above → rejected
 
-### T-2 — Parlia epoch boundary validator set transition
-
-- Chain crosses first Parlia epoch boundary (`block % epochLength == 0`)
-- `prepareValidators()` calls `BSCValidatorSet.getValidators()` at epoch boundary
-- Validator set from contract storage encodes correctly into `header.Extra`
-- Snapshot switches signer set at `epoch+1`; chain continues without `errUnauthorizedValidator`
-- Chain crosses second epoch boundary; all 3 nodes remain in consensus
-- `parlia_getValidators` at epoch boundary returns the correct 3 validators
-
-### Clique epoch boundary coincides with fork block
-
-- `CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK == N`: fork fires exactly on a Clique epoch checkpoint
-- The epoch block carries a full signer list in `extraData`; Parlia snapshot seeding must treat this block as both an epoch checkpoint and the fork origin
-- Covers the code path excluded by T-2's `PARLIA_GENESIS_BLOCK >= EPOCH_LENGTH` guard
-- 7 assertions: block existence, extraData length, non-zero miner, `parlia_getValidators` count, block `PGB+1` existence (chain did not stall at epoch/fork boundary), first Parlia epoch boundary, 3-node hash agreement
-
-### Address consistency requirement (T-2)
-
-At `ParliaGenesisBlock`, `initContract()` calls `BSCValidatorSet.init()` which reads
-`INIT_VALIDATORSET_BYTES` from the compiled bytecode and writes those addresses into contract
-storage. At each epoch boundary, `getValidators()` returns those addresses. If they differ from
-the actual sealing node addresses, the chain halts at `epoch+1`.
-
-T-2 uses fixed dev keystores from `core/systemcontracts/parliagenesis/default/keystores/`,
-which match the addresses baked into `parliagenesis/default/ValidatorContract`. See
-`core/systemcontracts/parliagenesis/default/README.md` for details.
-
 ## Remaining gaps
 
 | Gap | Status |
@@ -230,8 +232,8 @@ KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback
 # T-3: user transaction crossing the fork boundary
 GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
 
-# T-3: run Clique chain to block ~30 before stopping (pre-stop target).
-# The script always sets the effective fork block to frozen_head+1 at runtime,
-# so PARLIA_GENESIS_BLOCK here controls how far Clique runs, not the exact fork height.
+# T-3: run Clique chain to block ~25 before stopping (PRE_STOP = PARLIA_GENESIS_BLOCK − 5 = 25).
+# The effective fork block is frozen_head+1 ≈ 26; PARLIA_GENESIS_BLOCK controls the
+# pre-stop target, not the exact fork height.
 GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 ```
