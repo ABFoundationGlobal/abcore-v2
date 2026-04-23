@@ -18,7 +18,8 @@
 #
 # Note: FOUNDATION_ADDR is declared as address public constant in System.sol, inherited by
 # BSCValidatorSet.  The inherited getter is not reachable through BSCValidatorSet's ABI dispatch
-# in the compiled bytecode; fee routing to 0xf000 is verified via balance check instead.
+# in the compiled bytecode; fee routing to EXPECTED_FOUNDATION (params.env) is verified via
+# balance check instead.
 #
 # T-6.b and T-6.c (Feynman-initialized parameters, updateParam bounds) are
 # tracked as planned work in script/transition-test/README.md.
@@ -99,6 +100,26 @@ selector() {
   attach_exec "$GETH" "$IPC1" "web3.sha3('${1}').substring(2, 10)" 2>/dev/null || echo ""
 }
 
+# assert_uint256 <label> <contract> <selector> <expected>
+# Calls eth_call_raw+decode_uint256 and records ok/fail without aborting on RPC errors.
+assert_uint256() {
+  local label="$1" contract="$2" sel="$3" expected="$4"
+  local raw val
+  if raw=$(eth_call_raw "$contract" "0x${sel}" 2>/dev/null); then
+    if val=$(decode_uint256 "$raw" 2>/dev/null); then
+      if [[ "$val" -eq "$expected" ]]; then
+        ok "${label} == ${expected}"
+      else
+        fail "${label}: expected ${expected}, got ${val}"
+      fi
+    else
+      fail "${label}: failed to decode eth_call result: ${raw}"
+    fi
+  else
+    fail "${label}: eth_call RPC error (contract unreachable or call reverted)"
+  fi
+}
+
 log "T-6 system contract parameter assertions"
 log "  Computing function selectors..."
 SEL_INIT_CABINETS=$(selector "INIT_NUM_OF_CABINETS()")
@@ -107,50 +128,12 @@ SEL_BURN_RATIO=$(selector "burnRatio()")
 SEL_SYS_REWARD_RATIO=$(selector "systemRewardBaseRatio()")
 SEL_ANTI_MEV_RATIO=$(selector "systemRewardAntiMEVRatio()")
 
-# ── 1. INIT_NUM_OF_CABINETS constant ─────────────────────────────────────────
-result=$(eth_call_raw "$CONTRACT_VALIDATORSET" "0x${SEL_INIT_CABINETS}")
-val=$(decode_uint256 "$result")
-if [[ "$val" -eq "$EXPECTED_INIT_NUM_OF_CABINETS" ]]; then
-  ok "INIT_NUM_OF_CABINETS == ${EXPECTED_INIT_NUM_OF_CABINETS}"
-else
-  fail "INIT_NUM_OF_CABINETS: expected ${EXPECTED_INIT_NUM_OF_CABINETS}, got ${val}"
-fi
-
-# ── 2. FOUNDATION_RATIO constant (1500 = 15 %) ───────────────────────────────
-result=$(eth_call_raw "$CONTRACT_VALIDATORSET" "0x${SEL_FOUNDATION_RATIO}")
-val=$(decode_uint256 "$result")
-if [[ "$val" -eq 1500 ]]; then
-  ok "FOUNDATION_RATIO == 1500 (15 %)"
-else
-  fail "FOUNDATION_RATIO: expected 1500, got ${val}"
-fi
-
-# ── 3. burnRatio() ───────────────────────────────────────────────────────────
-result=$(eth_call_raw "$CONTRACT_VALIDATORSET" "0x${SEL_BURN_RATIO}")
-val=$(decode_uint256 "$result")
-if [[ "$val" -eq "$EXPECTED_BURN_RATIO" ]]; then
-  ok "burnRatio == ${EXPECTED_BURN_RATIO}"
-else
-  fail "burnRatio: expected ${EXPECTED_BURN_RATIO}, got ${val}"
-fi
-
-# ── 4. systemRewardBaseRatio() ───────────────────────────────────────────────
-result=$(eth_call_raw "$CONTRACT_VALIDATORSET" "0x${SEL_SYS_REWARD_RATIO}")
-val=$(decode_uint256 "$result")
-if [[ "$val" -eq "$EXPECTED_SYS_REWARD_RATIO" ]]; then
-  ok "systemRewardBaseRatio == ${EXPECTED_SYS_REWARD_RATIO}"
-else
-  fail "systemRewardBaseRatio: expected ${EXPECTED_SYS_REWARD_RATIO}, got ${val}"
-fi
-
-# ── 5. systemRewardAntiMEVRatio() == 0 ───────────────────────────────────────
-result=$(eth_call_raw "$CONTRACT_VALIDATORSET" "0x${SEL_ANTI_MEV_RATIO}")
-val=$(decode_uint256 "$result")
-if [[ "$val" -eq 0 ]]; then
-  ok "systemRewardAntiMEVRatio == 0 (unset storage default)"
-else
-  fail "systemRewardAntiMEVRatio: expected 0, got ${val}"
-fi
+# ── 1–5. BSCValidatorSet parameter assertions ─────────────────────────────────
+assert_uint256 "INIT_NUM_OF_CABINETS" "$CONTRACT_VALIDATORSET" "$SEL_INIT_CABINETS"  "$EXPECTED_INIT_NUM_OF_CABINETS"
+assert_uint256 "FOUNDATION_RATIO"     "$CONTRACT_VALIDATORSET" "$SEL_FOUNDATION_RATIO" 1500
+assert_uint256 "burnRatio"            "$CONTRACT_VALIDATORSET" "$SEL_BURN_RATIO"       "$EXPECTED_BURN_RATIO"
+assert_uint256 "systemRewardBaseRatio" "$CONTRACT_VALIDATORSET" "$SEL_SYS_REWARD_RATIO" "$EXPECTED_SYS_REWARD_RATIO"
+assert_uint256 "systemRewardAntiMEVRatio" "$CONTRACT_VALIDATORSET" "$SEL_ANTI_MEV_RATIO" 0
 
 # ── 6–8. Bytecode deployment ──────────────────────────────────────────────────
 check_code_deployed() {
