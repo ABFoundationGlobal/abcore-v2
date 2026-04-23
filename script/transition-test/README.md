@@ -13,6 +13,7 @@ Parlia epoch boundary validator set transitions.
 | `97-run-late-restart.sh` | T-1.5: late-restart (chain already past fork block when node starts) |
 | `96-run-rollback-drill.sh` | T-1.6: coordinated rollback (Parlia→Clique rewind via debug.setHead) |
 | `95-run-epoch-test.sh` | T-2: Parlia epoch boundary; validator set transition at first and second epoch |
+| `94-run-tx-test.sh` | T-3: user transaction submitted pre-fork, mined in first post-fork Parlia blocks |
 | `93-run-clique-epoch-fork-test.sh` | Clique epoch boundary coincides with fork block (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) |
 | `06-verify-contracts.sh` | T-6: AB-chain system contract parameter and fee-routing assertions (runs on live nodes; called by 05-verify.sh) |
 | `01-setup.sh` | Generate accounts + Clique genesis + init datadirs |
@@ -30,7 +31,9 @@ Parlia epoch boundary validator set transitions.
 | T-1.5 | Late restart (chain already past fork) | `97-run-late-restart.sh` | ✅ |
 | T-1.6 | Coordinated rollback drill (Parlia→Clique) | `96-run-rollback-drill.sh` | ✅ |
 | T-2 | Parlia epoch boundary validator set transition | `95-run-epoch-test.sh` | ✅ |
-| — | Fork block coincides with Clique epoch boundary | `93-run-clique-epoch-fork-test.sh` | ✅ |
+| T-3 | User transaction crossing the fork boundary | `94-run-tx-test.sh` | ✅ |
+| T-4 | Fork block coincides with Clique epoch boundary | `93-run-clique-epoch-fork-test.sh` | ✅ |
+| T-5 | Single-node rolling restart while chain is in Parlia | planned | 🔲 |
 | T-6 | AB-chain system contract parameter + fee routing | `06-verify-contracts.sh` | ✅ (T-6.a) |
 | T-6.b | Feynman-initialized contract parameters | — | 📋 Planned |
 | T-6.c | `updateParam` governance bounds testing | — | 📋 Planned |
@@ -70,13 +73,6 @@ Parlia epoch boundary validator set transitions.
 - Chain crosses second epoch boundary; all 3 nodes remain in consensus
 - `parlia_getValidators` at epoch boundary returns the correct 3 validators
 
-### Clique epoch boundary coincides with fork block
-
-- `CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK == N`: fork fires exactly on a Clique epoch checkpoint
-- The epoch block carries a full signer list in `extraData`; Parlia snapshot seeding must treat this block as both an epoch checkpoint and the fork origin
-- Covers the code path excluded by T-2's `PARLIA_GENESIS_BLOCK >= EPOCH_LENGTH` guard
-- 7 assertions: block existence, extraData length, non-zero miner, `parlia_getValidators` count, block `PGB+1` existence (chain did not stall at epoch/fork boundary), first Parlia epoch boundary, 3-node hash agreement
-
 ### Address consistency requirement (T-2)
 
 At `ParliaGenesisBlock`, `initContract()` calls `BSCValidatorSet.init()` which reads
@@ -87,6 +83,51 @@ the actual sealing node addresses, the chain halts at `epoch+1`.
 T-2 uses fixed dev keystores from `core/systemcontracts/parliagenesis/default/keystores/`,
 which match the addresses baked into `parliagenesis/default/ValidatorContract`. See
 `core/systemcontracts/parliagenesis/default/README.md` for details.
+
+### T-3 — User transaction crossing the fork boundary
+
+- All validators stop at `PRE_STOP` (`PARLIA_GENESIS_BLOCK − 5`); the effective fork
+  block is set to `frozen_head + 1` at runtime, so the chain is stalled exactly one
+  block before the fork regardless of the input `PARLIA_GENESIS_BLOCK`
+- Val-1 restarts in sync-only mode (no `--mine`, no live peers) so no block can
+  be produced
+- A user transaction is submitted via val-1's IPC endpoint; it enters the txpool
+  but cannot be mined while the chain is stalled
+- Val-1 is stopped gracefully (SIGTERM); geth flushes the txpool journal to
+  `<datadir>/geth/transactions.rlp`
+- All 3 validators restart with `OverrideParliaGenesisBlock`; val-1 reloads the
+  journal on startup and re-broadcasts the pending transaction to peers
+- The chain crosses `ParliaGenesisBlock` and enters Parlia mode; the transaction
+  is included in one of the first post-fork Parlia blocks
+- Verifies: `receipt.blockNumber >= ParliaGenesisBlock`, `receipt.status == 0x1`,
+  and the recipient balance increased by the transferred amount
+- Confirms that `IsSystemTransaction()` does not incorrectly filter out a regular
+  user transaction in `FinalizeAndAssemble`
+
+### T-4 — Fork block coincides with Clique epoch boundary
+
+- `CLIQUE_EPOCH` and `PARLIA_GENESIS_BLOCK` are set to the same value (e.g. 20)
+  so the fork fires exactly on a Clique epoch block
+- The epoch block carries a full Clique signer list in `extraData`; the Parlia
+  snapshot seeding path must treat this block as both an epoch checkpoint and
+  the fork origin
+- Verifies: `parlia_getValidators` at the fork/epoch block returns the correct
+  signer set, the chain continues without `errUnauthorizedValidator`, and the
+  validator set encodes correctly into the first post-fork epoch block
+- Covers the code path excluded by T-2's `die` guard
+  (`PARLIA_GENESIS_BLOCK >= EPOCH_LENGTH`)
+
+### T-5 — Single-node rolling restart while chain is in Parlia
+
+- All 3 validators run normally in Parlia mode; chain advances well past the fork
+- Val-2 is stopped while val-1 and val-3 continue sealing; the 2-of-3 quorum is
+  maintained
+- Val-1 and val-3 produce 10 or more Parlia blocks while val-2 is offline
+- Val-2 restarts with the same TOML config; it syncs the missed Parlia blocks
+  from peers and resumes participation
+- Verifies: val-2 catches up to the canonical tip within the timeout, all 3
+  nodes agree on the same hash, and val-2's miner address appears in the sealer
+  rotation within a few blocks of the catch-up
 
 ### T-6 — AB-chain system contract parameter and logic verification after fork
 
@@ -159,12 +200,12 @@ test harness not yet available in this suite.
 | Gap | Status |
 |---|---|
 | Parlia epoch boundary | Covered by T-2 (`95-run-epoch-test.sh`) |
-| Fork block coincides with Clique epoch boundary | Covered by `93-run-clique-epoch-fork-test.sh` |
+| Transaction submission across fork boundary | Covered by T-3 (`94-run-tx-test.sh`) |
+| Fork block coincides with Clique epoch boundary | Covered by T-4 (`93-run-clique-epoch-fork-test.sh`) |
+| Single-node rolling restart in Parlia mode | Planned as T-5 |
 | AB-chain system contract constants + fee routing (T-6.a) | Covered by `06-verify-contracts.sh` |
 | Feynman-initialized contract parameters (T-6.b) | Planned — see T-6.b section above |
 | `updateParam` governance bounds testing (T-6.c) | Planned — see T-6.c section above |
-| Transaction submission across fork boundary | Planned (T-3, `94-run-tx-test.sh`) |
-| Single-node rolling restart while chain is in Parlia | Planned |
 | StakeHub validator registration (production mainnet, Luban+ path) | E-2/S-1 cloud testnet scope |
 
 ## Running
@@ -192,13 +233,13 @@ GETH=./build/bin/geth bash script/transition-test/95-run-epoch-test.sh
 # T-2: custom epoch length
 GETH=./build/bin/geth EPOCH_LENGTH=100 bash script/transition-test/95-run-epoch-test.sh
 
-# Clique-epoch-fork: fork block == Clique epoch boundary (EPOCH_LENGTH=20, PGB=20)
+# T-4 (Clique-epoch-fork): fork block == Clique epoch boundary (EPOCH_LENGTH=20, PGB=20)
 GETH=./build/bin/geth bash script/transition-test/93-run-clique-epoch-fork-test.sh
 
-# Clique-epoch-fork: custom epoch length
+# T-4: custom epoch length
 GETH=./build/bin/geth EPOCH_LENGTH=30 bash script/transition-test/93-run-clique-epoch-fork-test.sh
 
-# T-1 + T-2 combined (adds ~3 minutes)
+# T-1 + T-3 (always included) + T-2 (opt-in, adds ~3 minutes)
 RUN_EPOCH_TEST=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # T-1 + Clique-epoch-fork combined
@@ -210,6 +251,14 @@ KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
 
 # Leave the rolled-back Clique network running after the drill
 KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+
+# T-3: user transaction crossing the fork boundary
+GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
+
+# T-3: run Clique chain to block ~25 before stopping (PRE_STOP = PARLIA_GENESIS_BLOCK − 5 = 25).
+# The effective fork block is frozen_head+1 ≈ 26; PARLIA_GENESIS_BLOCK controls the
+# pre-stop target, not the exact fork height.
+GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 
 # T-6 assertions run automatically as part of T-1 and T-2; no extra flag needed.
 # To run T-6 assertions standalone on already-live nodes:
