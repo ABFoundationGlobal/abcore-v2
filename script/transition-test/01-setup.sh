@@ -31,7 +31,27 @@ create_account() {
   log "validator-${n}: ${addr}"
 }
 
-for n in 1 2 3; do create_account "$n"; done
+# use_dev_keystore copies the fixed dev keystore for validator N so its address
+# matches INIT_VALIDATORSET_BYTES baked into the defaultNet bytecode.  Without
+# this, the first Parlia epoch boundary triggers getValidators() which returns
+# the dev-keystore addresses; if the actual validators differ, the chain stalls.
+use_dev_keystore() {
+  local n="$1"
+  local dir src
+  dir=$(val_dir "$n")
+  src="${REPO_ROOT}/core/systemcontracts/parliagenesis/default/keystores/validator-${n}"
+  [[ -d "$src" ]] || die "dev keystore for validator-${n} not found at ${src}"
+  mkdir -p "${dir}/keystore"
+  local -a keystore_files
+  shopt -s nullglob; keystore_files=("${src}"/UTC--*); shopt -u nullglob
+  [[ ${#keystore_files[@]} -gt 0 ]] || die "dev keystore for validator-${n} has no UTC--* files at ${src}"
+  cp "${keystore_files[@]}" "${dir}/keystore/"
+  cp "${src}/address.txt" "${dir}/address.txt"
+  cp "${src}/password.txt" "$(val_pw "$n")" 2>/dev/null || printf "password\n" > "$(val_pw "$n")"
+  log "validator-${n}: $(cat "${dir}/address.txt")"
+}
+
+for n in 1 2 3; do use_dev_keystore "$n"; done
 
 # ── Write genesis.json ───────────────────────────────────────────────────────
 export SCRIPT_DIR DATADIR_ROOT CHAIN_ID CLIQUE_PERIOD CLIQUE_EPOCH GENESIS_JSON

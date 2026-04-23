@@ -73,8 +73,6 @@ log "  PRE_STOP=${PRE_STOP}, POST_FORK=${POST_FORK}"
 log "  EPOCH_BOUNDARY=${EPOCH_BOUNDARY}, POST_EPOCH=${POST_EPOCH}"
 log "  SECOND_EPOCH_BOUNDARY=${SECOND_EPOCH_BOUNDARY}, POST_SECOND_EPOCH=${POST_SECOND_EPOCH}"
 
-DEV_KEYSTORES="${REPO_ROOT}/core/systemcontracts/parliagenesis/default/keystores"
-
 cleanup_on_exit() {
   local code=$?
   if [[ "$code" -ne 0 ]]; then
@@ -97,29 +95,8 @@ run() {
 }
 
 # ── Phase 1: setup ─────────────────────────────────────────────────────────────
-# Copy fixed dev keystores so 01-setup.sh reuses them (skips geth account new).
-# These addresses match INIT_VALIDATORSET_BYTES in default/ValidatorContract.
-log "Copying fixed dev keystores from ${DEV_KEYSTORES}"
-for n in 1 2 3; do
-  d=$(val_dir "$n")
-  mkdir -p "$d"
-  if [[ -d "${DEV_KEYSTORES}/validator-${n}" ]]; then
-    # Copy the entire keystore dir; address.txt presence makes 01-setup.sh skip account creation
-    src="${DEV_KEYSTORES}/validator-${n}"
-    # Copy keystore files (the actual key JSON)
-    if ls "${src}"/UTC--* >/dev/null 2>&1; then
-      mkdir -p "${d}/keystore"
-      cp "${src}"/UTC--* "${d}/keystore/"
-    fi
-    cp "${src}/address.txt" "${d}/address.txt"
-    cp "${src}/password.txt" "${d}/password.txt" 2>/dev/null || printf 'password\n' > "${d}/password.txt"
-    log "validator-${n}: $(cat "${d}/address.txt")"
-  else
-    die "dev keystore for validator-${n} not found at ${DEV_KEYSTORES}/validator-${n}"
-  fi
-done
-
-# partial_clean wipes chain data but preserves keystores we just copied
+# 01-setup.sh uses use_dev_keystore() to install the fixed keystores whose
+# addresses match INIT_VALIDATORSET_BYTES in the defaultNet bytecode.
 partial_clean
 run "${SCRIPT_DIR}/01-setup.sh"
 
