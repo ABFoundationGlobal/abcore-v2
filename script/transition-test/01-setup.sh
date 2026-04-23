@@ -42,7 +42,10 @@ use_dev_keystore() {
   src="${REPO_ROOT}/core/systemcontracts/parliagenesis/default/keystores/validator-${n}"
   [[ -d "$src" ]] || die "dev keystore for validator-${n} not found at ${src}"
   mkdir -p "${dir}/keystore"
-  cp "${src}"/UTC--* "${dir}/keystore/" 2>/dev/null || true
+  local -a keystore_files
+  shopt -s nullglob; keystore_files=("${src}"/UTC--*); shopt -u nullglob
+  [[ ${#keystore_files[@]} -gt 0 ]] || die "dev keystore for validator-${n} has no UTC--* files at ${src}"
+  cp "${keystore_files[@]}" "${dir}/keystore/"
   cp "${src}/address.txt" "${dir}/address.txt"
   cp "${src}/password.txt" "$(val_pw "$n")" 2>/dev/null || printf "password\n" > "$(val_pw "$n")"
   log "validator-${n}: $(cat "${dir}/address.txt")"
