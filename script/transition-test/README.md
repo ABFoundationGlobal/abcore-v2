@@ -15,7 +15,7 @@ Parlia epoch boundary validator set transitions.
 | T-2 | `95-run-epoch-test.sh`             | Parlia epoch boundary; validator set transition at first and second epoch | ✅ |
 | T-3 | `94-run-tx-test.sh`                | User transaction submitted pre-fork, mined in first post-fork Parlia blocks | ✅ |
 | T-4 | `93-run-clique-epoch-fork-test.sh` | Fork block coincides with Clique epoch boundary (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) | ✅ |
-| T-5 | planned                            | Single-node rolling restart while chain is in Parlia | 🔲 |
+| T-5 | `92-run-rolling-restart-test.sh`   | Single-node rolling restart while chain is in Parlia; 2-of-3 quorum maintained during offline window (also runs as part of `99-run-all.sh`) | ✅ |
 | T-6 | planned                            | Transaction-based logic verification of AB-chain system contract modifications: `FOUNDATION_ADDR` fee routing ratio, validator whitelist election priority (`StakeHub`), and governance `updateParam` boundary enforcement — requires sending transactions via the GovHub system-call path | 🔲 |
 
 ### Helper scripts
@@ -110,15 +110,14 @@ which match the addresses baked into `parliagenesis/default/ValidatorContract`. 
 
 ### T-5 — Single-node rolling restart while chain is in Parlia
 
-- All 3 validators run normally in Parlia mode; chain advances well past the fork
-- Val-2 is stopped while val-1 and val-3 continue sealing; the 2-of-3 quorum is
-  maintained
-- Val-1 and val-3 produce 10 or more Parlia blocks while val-2 is offline
-- Val-2 restarts with the same TOML config; it syncs the missed Parlia blocks
-  from peers and resumes participation
-- Verifies: val-2 catches up to the canonical tip within the timeout, all 3
-  nodes agree on the same hash, and val-2's miner address appears in the sealer
-  rotation within a few blocks of the catch-up
+- All 3 validators cross the fork and advance to `ParliaGenesisBlock + 20` in Parlia mode
+- Val-2 is stopped; val-1 and val-3 continue sealing with the 2-of-3 quorum intact
+- Val-1 and val-3 produce `OFFLINE_BLOCKS` (default 12) more Parlia blocks while val-2 is offline
+- Val-2 restarts with the same TOML config (`OverrideParliaGenesisBlock`) and is re-wired
+  into the peer mesh; it syncs the missed blocks from val-1 and val-3
+- Verifies: all 3 nodes agree on the same hash at the offline target height
+- Verifies: val-2's miner address (`eth.getBlock(n).miner`) appears in the sealer rotation
+  within 20 blocks of the catch-up
 
 ### T-6 — AB-chain system contract on-chain behavior (planned)
 
@@ -155,7 +154,7 @@ focus areas, all requiring the GovHub system-call path (sender `SystemAddress` �
 | Parlia epoch boundary | Covered by T-2 (`95-run-epoch-test.sh`) |
 | Transaction submission across fork boundary | Covered by T-3 (`94-run-tx-test.sh`) |
 | Fork block coincides with Clique epoch boundary | Covered by T-4 (`93-run-clique-epoch-fork-test.sh`) |
-| Single-node rolling restart in Parlia mode | Planned as T-5 |
+| Single-node rolling restart in Parlia mode | Covered by T-5 (`92-run-rolling-restart-test.sh`) |
 | AB-chain system contract on-chain behavior (T-6) | Planned — see T-6 section above |
 | StakeHub validator registration (production mainnet, Luban+ path) | E-2/S-1 cloud testnet scope |
 
@@ -211,7 +210,10 @@ GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
 # pre-stop target, not the exact fork height.
 GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 
-# T-6 assertions run automatically as part of T-1 and T-2; no extra flag needed.
-# To run T-6 assertions standalone on already-live nodes:
+# T-5: single-node rolling restart in Parlia mode
+GETH=./build/bin/geth bash script/transition-test/92-run-rolling-restart-test.sh
+
+# 06-verify-contracts.sh: static contract data checks (called automatically by 05-verify.sh)
+# To run standalone on already-live nodes:
 GETH=./build/bin/geth bash script/transition-test/06-verify-contracts.sh
 ```
