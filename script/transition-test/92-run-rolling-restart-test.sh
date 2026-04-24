@@ -54,6 +54,9 @@ if [[ "${_DATADIR_ROOT_EXPLICIT:-}" != "set" ]]; then
 fi
 
 OFFLINE_BLOCKS=${OFFLINE_BLOCKS:-12}
+if [[ "$OFFLINE_BLOCKS" -lt 10 ]]; then
+  die "OFFLINE_BLOCKS=${OFFLINE_BLOCKS} is too small; must be >= 10 to meaningfully test validator rejoin"
+fi
 TOML_CONFIG="${DATADIR_ROOT}/override.toml"
 
 # Key block heights
@@ -92,6 +95,9 @@ fail() { die "FAIL: $*"; }
 
 # ── Phase 1: setup ────────────────────────────────────────────────────────────
 run "${SCRIPT_DIR}/04-clean.sh"
+# 04-clean.sh calls 03-stop.sh which removes the port sentinel; re-acquire it
+# immediately so parallel runs cannot steal this PORT_BASE during setup.
+mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 run "${SCRIPT_DIR}/01-setup.sh"
 
 # ── Phase 2: start Clique network ────────────────────────────────────────────
