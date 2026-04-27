@@ -247,9 +247,12 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 ### Upgrade 1：v0.2.0 — 共识切换（Clique → Parlia）
 
+> **⚠️ 块高为演练示例值，不是预设的真实值。** N、M 及所有后续块高/时间戳均须在执行前根据实际环境重新设定：DevNet 可选较小值（如 N=500）缩短等待；Testnet/Mainnet 的具体值在 DevNet 演练通过后才确定。
+
 **params/config.go 修改：**
 ```go
-// N = 30001（第一个 Clique epoch 结束后的首块，避免 epoch boundary 冲突）
+// N = 30001（示例值：第一个 Clique epoch 结束后的首块，避免 epoch boundary 冲突）
+// 实际值须在执行前根据当前链高度重新设定
 ABCoreMainChainConfig.ParliaGenesisBlock = big.NewInt(30001)
 ABCoreTestChainConfig.ParliaGenesisBlock = big.NewInt(N_testnet)
 ```
@@ -336,8 +339,10 @@ eth.getBlock(0).hash
 
 ### Upgrade 2：v0.3.0 — London + 13 BSC block forks
 
-**params/config.go 修改（建议 M = 60001；M 本身不是 epoch boundary，Luban extraData 变更在 M 之后的第一个 epoch block `ceil(M/200)*200 = 60200` 生效）：**
+**params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M = N+30000 以满足 Upgrade 1 的观察窗口；M 本身不是 epoch boundary，Luban extraData 变更在 M 之后的第一个 epoch block `ceil(M/200)*200` 生效）：**
 ```go
+// M = 60001（示例值，= N(30001) + 30000，满足 Upgrade 1 ≥ 30000 块观察窗口要求）
+// 实际值须在执行前根据当前链高度重新设定
 LondonBlock:     big.NewInt(60001),
 RamanujanBlock:  big.NewInt(60001),
 NielsBlock:      big.NewInt(60001),
@@ -354,7 +359,7 @@ HertzBlock:      big.NewInt(60001),
 HertzfixBlock:   big.NewInt(60001),
 ```
 
-> **关于 M 与 epoch boundary 的关系**：Luban extraData 格式变更在 epoch block 生效（epoch block 为 200 的整数倍块）。M=60001 本身不是 epoch block（60001 mod 200 = 1），但 Luban 会在 M 之后第一个 epoch block（块 60200）生效。如需在激活块即完成 Luban extraData 验证，应将 M 选为真正的 epoch boundary（如 60000 或 60200）。若 M 不是 epoch block，第一个可验证 Luban extraData 的块为 `ceil(M/200)*200`。
+> **关于 M 与 epoch boundary 的关系**：Luban extraData 格式变更在 epoch block 生效（epoch block 为 200 的整数倍块）。若 M 不是 epoch block（M mod 200 ≠ 0），第一个可验证 Luban extraData 的块为 `ceil(M/200)*200`。如需在激活块即完成验证，可将 M 直接选为 epoch boundary（即 M mod 200 = 0）。
 
 **激活效果：**
 - EIP-1559 basefee 机制生效
@@ -366,7 +371,7 @@ HertzfixBlock:   big.NewInt(60001),
 # 1. baseFeePerGas 非零
 eth.getBlock(M).baseFeePerGas  # > 0
 
-# 2. Luban extraData 格式（第一个 Luban epoch block：ceil(M/200)*200 = 60200）
+# 2. Luban extraData 格式（第一个 Luban epoch block：ceil(M/200)*200，M 为实际激活块高）
 # 字节长度 = 32B vanity + 5×68B validators + 65B seal = 437B
 # RPC 返回 hex 字符串已含 "0x" 前缀，jq .length = 2 + 437*2 = 876
 EPOCH_BLOCK=$(( (60001 + 199) / 200 * 200 ))
