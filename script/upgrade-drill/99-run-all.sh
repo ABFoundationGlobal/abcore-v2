@@ -12,8 +12,8 @@
 #
 # Environment:
 #   GETH                  geth binary path (auto-built if unset)
-#   PARLIA_GENESIS_BLOCK  U-1 Clique→Parlia fork block height (default: 100)
-#   LONDON_BLOCK          U-2 London fork block height (default: U-1 head + 50)
+#   PARLIA_GENESIS_BLOCK  U-1 Clique→Parlia fork block height (default: 30)
+#   LONDON_BLOCK          U-2 London fork block height (default: U-1 head + 20)
 #   KEEP_RUNNING=1        leave nodes running after PASS (for manual inspection)
 set -euo pipefail
 
@@ -38,9 +38,9 @@ source "${SCRIPT_DIR}/lib.sh"
 export GETH
 export DATADIR_ROOT GENESIS_JSON TOML_CONFIG SNAPSHOT_DIR
 export CHAIN_ID NETWORK_ID CLIQUE_PERIOD CLIQUE_EPOCH
-export PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-100}
+export PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-30}
 # LONDON_BLOCK is intentionally not forced here: 81-run-u2 defaults to
-# current_head + 50, which gives the right value when it reads a live chain.
+# current_head + 20, which gives the right value when it reads a live chain.
 
 log "run-all: GETH=${GETH}"
 log "run-all: DATADIR_ROOT=${DATADIR_ROOT}"

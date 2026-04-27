@@ -71,11 +71,11 @@ trap cleanup_on_exit EXIT
 
 if [[ -z "${LONDON_BLOCK:-}" ]]; then
   _cur=$(head_number "$GETH" "$(val_ipc 1)")
-  LONDON_BLOCK=$(( _cur + 50 ))
-  log "LONDON_BLOCK not set — defaulting to current head + 50 = ${LONDON_BLOCK}"
+  LONDON_BLOCK=$(( _cur + 20 ))
+  log "LONDON_BLOCK not set — defaulting to current head + 20 = ${LONDON_BLOCK}"
 fi
 
-PREP_STOP=$(( LONDON_BLOCK - 15 ))
+PREP_STOP=$(( LONDON_BLOCK - 5 ))
 [[ "$PREP_STOP" -lt 1 ]] && PREP_STOP=1
 POST_FORK=$(( LONDON_BLOCK + 3 ))
 
