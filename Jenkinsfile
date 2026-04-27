@@ -77,7 +77,8 @@ pipeline {
         stage('准备目录') {
             steps {
                 sh """
-                    mkdir -p ${DATADIR}/keystore
+                    sudo mkdir -p ${DATADIR}/keystore
+                    sudo chown -R \$(id -u):\$(id -g) ${DATADIR}
 
                     if [ "${params.NODE_ROLE}" = "validator" ]; then
                         if [ -z "\$(ls -A ${DATADIR}/keystore 2>/dev/null)" ]; then
