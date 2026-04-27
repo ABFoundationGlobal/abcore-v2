@@ -4,39 +4,30 @@ End-to-end scenarios for the ABCore Clique→Parlia migration, including the
 baseline fork path, late restart handling, coordinated rollback drill, and
 Parlia epoch boundary validator set transitions.
 
-## Scripts
+## Scenario coverage
+
+| ID | Script                             | Description | Status |
+|---|------------------------------------|---|---|
+| T-1 | `99-run-all.sh`                    | All-stop-restart fork transition (3-validator network) | ✅ |
+| T-1 variant | `98-run-vote-change.sh`            | Pre-fork `clique_propose` vote-in of a 4th validator | ✅ |
+| T-1.5 | `97-run-late-restart.sh`           | Late-restart (chain already past fork block when node starts) | ✅ |
+| T-1.6 | `96-run-rollback-drill.sh`         | Coordinated rollback (Parlia→Clique rewind via debug.setHead) | ✅ |
+| T-2 | `95-run-epoch-test.sh`             | Parlia epoch boundary; validator set transition at first and second epoch | ✅ |
+| T-3 | `94-run-tx-test.sh`                | User transaction submitted pre-fork, mined in first post-fork Parlia blocks | ✅ |
+| T-4 | `93-run-clique-epoch-fork-test.sh` | Fork block coincides with Clique epoch boundary (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) | ✅ |
+| T-5 | `92-run-rolling-restart-test.sh`   | Single-node rolling restart while chain is in Parlia; 2-of-3 quorum maintained during offline window (also runs as part of `99-run-all.sh`) | ✅ |
+| T-6 | planned                            | Transaction-based logic verification of AB-chain system contract modifications: `FOUNDATION_ADDR` fee routing ratio, validator whitelist election priority (`StakeHub`), and governance `updateParam` boundary enforcement — requires sending transactions via the GovHub system-call path | 🔲 |
+
+### Helper scripts
 
 | Script | Purpose |
 |---|---|
-| `99-run-all.sh` | T-1: 3-validator network, all-stop-restart fork transition |
-| `98-run-vote-change.sh` | T-1 variant: pre-fork `clique_propose` vote-in of a 4th validator |
-| `97-run-late-restart.sh` | T-1.5: late-restart (chain already past fork block when node starts) |
-| `96-run-rollback-drill.sh` | T-1.6: coordinated rollback (Parlia→Clique rewind via debug.setHead) |
-| `95-run-epoch-test.sh` | T-2: Parlia epoch boundary; validator set transition at first and second epoch |
-| `94-run-tx-test.sh` | T-3: user transaction submitted pre-fork, mined in first post-fork Parlia blocks |
-| `93-run-clique-epoch-fork-test.sh` | Clique epoch boundary coincides with fork block (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) |
-| `06-verify-contracts.sh` | T-6: AB-chain system contract parameter and fee-routing assertions (runs on live nodes; called by 05-verify.sh) |
 | `01-setup.sh` | Generate accounts + Clique genesis + init datadirs |
 | `02-start.sh` | Start validators (Clique or DualConsensus via TOML config) |
 | `03-stop.sh` | Gracefully stop all running validators |
 | `04-clean.sh` | Stop + wipe datadirs |
-| `05-verify.sh` | Post-fork verification checks (called by 99/98) |
-
-## Scenario coverage
-
-| ID | Scenario | Script | Status |
-|---|---|---|---|
-| T-1 | All-stop-restart fork transition | `99-run-all.sh` | ✅ |
-| T-1 variant | Pre-fork clique_propose vote-change | `98-run-vote-change.sh` | ✅ |
-| T-1.5 | Late restart (chain already past fork) | `97-run-late-restart.sh` | ✅ |
-| T-1.6 | Coordinated rollback drill (Parlia→Clique) | `96-run-rollback-drill.sh` | ✅ |
-| T-2 | Parlia epoch boundary validator set transition | `95-run-epoch-test.sh` | ✅ |
-| T-3 | User transaction crossing the fork boundary | `94-run-tx-test.sh` | ✅ |
-| T-4 | Fork block coincides with Clique epoch boundary | `93-run-clique-epoch-fork-test.sh` | ✅ |
-| T-5 | Single-node rolling restart while chain is in Parlia | planned | 🔲 |
-| T-6 | AB-chain system contract parameter + fee routing | `06-verify-contracts.sh` | ✅ (T-6.a) |
-| T-6.b | Feynman-initialized contract parameters | — | 📋 Planned |
-| T-6.c | `updateParam` governance bounds testing | — | 📋 Planned |
+| `05-verify.sh` | Post-fork verification checks (called by `99-run-all.sh` and `98-run-vote-change.sh`) |
+| `06-verify-contracts.sh` | Static data validation for AB-chain system contract modifications: reads constants and storage values via `eth_call` (no transaction sent); called by `05-verify.sh`, can also run standalone on live nodes |
 
 ### T-1 — Baseline fork transition
 
@@ -119,85 +110,42 @@ which match the addresses baked into `parliagenesis/default/ValidatorContract`. 
 
 ### T-5 — Single-node rolling restart while chain is in Parlia
 
-- All 3 validators run normally in Parlia mode; chain advances well past the fork
-- Val-2 is stopped while val-1 and val-3 continue sealing; the 2-of-3 quorum is
-  maintained
-- Val-1 and val-3 produce 10 or more Parlia blocks while val-2 is offline
-- Val-2 restarts with the same TOML config; it syncs the missed Parlia blocks
-  from peers and resumes participation
-- Verifies: val-2 catches up to the canonical tip within the timeout, all 3
-  nodes agree on the same hash, and val-2's miner address appears in the sealer
-  rotation within a few blocks of the catch-up
+- All 3 validators cross the fork and advance to `ParliaGenesisBlock + 20` in Parlia mode
+- Val-2 is stopped; val-1 and val-3 continue sealing with the 2-of-3 quorum intact
+- Val-1 and val-3 produce `OFFLINE_BLOCKS` (default 12) more Parlia blocks while val-2 is offline
+- Val-2 restarts with the same TOML config (`OverrideParliaGenesisBlock`) and is re-wired
+  into the peer mesh; it syncs the missed blocks from val-1 and val-3
+- Verifies: all 3 nodes agree on the same hash at the offline target height
+- Verifies: val-2's miner address (`eth.getBlock(n).miner`) appears in the sealer rotation
+  within 20 blocks of the catch-up
 
-### T-6 — AB-chain system contract parameter and logic verification after fork
+### T-6 — AB-chain system contract on-chain behavior (planned)
 
-`06-verify-contracts.sh` is the first implementation of T-6.
-It verifies ABcore-specific values compiled into the `default/` bytecodes (built with
-`abchain-local` via `make build`) and confirms that fee-routing logic routes 15 % of
-transaction fees to `FOUNDATION_ADDR` with zero burn and zero system-reward distribution.
+Covers AB-chain-specific contract changes (introduced in `abcore-v2-genesis-contract`)
+that can only be exercised via live transaction submission against running nodes. Three
+focus areas, all requiring the GovHub system-call path (sender `SystemAddress` →
+`GovHub` → target contract), which is not yet implemented in this suite.
 
-Expected values are loaded at runtime from `parliagenesis/default/params.env`, which is
-generated by `make build` from `generate.py` `abchain_local` defaults and committed
-alongside the bytecodes.
+**Fee routing to `FOUNDATION_ADDR`** (`BSCValidatorSet` / `System.sol`):
+- `FOUNDATION_RATIO = 1500` (15 %) routes a fixed share of every block's fees to
+  `FOUNDATION_ADDR`; `burnRatio` and `systemRewardBaseRatio` are both 0
+- Submit user transactions and verify `FOUNDATION_ADDR` balance increases by the
+  expected fraction; confirm no tokens reach the burn address or `SystemReward`
 
-#### T-6.a — implemented (`06-verify-contracts.sh`)
+**Validator whitelist election priority** (`StakeHub`):
+- `WHITELIST_VOTING_POWER = type(uint64).max × 1e10` guarantees whitelisted
+  validators always outrank stake-based validators in Parlia election
+- Call `addToValidatorWhitelist` / `removeFromValidatorWhitelist` via GovHub and
+  verify `getValidatorElectionInfo()` returns `WHITELIST_VOTING_POWER` for listed
+  validators; confirm jailed validators get 0 regardless of whitelist membership
+- Toggle `whitelistEnabled` and confirm the election order changes accordingly
 
-Assertions via `eth_call` on `BSCValidatorSet` (0x1000), deployment checks, and post-tx balance verification:
-
-| Contract | What is checked | Expected |
-|---|---|---|
-| BSCValidatorSet | `INIT_NUM_OF_CABINETS()` constant | `9` (`abchain_local` default; loaded from `params.env`) |
-| BSCValidatorSet | `FOUNDATION_RATIO()` constant | `1500` (15 %; Solidity constant) |
-| BSCValidatorSet | `burnRatio()` | `0` (loaded from `params.env`) |
-| BSCValidatorSet | `systemRewardBaseRatio()` | `0` (loaded from `params.env`) |
-| BSCValidatorSet | `systemRewardAntiMEVRatio()` | `0` (unset storage default) |
-| GovToken (0x2005) | bytecode deployed | code length > 10 bytes |
-| StakeHub (0x2002) | bytecode deployed | code length > 10 bytes |
-| BSCGovernor (0x2004) | bytecode deployed | code length > 10 bytes |
-| `FOUNDATION_ADDR` (from `params.env`) | balance after test tx | increases (15 % fee routed) |
-
-Note: `FOUNDATION_ADDR` is `address public constant` in `System.sol` (inherited by BSCValidatorSet); the inherited getter is not reachable through BSCValidatorSet's ABI dispatch table in the compiled bytecode, so fee routing is verified via balance check. The address is `abchain_local`'s `foundation_addr` default (`0x…dEaD`), sourced from `params.env`.
-
-#### T-6.b — planned: Feynman-initialized contract parameters
-
-The following parameters are storage variables written by `initialize()` inside
-`initializeFeynmanContract()`, which only fires when the Feynman fork is active.
-The default transition-test genesis (`01-setup.sh`) does not set `feynmanTime` or
-`londonBlock`, so `initializeFeynmanContract()` is never called and these values
-remain zero.
-
-**Implementation steps:**
-1. Add `"londonBlock": 0` and `"feynmanTime": <N>` to the genesis config written
-   by `01-setup.sh`, where N is a Unix timestamp guaranteed to be reached at or
-   after `ParliaGenesisBlock` (e.g. `PARLIA_GENESIS_BLOCK` seconds after the
-   genesis timestamp).
-2. Verify that `TryUpdateBuildInSystemContract` does not overwrite the AB-chain
-   bytecodes via `feynmanUpgrade[defaultNet]` (confirm that entry is nil or a
-   no-op for the default network).
-3. Add assertions in the script for:
-
-| Contract | Method | Expected value |
-|---|---|---|
-| GovToken (0x2005) | `name()` | `"AB Governance Token"` |
-| GovToken (0x2005) | `symbol()` | `"govAB"` |
-| StakeHub (0x2002) | `minSelfDelegationBNB()` | `2_000_000_000 ether` |
-| StakeHub (0x2002) | `minDelegationBNBChange()` | `100_000_000 ether` |
-| BSCGovernor (0x2004) | `proposalThreshold()` | `2_000_000_000 ether` |
-| BSCGovernor (0x2004) | `quorumNumerator()` | `50` |
-
-#### T-6.c — planned: `updateParam` governance bounds testing
-
-`updateParam` calls on StakeHub and BSCGovernor must be submitted through the
-GovHub system-call path (caller must be `GovHub`), which requires a governance
-test harness not yet available in this suite.
-
-**Implementation steps:**
-1. Build a helper that crafts and submits `updateParam` as a system transaction
-   (from `SystemAddress` to `GovHub`, which forwards to the target contract).
-2. For StakeHub: submit at `min_self_delegation_max = 10_000_000_000 ether`
-   (accept) and at `10_000_000_000 ether + 1` (expect revert).
-3. For BSCGovernor: submit at `proposal_threshold_max = 10_000_000_000 ether`
-   (accept) and beyond (expect revert).
+**Governance `updateParam` boundary enforcement** (`StakeHub`, `BSCGovernor`):
+- AB-chain raises upper bounds for stake and governance thresholds (e.g.
+  `minSelfDelegationBNB` max = `10_000_000_000 AB`,
+  `proposalThreshold` max = `10_000_000_000 govAB`)
+- Submit `updateParam` at the boundary value (expect accept) and one unit beyond
+  (expect revert) for each tunable parameter
 
 ## Remaining gaps
 
@@ -206,10 +154,8 @@ test harness not yet available in this suite.
 | Parlia epoch boundary | Covered by T-2 (`95-run-epoch-test.sh`) |
 | Transaction submission across fork boundary | Covered by T-3 (`94-run-tx-test.sh`) |
 | Fork block coincides with Clique epoch boundary | Covered by T-4 (`93-run-clique-epoch-fork-test.sh`) |
-| Single-node rolling restart in Parlia mode | Planned as T-5 |
-| AB-chain system contract constants + fee routing (T-6.a) | Covered by `06-verify-contracts.sh` |
-| Feynman-initialized contract parameters (T-6.b) | Planned — see T-6.b section above |
-| `updateParam` governance bounds testing (T-6.c) | Planned — see T-6.c section above |
+| Single-node rolling restart in Parlia mode | Covered by T-5 (`92-run-rolling-restart-test.sh`) |
+| AB-chain system contract on-chain behavior (T-6) | Planned — see T-6 section above |
 | StakeHub validator registration (production mainnet, Luban+ path) | E-2/S-1 cloud testnet scope |
 
 ## Running
@@ -264,7 +210,10 @@ GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
 # pre-stop target, not the exact fork height.
 GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
 
-# T-6 assertions run automatically as part of T-1 and T-2; no extra flag needed.
-# To run T-6 assertions standalone on already-live nodes:
+# T-5: single-node rolling restart in Parlia mode
+GETH=./build/bin/geth bash script/transition-test/92-run-rolling-restart-test.sh
+
+# 06-verify-contracts.sh: static contract data checks (called automatically by 05-verify.sh)
+# To run standalone on already-live nodes:
 GETH=./build/bin/geth bash script/transition-test/06-verify-contracts.sh
 ```
