@@ -219,6 +219,15 @@ GETH="$GETH" \
 PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
 "${SCRIPT_DIR}/94-run-tx-test.sh"
 
+# ── T-5: single-node rolling restart in Parlia mode ───────────────────────────
+echo
+log "Running T-5 rolling restart test..."
+PORT_BASE="$PORT_BASE" \
+DATADIR_ROOT="${DATADIR_ROOT}-rolling-restart" \
+GETH="$GETH" \
+PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+"${SCRIPT_DIR}/92-run-rolling-restart-test.sh"
+
 # ── T-2: Parlia epoch boundary (opt-in; ~3 minutes) ───────────────────────────
 if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
   # T-2 uses EPOCH_LENGTH=50 and requires PARLIA_GENESIS_BLOCK < 50.
