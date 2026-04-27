@@ -26,7 +26,7 @@ pipeline {
         TARBALL        = "abcore-v2-${params.TAG}-linux-amd64.tar.gz"
         GITHUB_RELEASE = "https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${params.TAG}"
         DATADIR        = "/data/abcore-v2/${params.NETWORK}"
-        CONTAINER_NAME = "${params.NODE_ROLE == 'validator' ? 'abcore-' + params.NETWORK + '-validator' : 'abcore-' + params.NETWORK}"
+        CONTAINER_NAME = "${params.NODE_ROLE == 'validator' ? 'abcore-' + params.NETWORK + '-validator-jenkins' : 'abcore-' + params.NETWORK + '-jenkins'}"
     }
 
     stages {
@@ -128,10 +128,11 @@ pipeline {
                           --name ${CONTAINER_NAME} \\
                           --restart unless-stopped \\
                           -v ${DATADIR}:/data \\
-                          -p 127.0.0.1:8545:8545 \\
-                          -p 127.0.0.1:8546:8546 \\
-                          -p 0.0.0.0:33333:33333 \\
-                          -p 0.0.0.0:33333:33333/udp \\
+                          -p 127.0.0.1:28545:8545 \\
+                          -p 127.0.0.1:28546:8546 \\
+                          -p 127.0.0.1:26060:6060 \\
+                          -p 0.0.0.0:33335:33333 \\
+                          -p 0.0.0.0:33335:33333/udp \\
                           -e NETWORK=${params.NETWORK} \\
                           ${IMAGE_NAME} \\
                           --port 33333 \\
@@ -140,6 +141,7 @@ pipeline {
                                  --http.api 'txpool,net,web3,eth' \\
                           --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
                                  --ws.api 'txpool,net,web3,eth' \\
+                          --pprof --pprof.addr 0.0.0.0 --pprof.port 6060 \\
                           ${extraArgs}
 
                         echo "容器已启动"
