@@ -125,6 +125,12 @@ genesis = {
         'pascalTime':    9_999_999_999,
         'lorentzTime':   9_999_999_999,
         'maxwellTime':   9_999_999_999,
+        # blobSchedule is required by chainconfig validation whenever cancunTime
+        # or pragueTime is present.  Use the same defaults as BSC mainnet.
+        'blobSchedule': {
+            'cancun': {'target': 3, 'max': 6},
+            'prague': {'target': 6, 'max': 9},
+        },
         # Both clique and parlia are required so HasCliqueAndParlia() = true,
         # which enables DualConsensus when OverrideParliaGenesisBlock is set.
         'clique':  {'period': period, 'epoch': epoch},
