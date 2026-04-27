@@ -10,11 +10,17 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${DATA_DIR:-$SCRIPT_DIR/data}"
 
+# IP that Docker containers use to reach ports bound on the host.
+# On Linux with the default bridge network this is the docker0 gateway (172.17.0.1).
+# Override with DOCKER_HOST_IP if your setup differs.
+DOCKER_HOST_IP="${DOCKER_HOST_IP:-$(docker network inspect bridge \
+    --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || echo 127.0.0.1)}"
+
 # ---------------------------------------------------------------------------
 # Node layout
 #   val-0  val-1  val-2  val-3  val-4  rpc-0
-# RPC ports: val-N → 8545+N (0→8545 .. 4→8549), rpc-0 → 8550
-# P2P ports: val-N → 30300+N,                     rpc-0 → 30305
+# RPC ports: 19545–19550  (chosen to avoid collisions with testnet on 8545/18545/28545)
+# P2P ports: 31300–31305
 # ---------------------------------------------------------------------------
 ALL_NODES=(val-0 val-1 val-2 val-3 val-4 rpc-0)
 VALIDATOR_NODES=(val-0 val-1 val-2 val-3 val-4)
@@ -24,23 +30,23 @@ UPGRADE_ORDER=(val-4 val-0 val-1 val-2 val-3 rpc-0)
 
 node_rpc_port() {
     case "$1" in
-        val-0) echo 8545 ;;
-        val-1) echo 8546 ;;
-        val-2) echo 8547 ;;
-        val-3) echo 8548 ;;
-        val-4) echo 8549 ;;
-        rpc-0) echo 8550 ;;
+        val-0) echo 19545 ;;
+        val-1) echo 19546 ;;
+        val-2) echo 19547 ;;
+        val-3) echo 19548 ;;
+        val-4) echo 19549 ;;
+        rpc-0) echo 19550 ;;
     esac
 }
 
 node_p2p_port() {
     case "$1" in
-        val-0) echo 30300 ;;
-        val-1) echo 30301 ;;
-        val-2) echo 30302 ;;
-        val-3) echo 30303 ;;
-        val-4) echo 30304 ;;
-        rpc-0) echo 30305 ;;
+        val-0) echo 31300 ;;
+        val-1) echo 31301 ;;
+        val-2) echo 31302 ;;
+        val-3) echo 31303 ;;
+        val-4) echo 31304 ;;
+        rpc-0) echo 31305 ;;
     esac
 }
 

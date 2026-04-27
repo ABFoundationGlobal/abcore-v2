@@ -11,8 +11,8 @@ Scripts to run and upgrade the ABCore DevNet (5 validators + 1 RPC node, Chain I
 | server-3 | devnet-val-4        | Validator (single, canary)  |
 | server-4 | devnet-rpc-0        | RPC node (non-mining)       |
 
-RPC ports: val-0=8545 val-1=8546 val-2=8547 val-3=8548 val-4=8549 rpc-0=8550  
-P2P ports: val-0=30300 … val-4=30304 rpc-0=30305
+RPC ports: val-0=19545 val-1=19546 val-2=19547 val-3=19548 val-4=19549 rpc-0=19550  
+P2P ports: val-0=31300 … val-4=31304 rpc-0=31305
 
 ## Scripts
 

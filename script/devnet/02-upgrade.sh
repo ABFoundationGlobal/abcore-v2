@@ -100,8 +100,12 @@ if [[ "$FORK_TYPE" == "timestamp" ]]; then
 fi
 
 # Pull new image before starting the rolling upgrade
-info "Pulling $NEW_IMAGE ..."
-docker pull "$NEW_IMAGE"
+if docker image inspect "$NEW_IMAGE" &>/dev/null; then
+    info "Image $NEW_IMAGE already present locally, skipping pull."
+else
+    info "Pulling $NEW_IMAGE ..."
+    docker pull "$NEW_IMAGE"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 3 (Feynman) special pre-flight: remind about createValidator
@@ -186,8 +190,7 @@ restart_node() {
         --syncmode full \
         --gcmode archive \
         --verbosity "$LOG_LEVEL" \
-        --nat "extip:127.0.0.1" \
-        --nodiscover \
+        --nat "extip:$DOCKER_HOST_IP" \
         "${extra_flags[@]}" \
         > /dev/null
 
@@ -225,6 +228,35 @@ restart_node() {
 for node in "${UPGRADE_ORDER[@]}"; do
     restart_node "$node" "$NEW_IMAGE"
 done
+
+# ---------------------------------------------------------------------------
+# Re-wire P2P full mesh after rolling upgrade
+# Each restarted node loses its in-memory peer list; re-run addPeer for all.
+# ---------------------------------------------------------------------------
+section "Re-wiring P2P full mesh"
+
+declare -A ENODES
+for node in "${ALL_NODES[@]}"; do
+    port="$(node_rpc_port "$node")"
+    p2p_port="$(node_p2p_port "$node")"
+    raw=$(rpc_call "$port" admin_nodeInfo '[]' \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('enode',''))" 2>/dev/null || echo "")
+    enode=$(echo "$raw" | sed -E "s|@[^:]+:[0-9]+(\?.*)?$|@${DOCKER_HOST_IP}:${p2p_port}|")
+    if [[ -n "$enode" ]]; then
+        ENODES["$node"]="$enode"
+    fi
+done
+
+for src in "${ALL_NODES[@]}"; do
+    src_port="$(node_rpc_port "$src")"
+    for dst in "${ALL_NODES[@]}"; do
+        [[ "$src" == "$dst" ]] && continue
+        dst_enode="${ENODES[$dst]:-}"
+        [[ -z "$dst_enode" ]] && continue
+        rpc_call "$src_port" admin_addPeer "[\"$dst_enode\"]" > /dev/null
+    done
+done
+info "addPeer sent to all nodes"
 
 # ---------------------------------------------------------------------------
 # Post-upgrade status

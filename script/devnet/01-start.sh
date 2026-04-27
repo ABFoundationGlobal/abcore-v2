@@ -62,6 +62,10 @@ done
 
 if [[ -d "$DATA_DIR" ]]; then
     warn "Removing existing data directory: $DATA_DIR"
+    # geth init runs as root inside Docker, so chaindata is root-owned.
+    # Use a throw-away container to delete it cleanly without requiring sudo.
+    docker run --rm -v "$DATA_DIR:/target" --entrypoint sh \
+        "$V1_IMAGE" -c "rm -rf /target/*" 2>/dev/null || sudo rm -rf "$DATA_DIR"
     rm -rf "$DATA_DIR"
 fi
 
@@ -74,8 +78,12 @@ done
 # ---------------------------------------------------------------------------
 section "Installing validator keystores"
 
-info "Pulling $V1_IMAGE ..."
-docker pull "$V1_IMAGE"
+if docker image inspect "$V1_IMAGE" &>/dev/null; then
+    info "Image $V1_IMAGE already present locally, skipping pull."
+else
+    info "Pulling $V1_IMAGE ..."
+    docker pull "$V1_IMAGE"
+fi
 
 VALIDATOR_ADDRESSES=()
 
@@ -83,10 +91,8 @@ for node in "${VALIDATOR_NODES[@]}"; do
     local_dir="$(node_datadir "$node")"
     addr=$(cat "$KEYSTORES_DIR/$node.address")
 
-    # Copy keystore file into node's keystore directory
     cp "$KEYSTORES_DIR/$node.json" "$local_dir/keystore/$node.json"
-    # Empty password (DevNet only)
-    echo "" > "$local_dir/password.txt"
+    echo "" > "$local_dir/password.txt"   # empty password for devnet
     echo "$addr" > "$local_dir/address.txt"
 
     VALIDATOR_ADDRESSES+=("$addr")
@@ -167,90 +173,19 @@ for node in "${ALL_NODES[@]}"; do
         --entrypoint geth \
         "$V1_IMAGE" \
         init --datadir /data /genesis.json \
-        2>&1 | grep -E "^(INFO|WARN|ERRO|err)" || true
+        2>&1 | grep -E "(ERR|WARN|Fatal)" || true
 done
 
 # ---------------------------------------------------------------------------
-# Step 4: write static-nodes.json
-# We pre-generate deterministic node keys so enode IDs are stable across
-# resets.  Each node gets a fixed nodekey file in its datadir/geth/ folder.
-# ---------------------------------------------------------------------------
-section "Generating node keys and building static-nodes.json"
-
-# Generate a stable nodekey for each node using docker bootnode tool (if
-# available in the image) or openssl fallback.  Store in datadir/geth/nodekey.
-for node in "${ALL_NODES[@]}"; do
-    local_dir="$(node_datadir "$node")"
-    mkdir -p "$local_dir/geth"
-    p2p_port="$(node_p2p_port "$node")"
-
-    # Generate nodekey if not already present
-    if [[ ! -f "$local_dir/geth/nodekey" ]]; then
-        # 32-byte random hex private key
-        openssl rand -hex 32 > "$local_dir/geth/nodekey"
-    fi
-
-    # Derive enode public key from nodekey using docker bootnode tool.
-    # Write the result to a small file so the Python below (which runs in a
-    # subshell via command substitution) can read it without needing to
-    # inherit a bash associative array.
-    enode_id=$(docker run --rm \
-        -v "$local_dir/geth/nodekey:/nodekey:ro" \
-        --entrypoint bootnode \
-        "$V1_IMAGE" \
-        -nodekey /nodekey -writeaddress 2>/dev/null || echo "")
-
-    if [[ -z "$enode_id" ]]; then
-        warn "  Could not derive enode for $node (bootnode not in image). Static-nodes will be incomplete."
-        echo "" > "$local_dir/geth/enode.txt"
-    else
-        enode="enode://${enode_id}@127.0.0.1:${p2p_port}"
-        echo "$enode" > "$local_dir/geth/enode.txt"
-        info "  $node → $enode"
-    fi
-done
-
-# Write static-nodes.json for every node.
-# Reads enode.txt files written above — avoids bash associative array
-# inheritance issues across the command-substitution subshell.
-python3 - <<PYEOF
-import json, os
-
-nodes = "$( IFS=' '; echo "${ALL_NODES[*]}" )".split()
-data_dir = "$DATA_DIR"
-
-enodes = {}
-for node in nodes:
-    enode_file = os.path.join(data_dir, node, "geth", "enode.txt")
-    if os.path.exists(enode_file):
-        enodes[node] = open(enode_file).read().strip()
-    else:
-        enodes[node] = ""
-
-valid = [e for e in enodes.values() if e]
-
-for node in nodes:
-    local_dir = os.path.join(data_dir, node, "geth")
-    os.makedirs(local_dir, exist_ok=True)
-    own = enodes.get(node, "")
-    peers = [e for e in valid if e != own]
-    with open(local_dir + "/static-nodes.json", "w") as f:
-        json.dump(peers, f, indent=4)
-
-print("  static-nodes.json written for %d nodes (%d valid enodes)" % (len(nodes), len(valid)))
-PYEOF
-
-# ---------------------------------------------------------------------------
-# Step 5: start all nodes
+# Step 4: start all nodes
 # ---------------------------------------------------------------------------
 section "Starting v1 Clique network"
 
 start_node() {
     local node="$1"
     local image="$2"
-    local local_dir
+    local local_dir rpc_port p2p_port name
     local_dir="$(node_datadir "$node")"
-    local rpc_port p2p_port name
     rpc_port="$(node_rpc_port "$node")"
     p2p_port="$(node_p2p_port "$node")"
     name="$(node_container_name "$node")"
@@ -293,24 +228,73 @@ start_node() {
         --syncmode full \
         --gcmode archive \
         --verbosity "$LOG_LEVEL" \
-        --nat "extip:127.0.0.1" \
-        --nodiscover \
+        --nat "extip:$DOCKER_HOST_IP" \
         "${extra_flags[@]}" \
         > /dev/null
 }
 
 # Start val-4 first (single-node server, acts as canary)
 start_node val-4 "$V1_IMAGE"
-sleep 3
+sleep 2
 
 # Start remaining validators
 for node in val-0 val-1 val-2 val-3; do
     start_node "$node" "$V1_IMAGE"
-    sleep 2
+    sleep 1
 done
 
 # Start RPC node last
 start_node rpc-0 "$V1_IMAGE"
+
+# ---------------------------------------------------------------------------
+# Step 5: wire full mesh via admin_addPeer
+# Collect enode from each node's RPC and call admin_addPeer on all others.
+# This is more reliable than static-nodes.json and works without bootnode.
+# ---------------------------------------------------------------------------
+section "Wiring P2P full mesh"
+
+info "Waiting for all nodes to respond on RPC..."
+for node in "${ALL_NODES[@]}"; do
+    port="$(node_rpc_port "$node")"
+    if ! wait_for_rpc "$port" 30; then
+        error "$node RPC did not respond within 30s"
+        echo "Check: docker logs $(node_container_name "$node")"
+        exit 1
+    fi
+done
+
+# Collect enodes via admin_nodeInfo.
+# Replace the IP with DOCKER_HOST_IP so containers can reach each other via
+# the host bridge (containers cannot use 127.0.0.1 to reach host-bound ports).
+declare -A ENODES
+for node in "${ALL_NODES[@]}"; do
+    port="$(node_rpc_port "$node")"
+    p2p_port="$(node_p2p_port "$node")"
+    raw=$(rpc_call "$port" admin_nodeInfo '[]' \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('enode',''))" 2>/dev/null || echo "")
+    # Rewrite IP and port to DOCKER_HOST_IP:p2p_port so containers can reach
+    # each other via the host bridge. If the node already reported the correct
+    # IP (because --nat extip was set), the sed is a no-op and that's fine.
+    enode=$(echo "$raw" | sed -E "s|@[^:]+:[0-9]+(\?.*)?$|@${DOCKER_HOST_IP}:${p2p_port}|")
+    if [[ -z "$enode" ]]; then
+        warn "  Could not get enode for $node"
+    else
+        ENODES["$node"]="$enode"
+        info "  $node → $enode"
+    fi
+done
+
+# addPeer: each node connects to all others
+for src in "${ALL_NODES[@]}"; do
+    src_port="$(node_rpc_port "$src")"
+    for dst in "${ALL_NODES[@]}"; do
+        [[ "$src" == "$dst" ]] && continue
+        dst_enode="${ENODES[$dst]:-}"
+        [[ -z "$dst_enode" ]] && continue
+        rpc_call "$src_port" admin_addPeer "[\"$dst_enode\"]" > /dev/null
+    done
+    info "  $src: addPeer sent to $(( ${#ALL_NODES[@]} - 1 )) peers"
+done
 
 # ---------------------------------------------------------------------------
 # Step 6: health check
@@ -318,13 +302,6 @@ start_node rpc-0 "$V1_IMAGE"
 section "Waiting for chain to produce blocks"
 
 RPC_PORT="$(node_rpc_port rpc-0)"
-
-info "Waiting for rpc-0 RPC to become available (:$RPC_PORT)..."
-if ! wait_for_rpc "$RPC_PORT" 30; then
-    error "rpc-0 RPC did not respond within 30s"
-    echo "Check logs: docker logs devnet-rpc-0"
-    exit 1
-fi
 
 info "Waiting for block > 0 ..."
 if ! wait_for_block "$RPC_PORT" 1 120; then
@@ -336,7 +313,6 @@ fi
 BLOCK=$(block_number "$RPC_PORT")
 info "Chain is producing blocks. Current block: $BLOCK"
 
-# Show peer counts
 echo ""
 echo -e "${BLUE}Node status:${NC}"
 for node in "${ALL_NODES[@]}"; do
