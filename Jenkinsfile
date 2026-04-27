@@ -1,8 +1,13 @@
 pipeline {
-    agent any
+    agent { label "${params.SERVER}" }
 
     // ─── 手动触发时的参数表单 ──────────────────────────────────────────
     parameters {
+        choice(
+            name: 'SERVER',
+            choices: ['master', 'ab-testnet-server'],
+            description: '目标部署服务器'
+        )
         string(
             name: 'TAG',
             defaultValue: 'v0.1.2',
@@ -36,6 +41,7 @@ pipeline {
             steps {
                 sh """
                     echo "========================================="
+                    echo " 服务器    : ${params.SERVER}"
                     echo " 网络      : ${params.NETWORK}"
                     echo " 节点角色  : ${params.NODE_ROLE}"
                     echo " 目标版本  : ${params.TAG}"
@@ -173,6 +179,7 @@ pipeline {
             sh """
                 echo "========================================="
                 echo " ✅ 部署成功"
+                echo " 服务器: ${params.SERVER}"
                 echo " 网络  : ${params.NETWORK}"
                 echo " 角色  : ${params.NODE_ROLE}"
                 echo " 版本  : ${params.TAG}"
@@ -183,6 +190,7 @@ pipeline {
             sh """
                 echo "========================================="
                 echo " ❌ 部署失败，请查看上方日志"
+                echo " 服务器: ${params.SERVER}"
                 echo " 网络  : ${params.NETWORK}"
                 echo " 角色  : ${params.NODE_ROLE}"
                 echo " 版本  : ${params.TAG}"
