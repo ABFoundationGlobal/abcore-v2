@@ -84,7 +84,6 @@ pipeline {
             steps {
                 sh """
                     sudo mkdir -p ${DATADIR}/keystore
-                    sudo chown -R \$(id -u):\$(id -g) ${DATADIR}
 
                     if [ "${params.NODE_ROLE}" = "validator" ]; then
                         if [ -z "\$(ls -A ${DATADIR}/keystore 2>/dev/null)" ]; then
