@@ -251,13 +251,13 @@ compresses each gap to 3 minutes.
 
 ```bash
 # Runs init → U-1 → U-2 in sequence; auto-builds geth if GETH is unset.
-bash script/upgrade-drill/run-all.sh
+bash script/upgrade-drill/99-run-all.sh
 
 # With explicit binary and custom fork heights
-GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=50 bash script/upgrade-drill/run-all.sh
+GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=50 bash script/upgrade-drill/99-run-all.sh
 
 # Leave nodes running after PASS for manual inspection
-GETH=./build/bin/geth KEEP_RUNNING=1 bash script/upgrade-drill/run-all.sh
+GETH=./build/bin/geth KEEP_RUNNING=1 bash script/upgrade-drill/99-run-all.sh
 ```
 
 ### Round by round
