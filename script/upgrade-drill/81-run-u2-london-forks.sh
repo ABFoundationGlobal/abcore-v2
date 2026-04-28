@@ -203,22 +203,24 @@ for n in 2 3; do
   fi
 done
 
-# 2. baseFeePerGas is present and positive in the first post-fork block
-#    (EIP-1559 / London activation proof)
+# 2. baseFeePerGas field must be present in the first post-fork block.
+#    On BSC, London initialises baseFeePerGas to 0 (not the standard ~1 Gwei),
+#    so accept 0 as valid — the field being present is the activation indicator.
 basefee=$(attach_exec "$GETH" "$IPC1" "eth.getBlock(${CHECK_AT}).baseFeePerGas" 2>/dev/null || true)
-if [[ -n "$basefee" && "$basefee" != "null" && "$basefee" != "0" ]]; then
-  pass "block ${CHECK_AT} baseFeePerGas=${basefee} (EIP-1559 active)"
+if [[ -z "$basefee" || "$basefee" == "null" || "$basefee" == "undefined" ]]; then
+  fail "block ${CHECK_AT} baseFeePerGas absent: ${basefee} (London not activated?)"
 else
-  fail "block ${CHECK_AT} baseFeePerGas absent or zero: ${basefee} (London not activated?)"
+  pass "block ${CHECK_AT} baseFeePerGas=${basefee} (EIP-1559 field present)"
 fi
 
-# 3. Pre-fork block must NOT have baseFeePerGas
+# 3. Pre-fork block must NOT have baseFeePerGas.
+#    geth JS console returns undefined (not null) for absent fields.
 pre_basefee=$(attach_exec "$GETH" "$IPC1" \
   "eth.getBlock($(( LONDON_BLOCK - 1 ))).baseFeePerGas" 2>/dev/null || true)
-if [[ -z "$pre_basefee" || "$pre_basefee" == "null" ]]; then
+if [[ -z "$pre_basefee" || "$pre_basefee" == "null" || "$pre_basefee" == "undefined" ]]; then
   pass "block $(( LONDON_BLOCK - 1 )) has no baseFeePerGas (pre-London, expected)"
 else
-  fail "block $(( LONDON_BLOCK - 1 )) has baseFeePerGas=${pre_basefee} (London activated too early)"
+  fail "block $(( LONDON_BLOCK - 1 )) baseFeePerGas=${pre_basefee} (London activated too early)"
 fi
 
 # 4. Chain is still producing blocks (no consensus breakage)
