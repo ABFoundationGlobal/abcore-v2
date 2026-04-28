@@ -46,7 +46,7 @@ use_dev_keystore() {
   [[ ${#keystore_files[@]} -gt 0 ]] || die "no UTC--* files in ${src}"
   cp "${keystore_files[@]}" "${dir}/keystore/"
   cp "${src}/address.txt" "${dir}/address.txt"
-  cp "${src}/password.txt" "$(val_pw "$n")" 2>/dev/null || printf "password\n" > "$(val_pw "$n")"
+  cp "${src}/password.txt" "$(val_pw "$n")"
   log "validator-${n}: $(cat "${dir}/address.txt")"
 }
 

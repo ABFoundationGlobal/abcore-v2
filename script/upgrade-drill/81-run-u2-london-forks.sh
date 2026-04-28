@@ -186,7 +186,7 @@ Re-run with a higher LONDON_BLOCK, e.g. LONDON_BLOCK=$(( _post_reinit + 60 ))"
 fi
 log "All validators updated. Head=${_post_reinit} < LONDON_BLOCK=${LONDON_BLOCK} — fork not yet reached."
 
-# ── Phase 4: wait for the fork block ──────────────────────────────────────────
+# ── Phase 4: wait for the fork block ─────────────────────────────────────────
 
 log "Waiting for all nodes to cross London fork block ${LONDON_BLOCK}..."
 _pids=()
@@ -197,7 +197,7 @@ done
 for p in "${_pids[@]}"; do wait "$p"; done
 log "All nodes past London fork. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 
-# ── Phase 8: verify ───────────────────────────────────────────────────────────
+# ── Phase 5: verify ──────────────────────────────────────────────────────────
 
 log "Running U-2 verification..."
 IPC1=$(val_ipc 1)
