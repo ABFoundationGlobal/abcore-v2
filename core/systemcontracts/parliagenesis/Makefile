@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
-GENESIS_CONTRACT_COMMIT := 2775d16f2b56f3302fcc0a77f1d51f974dc8f6e7
+GENESIS_CONTRACT_COMMIT := 91fb231207f646661071a61edd5ca24a5e4cfb27
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -12,31 +12,11 @@ PYTHON                := $(or \
 	$(shell which python3.11 2>/dev/null), \
 	$(shell which python3.10 2>/dev/null))
 
-# ---- Chain parameters ----
-# Edit these values or override on the command line.
-# Values containing spaces must be quoted:
-#   make mainnet CHAIN_ID=36888 BLOCK_INTERVAL="3 seconds"
-CHAIN_ID                       ?= 714
-MAX_ELECTED_VALIDATORS         ?= 3
-BLOCK_INTERVAL                 ?= 3 seconds
-BREATHE_BLOCK_INTERVAL         ?= 10 minutes
-UNBOND_PERIOD                  ?= 2 minutes
-DOWNTIME_JAIL_TIME             ?= 2 minutes
-FELONY_JAIL_TIME               ?= 3 minutes
-MISDEMEANOR_THRESHOLD          ?= 50
-FELONY_THRESHOLD               ?= 150
-FELONY_SLASH_SCOPE             ?= 60
-INIT_BURN_RATIO                ?= 0
-STAKE_HUB_PROTECTOR            ?= address(0xdEaD)
-GOVERNOR_PROTECTOR             ?= address(0xdEaD)
-TOKEN_RECOVER_PORTAL_PROTECTOR ?= address(0xdEaD)
-SOURCE_CHAIN_ID                ?= Binance-Chain-Ganges
-INIT_VOTING_PERIOD             ?= 2 minutes / BLOCK_INTERVAL
-INIT_MIN_PERIOD_AFTER_QUORUM   ?= uint64(1 minutes / BLOCK_INTERVAL)
-INIT_MINIMAL_DELAY             ?= 1 minutes
-
-# ---- Output sub-directory (set automatically by each network target) ----
-OUTDIR ?= default
+# ---- Output sub-directory and generate.py command (set by each network target) ----
+# Each environment directory must contain its own validators.conf.
+# default/ validators are derived from default/keystores/; see default/README.md.
+OUTDIR       ?= default
+GENERATE_CMD ?= abchain-local
 
 .PHONY: pre build mainnet testnet recover _build
 
@@ -75,24 +55,23 @@ pre:
 
 ## Generate contracts for ABCore mainnet (chain ID 36888) → mainnet/
 mainnet: OUTDIR = mainnet
-mainnet: CHAIN_ID = 36888
-mainnet: MAX_ELECTED_VALIDATORS = 21
+mainnet: GENERATE_CMD = abchain-main
 mainnet: _build
 
 ## Generate contracts for ABCore testnet (chain ID 26888) → testnet/
 testnet: OUTDIR = testnet
-testnet: CHAIN_ID = 26888
-testnet: MAX_ELECTED_VALIDATORS = 7
+testnet: GENERATE_CMD = abchain-test
 testnet: _build
 
-## Generate contracts with default chain parameters → default/
+## Generate contracts with local development parameters → default/
 build: OUTDIR = default
+build: GENERATE_CMD = abchain-local
 build: _build
 
 ## Internal: compile contracts and extract deployedBytecode into $(PARLIA_DIR)$(OUTDIR)/
 _build:
-	@[ -f "$(PARLIA_DIR)validators.conf" ] || { \
-		echo "Error: validators.conf not found. Copy validators.conf.example and fill in your validators."; \
+	@[ -f "$(PARLIA_DIR)$(OUTDIR)/validators.conf" ] || { \
+		echo "Error: $(OUTDIR)/validators.conf not found. Create it with your validator addresses (see validators.conf.example)."; \
 		exit 1; \
 	}
 	@[ -d "$(GENESIS_CONTRACT_DIR)/node_modules" ] || { \
@@ -100,28 +79,10 @@ _build:
 		exit 1; \
 	}
 	mkdir -p "$(PARLIA_DIR)$(OUTDIR)"
-	cp $(PARLIA_DIR)validators.conf $(GENESIS_CONTRACT_DIR)/validators.conf
+	cp $(PARLIA_DIR)$(OUTDIR)/validators.conf $(GENESIS_CONTRACT_DIR)/validators.conf
 	cd $(GENESIS_CONTRACT_DIR) && $(POETRY) run python -m scripts.generate generate-validators
 	cd $(GENESIS_CONTRACT_DIR) && { \
-		PATH="$(dir $(FORGE)):$$PATH" $(POETRY) run python -m scripts.generate dev \
-			--dev-chain-id $(CHAIN_ID) \
-			--block-interval "$(BLOCK_INTERVAL)" \
-			--breathe-block-interval "$(BREATHE_BLOCK_INTERVAL)" \
-			--max-elected-validators "$(MAX_ELECTED_VALIDATORS)" \
-			--unbond-period "$(UNBOND_PERIOD)" \
-			--downtime-jail-time "$(DOWNTIME_JAIL_TIME)" \
-			--felony-jail-time "$(FELONY_JAIL_TIME)" \
-			--misdemeanor-threshold "$(MISDEMEANOR_THRESHOLD)" \
-			--felony-threshold "$(FELONY_THRESHOLD)" \
-			--init-felony-slash-scope "$(FELONY_SLASH_SCOPE)" \
-			--init-burn-ratio "$(INIT_BURN_RATIO)" \
-			--stake-hub-protector "$(STAKE_HUB_PROTECTOR)" \
-			--governor-protector "$(GOVERNOR_PROTECTOR)" \
-			--token-recover-portal-protector "$(TOKEN_RECOVER_PORTAL_PROTECTOR)" \
-			--source-chain-id "$(SOURCE_CHAIN_ID)" \
-			--init-voting-period "$(INIT_VOTING_PERIOD)" \
-			--init-min-period-after-quorum "$(INIT_MIN_PERIOD_AFTER_QUORUM)" \
-			--init-minimal-delay "$(INIT_MINIMAL_DELAY)"; \
+		PATH="$(dir $(FORGE)):$$PATH" $(POETRY) run python -m scripts.generate $(GENERATE_CMD); \
 		exit_code=$$?; \
 		$(POETRY) run python -m scripts.generate recover; \
 		exit $$exit_code; \
@@ -167,25 +128,8 @@ _build:
 		echo "generated_at:            $$(date -u '+%Y-%m-%dT%H:%M:%SZ')"; \
 		echo ""; \
 		echo "# Build parameters"; \
-		echo "OUTDIR:                        $(OUTDIR)"; \
-		echo "CHAIN_ID:                      $(CHAIN_ID)"; \
-		echo "MAX_ELECTED_VALIDATORS:        $(MAX_ELECTED_VALIDATORS)"; \
-		echo "BLOCK_INTERVAL:                $(BLOCK_INTERVAL)"; \
-		echo "BREATHE_BLOCK_INTERVAL:        $(BREATHE_BLOCK_INTERVAL)"; \
-		echo "UNBOND_PERIOD:                 $(UNBOND_PERIOD)"; \
-		echo "DOWNTIME_JAIL_TIME:            $(DOWNTIME_JAIL_TIME)"; \
-		echo "FELONY_JAIL_TIME:              $(FELONY_JAIL_TIME)"; \
-		echo "MISDEMEANOR_THRESHOLD:         $(MISDEMEANOR_THRESHOLD)"; \
-		echo "FELONY_THRESHOLD:              $(FELONY_THRESHOLD)"; \
-		echo "FELONY_SLASH_SCOPE:            $(FELONY_SLASH_SCOPE)"; \
-		echo "INIT_BURN_RATIO:               $(INIT_BURN_RATIO)"; \
-		echo "STAKE_HUB_PROTECTOR:           $(STAKE_HUB_PROTECTOR)"; \
-		echo "GOVERNOR_PROTECTOR:            $(GOVERNOR_PROTECTOR)"; \
-		echo "TOKEN_RECOVER_PORTAL_PROTECTOR: $(TOKEN_RECOVER_PORTAL_PROTECTOR)"; \
-		echo "SOURCE_CHAIN_ID:               $(SOURCE_CHAIN_ID)"; \
-		echo "INIT_VOTING_PERIOD:            $(INIT_VOTING_PERIOD)"; \
-		echo "INIT_MIN_PERIOD_AFTER_QUORUM:  $(INIT_MIN_PERIOD_AFTER_QUORUM)"; \
-		echo "INIT_MINIMAL_DELAY:            $(INIT_MINIMAL_DELAY)"; \
+		echo "OUTDIR:       $(OUTDIR)"; \
+		echo "GENERATE_CMD: $(GENERATE_CMD)"; \
 		echo ""; \
 		echo "# SHA-256 checksums"; \
 		for pair in $$pairs; do \
@@ -194,6 +138,11 @@ _build:
 		done; \
 	} > "$(PARLIA_DIR)$(OUTDIR)/MANIFEST"; \
 	echo "Written $(OUTDIR)/MANIFEST"
+	$(PYTHON) "$(PARLIA_DIR)extract-params.py" \
+		"$(GENESIS_CONTRACT_DIR)/scripts/generate.py" \
+		"$(GENERATE_CMD)" \
+		> "$(PARLIA_DIR)$(OUTDIR)/params.env"
+	@echo "Written $(OUTDIR)/params.env"
 
 ## Restore contract source files if a previous build was interrupted
 recover:

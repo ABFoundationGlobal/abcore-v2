@@ -73,6 +73,9 @@ script/compat-clique-v1-v2/data/
 script/compat-clique-v1-v2/genesis.json
 script/compat-clique-v1-v2/bin/
 
+# Transition test Python venv (created by 94-run-tx-test.sh)
+script/transition-test/.venv
+
 # Release script runtime data (chain state, keystore, configs staged for docker)
 script/release/data/
 
