@@ -69,6 +69,10 @@ trap cleanup_on_exit EXIT
 
 # ── Phase 1: determine LONDON_BLOCK ──────────────────────────────────────────
 
+# Ensure IPC is responsive before querying chain head (nodes may have just
+# been started by U-1 or restarted manually).
+wait_for_ipc "$GETH" "$(val_ipc 1)" 30
+
 if [[ -z "${LONDON_BLOCK:-}" ]]; then
   _cur=$(head_number "$GETH" "$(val_ipc 1)")
   LONDON_BLOCK=$(( _cur + 20 ))
@@ -107,10 +111,10 @@ stop_all
 
 # ── Phase 4: update genesis.json with LONDON_BLOCK ───────────────────────────
 #
-# We lower all 12 fork parameters from their placeholder values (9_999_999)
-# to LONDON_BLOCK.  Only these fields are modified; everything else (chainId,
-# alloc, extraData, clique/parlia period/epoch) stays the same so the genesis
-# block hash remains unchanged and geth init succeeds.
+# We set all 14 fork parameters to LONDON_BLOCK, adding fields that were
+# previously absent (nil).  Only these fields are modified; everything else
+# (chainId, alloc, extraData, clique/parlia period/epoch) stays the same so
+# the genesis block hash remains unchanged and geth init succeeds.
 
 export GENESIS_JSON LONDON_BLOCK
 python3 - <<'PY'

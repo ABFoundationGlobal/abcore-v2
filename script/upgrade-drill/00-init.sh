@@ -9,8 +9,9 @@
 # Creates:
 #   <DATADIR_ROOT>/validator-{1,2,3}/  — keystores, password files, datadirs
 #   <DATADIR_ROOT>/genesis.json        — Clique+Parlia genesis; higher forks
-#                                        at placeholder heights, overridden by
-#                                        each U-N script via reinit_genesis()
+#                                        absent (nil/not scheduled); each U-N
+#                                        script adds its own fork fields via
+#                                        reinit_genesis()
 #   <DATADIR_ROOT>/config.toml         — base TOML (NetworkId, SyncMode only)
 #
 # Does NOT start the nodes.  Run 80-run-u1-parlia-switch.sh next.

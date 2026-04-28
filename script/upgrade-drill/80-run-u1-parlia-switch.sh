@@ -21,7 +21,7 @@
 #   8. Leave nodes running for U-2
 #
 # Environment:
-#   PARLIA_GENESIS_BLOCK  fork block height (default: 100)
+#   PARLIA_GENESIS_BLOCK  fork block height (default: 30)
 #   KEEP_RUNNING=1        leave nodes up after PASS even on failure
 set -euo pipefail
 
