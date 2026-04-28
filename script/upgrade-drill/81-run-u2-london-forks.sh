@@ -16,13 +16,14 @@
 # Steps:
 #   1. Determine LONDON_BLOCK (default: current head + 20)
 #   2. Wait for chain to reach LONDON_BLOCK - 5 (preparation window)
-#   3. Stop all validators
-#   4. Update genesis.json with LONDON_BLOCK for all 14 fork parameters
-#   5. reinit_genesis() to update stored chainconfig in all 3 datadirs
-#   6. Start all validators; wait for peer mesh
-#   7. Wait for chain to cross LONDON_BLOCK
-#   8. Verify: chain agreement, baseFeePerGas present in post-fork block
-#   9. Leave nodes running for U-3
+#   3. Update genesis.json with LONDON_BLOCK for all 14 fork parameters
+#      (nodes remain running; genesis.json is only read at geth init time)
+#   4. Rolling genesis reinit: for each validator in turn —
+#        stop → geth init → restart → re-peer → wait for sync
+#      2-of-3 quorum is maintained throughout; no seal-race deadlock.
+#   5. Wait for chain to cross LONDON_BLOCK
+#   6. Verify: chain agreement, baseFeePerGas present in post-fork block
+#   7. Leave nodes running for U-3
 #
 # Environment:
 #   LONDON_BLOCK  fork block height (default: current head + 20)
@@ -103,18 +104,16 @@ wait_for_same_head --min-height "$PREP_STOP" "$GETH" "$(val_ipc 1)" 30 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
 
-log "All nodes converged at $(head_number "$GETH" "$(val_ipc 1)"). Stopping for genesis reinit..."
+log "All nodes converged at $(head_number "$GETH" "$(val_ipc 1)"). Preparing genesis reinit..."
 
-# ── Phase 3: stop all validators ─────────────────────────────────────────────
-
-stop_all
-
-# ── Phase 4: update genesis.json with LONDON_BLOCK ───────────────────────────
+# ── Phase 3: update genesis.json while nodes are still running ───────────────
 #
 # We set all 14 fork parameters to LONDON_BLOCK, adding fields that were
 # previously absent (nil).  Only these fields are modified; everything else
 # (chainId, alloc, extraData, clique/parlia period/epoch) stays the same so
 # the genesis block hash remains unchanged and geth init succeeds.
+# Updating the file while nodes run is safe — geth reads chainconfig from the
+# database, not from genesis.json at runtime.
 
 export GENESIS_JSON LONDON_BLOCK
 python3 - <<'PY'
@@ -154,66 +153,45 @@ with open(genesis_path, 'w') as f:
 print(f'Updated {genesis_path}')
 PY
 
-# ── Phase 5: reinit all datadirs to update stored chainconfig ─────────────────
-
-reinit_genesis
-
-# ── Phase 6: start all validators with deadlock-recovery loop ────────────────
+# ── Phase 4: rolling genesis reinit ──────────────────────────────────────────
 #
-# Simultaneous restart from the same block height can trigger the same
-# seal-race deadlock as in U-1: all validators see themselves as "signed
-# recently" and nobody produces the next block.  Retry up to 5 times;
-# each stop+restart shifts the timing and breaks the deadlock.
+# Stop each validator in turn, run geth init to update its stored chainconfig,
+# then restart it and wait for it to re-join before moving to the next node.
+# This keeps 2-of-3 quorum active throughout and avoids the seal-race deadlock
+# that occurs when all validators restart simultaneously from the same head.
 
-_attempt=0
-while true; do
-  _attempt=$(( _attempt + 1 ))
-  log "Restart attempt ${_attempt} with London fork at ${LONDON_BLOCK}..."
+log "Starting rolling genesis reinit (2-of-3 quorum maintained throughout)..."
+for n in 1 2 3; do
+  ref=$(( n == 1 ? 2 : 1 ))
 
-  for n in 1 2 3; do launch_validator "$n"; done
+  log "Rolling reinit: stopping validator-${n}..."
+  stop_pidfile "$(val_pid "$n")"
 
-  _pids=()
-  for n in 1 2 3; do
-    wait_for_ipc "$GETH" "$(val_ipc "$n")" 60 &
-    _pids+=($!)
-  done
-  for p in "${_pids[@]}"; do wait "$p"; done
+  log "Rolling reinit: geth init validator-${n}..."
+  "$GETH" init --datadir "$(val_dir "$n")" "${GENESIS_JSON}" 2>/dev/null
 
-  wire_mesh
+  log "Rolling reinit: starting validator-${n}..."
+  launch_validator "$n"
+  wait_for_ipc "$GETH" "$(val_ipc "$n")" 60
 
-  _pids=()
-  for n in 1 2 3; do
-    wait_for_min_peers "$GETH" "$(val_ipc "$n")" 2 30 &
-    _pids+=($!)
-  done
-  for p in "${_pids[@]}"; do wait "$p"; done
-
-  # Wait up to 60 s for the chain to advance 3 blocks from current head.
-  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
-  _target=$(( _head_before + 3 ))
-
-  _alive=false
-  _deadline=$(( $(date +%s) + 60 ))
-  while [[ $(date +%s) -lt $_deadline ]]; do
-    _head=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
-    if [[ "$_head" -ge "$_target" ]]; then _alive=true; break; fi
-    sleep 2
+  # Re-wire peers from this node's perspective.
+  for peer in 1 2 3; do
+    [[ "$peer" -eq "$n" ]] && continue
+    _enode=$(get_enode "$GETH" "$(val_ipc "$peer")" 2>/dev/null || true)
+    [[ -n "$_enode" ]] && add_peer "$GETH" "$(val_ipc "$n")" "$_enode" >/dev/null 2>&1 || true
   done
 
-  if "$_alive"; then
-    log "Chain advancing (head=${_head} ≥ target=${_target}). Restart successful."
-    break
-  fi
-
-  if [[ "$_attempt" -ge 5 ]]; then
-    die "chain did not advance after ${_attempt} restart attempts — giving up"
-  fi
-
-  log "WARNING: chain stalled (seal-race deadlock?). Stopping for retry..."
-  stop_all
+  # Wait for this validator to catch up to the reference node.
+  _target=$(head_number "$GETH" "$(val_ipc "$ref")" 2>/dev/null || echo 1)
+  log "Rolling reinit: waiting for validator-${n} to reach head ${_target}..."
+  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$_target" 120
+  log "Rolling reinit: validator-${n} ready (head=$(head_number "$GETH" "$(val_ipc "$n")"))."
 done
 
-log "Network up. Head=$(head_number "$GETH" "$(val_ipc 1)")"
+wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)"
+log "Rolling reinit complete. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 
 # ── Phase 7: wait for the fork block ──────────────────────────────────────────
 
