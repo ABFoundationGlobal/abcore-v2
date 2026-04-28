@@ -172,7 +172,7 @@ stop_pidfile() {
 }
 
 stop_all() {
-  local found=0
+  local -a pids=()
   shopt -s nullglob
   for pidfile in "${DATADIR_ROOT}"/validator-*/geth.pid; do
     local name pid
@@ -181,21 +181,29 @@ stop_all() {
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       log "Stopping ${name} (pid=${pid})"
       kill "$pid" 2>/dev/null || true
-      found=1
+      pids+=("$pid")
     else
       rm -f "$pidfile"
     fi
   done
   shopt -u nullglob
-  if [[ "$found" -eq 1 ]]; then
-    sleep 2
-    shopt -s nullglob
-    for pidfile in "${DATADIR_ROOT}"/validator-*/geth.pid; do
-      local pid
-      pid=$(cat "$pidfile" 2>/dev/null || true)
-      [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
-      rm -f "$pidfile"
+
+  if [[ "${#pids[@]}" -gt 0 ]]; then
+    # Wait up to 30 s for graceful shutdown before SIGKILL.
+    local deadline=$(( $(date +%s) + 30 ))
+    while [[ $(date +%s) -lt $deadline ]]; do
+      local running=0
+      for pid in "${pids[@]}"; do
+        kill -0 "$pid" 2>/dev/null && running=$(( running + 1 )) || true
+      done
+      [[ "$running" -eq 0 ]] && break
+      sleep 0.5
     done
+    for pid in "${pids[@]}"; do
+      kill -9 "$pid" 2>/dev/null || true
+    done
+    shopt -s nullglob
+    rm -f "${DATADIR_ROOT}"/validator-*/geth.pid
     shopt -u nullglob
   fi
   log "All validators stopped."

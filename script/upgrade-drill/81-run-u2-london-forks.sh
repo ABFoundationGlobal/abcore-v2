@@ -2,22 +2,22 @@
 # U-2: London + 13 BSC block forks (block height activation).
 #
 # Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
-# Local parameter default: LONDON_BLOCK = current head + 50.
+# Local parameter default: LONDON_BLOCK = current head + 20.
 #
 # Fork activations (all set to LONDON_BLOCK):
-#   londonBlock, mirrorSyncBlock, brunoBlock, eulerBlock, gibbsBlock,
-#   nanoBlock, moranBlock, planckBlock, lubanBlock, platoBlock,
-#   hertzBlock, hertzfixBlock
+#   londonBlock, ramanujanBlock, nielsBlock, mirrorSyncBlock, brunoBlock,
+#   eulerBlock, gibbsBlock, nanoBlock, moranBlock, planckBlock, lubanBlock,
+#   platoBlock, hertzBlock, hertzfixBlock
 #
 # Prerequisites:
 #   - U-1 has completed; nodes are running in Parlia mode
 #   - A pre-U-2 snapshot is recommended (run 07-snapshot.sh first)
 #
 # Steps:
-#   1. Determine LONDON_BLOCK (default: current head + 50)
-#   2. Wait for chain to reach LONDON_BLOCK - 15 (preparation window)
+#   1. Determine LONDON_BLOCK (default: current head + 20)
+#   2. Wait for chain to reach LONDON_BLOCK - 5 (preparation window)
 #   3. Stop all validators
-#   4. Update genesis.json with LONDON_BLOCK for all 12 fork parameters
+#   4. Update genesis.json with LONDON_BLOCK for all 14 fork parameters
 #   5. reinit_genesis() to update stored chainconfig in all 3 datadirs
 #   6. Start all validators; wait for peer mesh
 #   7. Wait for chain to cross LONDON_BLOCK
@@ -25,7 +25,7 @@
 #   9. Leave nodes running for U-3
 #
 # Environment:
-#   LONDON_BLOCK  fork block height (default: current head + 50)
+#   LONDON_BLOCK  fork block height (default: current head + 20)
 #   KEEP_RUNNING=1
 set -euo pipefail
 
@@ -91,7 +91,7 @@ fi
 
 # ── Phase 2: wait for preparation window ─────────────────────────────────────
 
-log "Waiting for head to reach ${PREP_STOP} (15 blocks before fork)..."
+log "Waiting for head to reach ${PREP_STOP} (5 blocks before fork)..."
 wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$PREP_STOP" 120
 
 # Drain any in-flight blocks so all nodes are at the same tip before stopping.
@@ -125,6 +125,8 @@ with open(genesis_path) as f:
 cfg = genesis['config']
 fork_fields = [
     'londonBlock',
+    'ramanujanBlock',
+    'nielsBlock',
     'mirrorSyncBlock',
     'brunoBlock',
     'eulerBlock',

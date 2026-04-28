@@ -2,7 +2,7 @@
 # U-1: Clique→Parlia switch (block height activation).
 #
 # Corresponds to devnet Upgrade 1 (v0.2.0, ParliaGenesisBlock = 30001).
-# Local parameter default: PARLIA_GENESIS_BLOCK=100.
+# Local parameter default: PARLIA_GENESIS_BLOCK=30.
 #
 # Prerequisites:
 #   - 00-init.sh has been run (DATADIR_ROOT and config.toml exist)

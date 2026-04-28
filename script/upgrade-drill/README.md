@@ -29,7 +29,7 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 | `00-init.sh` | Generate accounts + Clique genesis + init datadirs (3-node network) |
 | `07-snapshot.sh` | Full backup of chaindata / keystore / nodekey / static-nodes.json |
 | `08-restore.sh` | Restore a datadir from a snapshot archive (rollback after failed upgrade) |
-| `lib.sh` | Shared functions: `snapshot`, `restore`, `wait_block`, `wait_timestamp`, `rolling_restart` |
+| `lib.sh` | Shared functions: `launch_validator`, `stop_all`, `wire_mesh`, `rolling_restart`, `wait_for_head_at_least`, `wait_for_timestamp`, `reinit_genesis` |
 
 ## Differences from devnet
 
@@ -37,7 +37,7 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 |---|---|---|
 | Binary | Replace binary at each round | **Single abcore-v2 binary; only TOML changes** |
 | Node count | 5 validators + 1 RPC | 3 validators |
-| U-1 / U-2 block heights | 30001 / 60001 | 100 / 200 (50–100 block intervals) |
+| U-1 / U-2 block heights | 30001 / 60001 | 30 / head+20 (≤50 block intervals) |
 | Timestamp observation window | 24–168 hours | 2–10 minutes |
 | StakeHub registration (U-3) | All validators must register before the first breathe block | Same requirement; script sends registration txs automatically via IPC |
 | BlobScheduleConfig (U-4) | Production config file | Inline TOML minimal config |
@@ -57,7 +57,7 @@ reinit is needed because DualConsensus reads the override at runtime.
 [Eth]
 NetworkId = 99988
 SyncMode = "full"
-OverrideParliaGenesisBlock = 100   # ← appended by 80-run-u1-parlia-switch.sh
+OverrideParliaGenesisBlock = 30    # ← appended by 80-run-u1-parlia-switch.sh
 
 [Eth.Miner]
 GasPrice = 1000000000
@@ -68,25 +68,27 @@ NoUSB = true
 ```
 
 **U-2 through U-6 — `reinit_genesis()` in `lib.sh`:**
-`00-init.sh` writes `genesis.json` with all higher forks at placeholder values
-(`9_999_999` for block heights, `9_999_999_999` for timestamps).  Before each
-round, the U-N script lowers the relevant parameters in `genesis.json` and calls
+`00-init.sh` writes `genesis.json` with only Berlin-and-below forks active; all
+higher forks are **absent** (nil — never scheduled).  Before each round, the U-N
+script adds the relevant fork fields to `genesis.json` and calls
 `reinit_genesis()`, which runs `geth init` on all 3 datadirs.  `geth init` stores
 the updated chainconfig in the database without wiping chain data (the genesis
 block hash is unchanged; only the stored fork parameters differ).
 
 ```
 genesis.json after 00-init.sh:
-  londonBlock = 9_999_999, shanghaiTime = 9_999_999_999, ...
+  berlinBlock = 0
+  # higher forks absent (nil) — not scheduled
 
-genesis.json after U-2 script patches it:
-  londonBlock = 200, mirrorSyncBlock = 200, ..., (other BSC forks = 200)
-  shanghaiTime = 9_999_999_999, ...   ← still placeholder until U-3
+genesis.json after U-2 script adds them:
+  berlinBlock = 0
+  londonBlock = <head+20>, ramanujanBlock = <head+20>, ..., hertzfixBlock = <head+20>
+  # shanghaiTime absent (nil) — still not scheduled until U-3
 
-genesis.json after U-3 script patches it:
-  londonBlock = 200, ...
-  shanghaiTime = 1745000000, keplerTime = 1745000000, feynmanTime = 1745000000
-  cancunTime = 9_999_999_999, ...     ← still placeholder until U-4
+genesis.json after U-3 script adds them:
+  londonBlock = <U-2 value>, ...
+  shanghaiTime = <timestamp>, keplerTime = <timestamp>, feynmanTime = <timestamp>
+  # cancunTime absent (nil) — still not scheduled until U-4
 ```
 
 `config.toml` only needs additional entries for U-4 (`BlobScheduleConfig`) since
@@ -113,14 +115,14 @@ Max    = 6
 
 Corresponds to devnet Upgrade 1 (v0.2.0, `ParliaGenesisBlock = 30001`).
 
-**Local parameters:** `PARLIA_GENESIS_BLOCK=100`, `CLIQUE_EPOCH=50`
+**Local parameters:** `PARLIA_GENESIS_BLOCK=30` (default)
 
 **Prerequisites:** none
 
 **Steps:**
 1. `07-snapshot.sh` — back up Clique chain state
-2. Append `parliaGenesisBlock = 100` to TOML; rolling-restart val-1 → val-2 → val-3
-3. Wait for block height to pass 100; observe for 2 minutes
+2. Set `OverrideParliaGenesisBlock = 30` in TOML; restart all validators with deadlock-recovery loop
+3. Wait for block height to pass 30; observe for 2 minutes
 
 **Verification:**
 - `parlia_getValidators` returns the correct 3 validator addresses
@@ -131,14 +133,14 @@ Corresponds to devnet Upgrade 1 (v0.2.0, `ParliaGenesisBlock = 30001`).
 
 Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
 
-**Local parameters:** `LONDON_BLOCK=200`; all 13 BSC historical block forks set to 200
+**Local parameters:** `LONDON_BLOCK=<current head + 20>` (default); all 13 BSC historical block forks set to the same value
 
 **Prerequisites:** none
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Append London + 13 BSC fork block fields (all `= 200`) to TOML; rolling restart
-3. Wait for block height to pass 200; observe for 3 minutes
+2. Patch genesis.json with LONDON_BLOCK for all 14 fork fields; call `reinit_genesis()` on all 3 datadirs; restart validators
+3. Wait for block height to pass LONDON_BLOCK; observe for 3 minutes
 
 **Verification:**
 - `eth_getBlockByNumber` returns a block with `baseFeePerGas` present (EIP-1559 active)

@@ -6,9 +6,9 @@
 # head — no snapshot step is needed in the automated path.
 #
 # Usage:
-#   bash script/upgrade-drill/run-all.sh
-#   GETH=./build/bin/geth bash script/upgrade-drill/run-all.sh
-#   PARLIA_GENESIS_BLOCK=50 GETH=./build/bin/geth bash script/upgrade-drill/run-all.sh
+#   bash script/upgrade-drill/99-run-all.sh
+#   GETH=./build/bin/geth bash script/upgrade-drill/99-run-all.sh
+#   PARLIA_GENESIS_BLOCK=50 GETH=./build/bin/geth bash script/upgrade-drill/99-run-all.sh
 #
 # Environment:
 #   GETH                  geth binary path (auto-built if unset)
