@@ -4,6 +4,9 @@ End-to-end scenarios for the ABCore Clique→Parlia migration, including the
 baseline fork path, late restart handling, coordinated rollback drill, and
 Parlia epoch boundary validator set transitions.
 
+For the full 6-round sequential upgrade drill (v0.1 → v0.7), see
+[`script/upgrade-drill/README.md`](../upgrade-drill/README.md).
+
 ## Scenario coverage
 
 | ID | Script                             | Description | Status |
