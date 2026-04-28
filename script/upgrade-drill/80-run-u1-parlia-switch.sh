@@ -22,7 +22,7 @@
 #
 # Environment:
 #   PARLIA_GENESIS_BLOCK  fork block height (default: 30)
-#   KEEP_RUNNING=1        leave nodes up after PASS even on failure
+#   KEEP_RUNNING=1        leave nodes up after PASS
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

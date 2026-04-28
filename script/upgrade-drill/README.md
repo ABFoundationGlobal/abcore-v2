@@ -29,7 +29,7 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 | `00-init.sh` | Generate accounts + Clique genesis + init datadirs (3-node network) |
 | `07-snapshot.sh` | Full backup of chaindata / keystore / nodekey / static-nodes.json |
 | `08-restore.sh` | Restore a datadir from a snapshot archive (rollback after failed upgrade) |
-| `lib.sh` | Shared functions: `launch_validator`, `stop_all`, `wire_mesh`, `rolling_restart`, `wait_for_head_at_least`, `wait_for_timestamp`, `reinit_genesis` |
+| `lib.sh` | Shared functions: `launch_validator`, `stop_all`, `wire_mesh`, `wait_for_head_at_least`, `wait_for_timestamp` |
 
 ## Differences from devnet
 
@@ -37,7 +37,7 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 |---|---|---|
 | Binary | Replace binary at each round | **Single abcore-v2 binary; only TOML changes** |
 | Node count | 5 validators + 1 RPC | 3 validators |
-| U-1 / U-2 block heights | 30001 / 60001 | 30 / head+20 (≤50 block intervals) |
+| U-1 / U-2 block heights | 30001 / 60001 | 30 / head+60 (≤90 block intervals) |
 | Timestamp observation window | 24–168 hours | 2–10 minutes |
 | StakeHub registration (U-3) | All validators must register before the first breathe block | Same requirement; script sends registration txs automatically via IPC |
 | BlobScheduleConfig (U-4) | Production config file | Inline TOML minimal config |
@@ -67,13 +67,15 @@ InsecureUnlockAllowed = true
 NoUSB = true
 ```
 
-**U-2 through U-6 — `reinit_genesis()` in `lib.sh`:**
+**U-2 through U-6 — rolling genesis reinit:**
 `00-init.sh` writes `genesis.json` with only Berlin-and-below forks active; all
 higher forks are **absent** (nil — never scheduled).  Before each round, the U-N
-script adds the relevant fork fields to `genesis.json` and calls
-`reinit_genesis()`, which runs `geth init` on all 3 datadirs.  `geth init` stores
-the updated chainconfig in the database without wiping chain data (the genesis
-block hash is unchanged; only the stored fork parameters differ).
+script adds the relevant fork fields to `genesis.json` and does a rolling genesis
+reinit: each validator is stopped, `geth init` is run to update its stored
+chainconfig, then it is restarted and synced before moving to the next node.
+`geth init` stores the updated chainconfig in the database without wiping chain
+data (the genesis block hash is unchanged; only the stored fork parameters differ).
+2-of-3 quorum is maintained throughout — the chain keeps producing blocks.
 
 ```
 genesis.json after 00-init.sh:
@@ -82,7 +84,7 @@ genesis.json after 00-init.sh:
 
 genesis.json after U-2 script adds them:
   berlinBlock = 0
-  londonBlock = <head+20>, ramanujanBlock = <head+20>, ..., hertzfixBlock = <head+20>
+  londonBlock = <head+60>, ramanujanBlock = <head+60>, ..., hertzfixBlock = <head+60>
   # shanghaiTime absent (nil) — still not scheduled until U-3
 
 genesis.json after U-3 script adds them:
@@ -133,13 +135,13 @@ Corresponds to devnet Upgrade 1 (v0.2.0, `ParliaGenesisBlock = 30001`).
 
 Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
 
-**Local parameters:** `LONDON_BLOCK=<current head + 20>` (default); all 13 BSC historical block forks set to the same value
+**Local parameters:** `LONDON_BLOCK=<current head + 60>` (default); all 13 BSC historical block forks set to the same value
 
 **Prerequisites:** none
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Patch genesis.json with LONDON_BLOCK for all 14 fork fields; call `reinit_genesis()` on all 3 datadirs; restart validators
+2. Patch genesis.json with LONDON_BLOCK for all 14 fork fields; rolling genesis reinit (stop → `geth init` → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
 3. Wait for block height to pass LONDON_BLOCK; observe for 3 minutes
 
 **Verification:**

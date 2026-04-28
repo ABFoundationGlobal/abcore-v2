@@ -53,9 +53,9 @@ use_dev_keystore() {
 for n in 1 2 3; do use_dev_keystore "$n"; done
 
 # ── Genesis ───────────────────────────────────────────────────────────────────
-# Fork activation heights / timestamps are set to large placeholder values here.
-# Each U-N script calls reinit_genesis() with an updated genesis.json that
-# lowers the relevant parameter to the desired local test value.
+# Higher fork activation heights / timestamps are intentionally absent (nil/not
+# scheduled) in the genesis written here.  Each U-N script adds the relevant
+# fork fields to genesis.json and runs geth init to update the stored chainconfig.
 #
 # Exception: ParliaGenesisBlock is left absent; U-1 activates it via the
 # OverrideParliaGenesisBlock TOML field (no genesis reinit needed for U-1).

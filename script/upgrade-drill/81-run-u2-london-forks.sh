@@ -95,9 +95,10 @@ fi
 # ── Phase 2: update genesis.json while nodes are still running ───────────────
 #
 # We set all 14 fork parameters to LONDON_BLOCK, adding fields that were
-# previously absent (nil).  Only these fields are modified; everything else
-# (chainId, alloc, extraData, clique/parlia period/epoch) stays the same so
-# the genesis block hash remains unchanged and geth init succeeds.
+# previously absent (nil) and overwriting any existing values if present.
+# Only these fields are modified; everything else (chainId, alloc, extraData,
+# clique/parlia period/epoch) stays the same so the genesis block hash remains
+# unchanged and geth init succeeds.
 # Updating the file while nodes run is safe — geth reads chainconfig from the
 # database, not from genesis.json at runtime.
 
@@ -139,7 +140,7 @@ with open(genesis_path, 'w') as f:
 print(f'Updated {genesis_path}')
 PY
 
-# ── Phase 4: rolling genesis reinit ──────────────────────────────────────────
+# ── Phase 3: rolling genesis reinit ──────────────────────────────────────────
 #
 # Stop each validator in turn, run geth init to update its stored chainconfig,
 # then restart it and wait for it to re-join before moving to the next node.
