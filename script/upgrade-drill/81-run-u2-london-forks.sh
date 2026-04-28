@@ -158,26 +158,60 @@ PY
 
 reinit_genesis
 
-# ── Phase 6: start all validators ─────────────────────────────────────────────
+# ── Phase 6: start all validators with deadlock-recovery loop ────────────────
+#
+# Simultaneous restart from the same block height can trigger the same
+# seal-race deadlock as in U-1: all validators see themselves as "signed
+# recently" and nobody produces the next block.  Retry up to 5 times;
+# each stop+restart shifts the timing and breaks the deadlock.
 
-log "Starting validators with updated chainconfig (London at block ${LONDON_BLOCK})..."
-for n in 1 2 3; do launch_validator "$n"; done
+_attempt=0
+while true; do
+  _attempt=$(( _attempt + 1 ))
+  log "Restart attempt ${_attempt} with London fork at ${LONDON_BLOCK}..."
 
-_pids=()
-for n in 1 2 3; do
-  wait_for_ipc "$GETH" "$(val_ipc "$n")" 60 &
-  _pids+=($!)
+  for n in 1 2 3; do launch_validator "$n"; done
+
+  _pids=()
+  for n in 1 2 3; do
+    wait_for_ipc "$GETH" "$(val_ipc "$n")" 60 &
+    _pids+=($!)
+  done
+  for p in "${_pids[@]}"; do wait "$p"; done
+
+  wire_mesh
+
+  _pids=()
+  for n in 1 2 3; do
+    wait_for_min_peers "$GETH" "$(val_ipc "$n")" 2 30 &
+    _pids+=($!)
+  done
+  for p in "${_pids[@]}"; do wait "$p"; done
+
+  # Wait up to 60 s for the chain to advance 3 blocks from current head.
+  _head_before=$(head_number "$GETH" "$(val_ipc 1)")
+  _target=$(( _head_before + 3 ))
+
+  _alive=false
+  _deadline=$(( $(date +%s) + 60 ))
+  while [[ $(date +%s) -lt $_deadline ]]; do
+    _head=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
+    if [[ "$_head" -ge "$_target" ]]; then _alive=true; break; fi
+    sleep 2
+  done
+
+  if "$_alive"; then
+    log "Chain advancing (head=${_head} ≥ target=${_target}). Restart successful."
+    break
+  fi
+
+  if [[ "$_attempt" -ge 5 ]]; then
+    die "chain did not advance after ${_attempt} restart attempts — giving up"
+  fi
+
+  log "WARNING: chain stalled (seal-race deadlock?). Stopping for retry..."
+  stop_all
 done
-for p in "${_pids[@]}"; do wait "$p"; done
-
-wire_mesh
-
-_pids=()
-for n in 1 2 3; do
-  wait_for_min_peers "$GETH" "$(val_ipc "$n")" 2 30 &
-  _pids+=($!)
-done
-for p in "${_pids[@]}"; do wait "$p"; done
 
 log "Network up. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 
