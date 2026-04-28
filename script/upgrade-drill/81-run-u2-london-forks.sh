@@ -2,7 +2,7 @@
 # U-2: London + 13 BSC block forks (block height activation).
 #
 # Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
-# Local parameter default: LONDON_BLOCK = current head + 20.
+# Local parameter default: LONDON_BLOCK = current head + 60.
 #
 # Fork activations (all set to LONDON_BLOCK):
 #   londonBlock, ramanujanBlock, nielsBlock, mirrorSyncBlock, brunoBlock,
@@ -14,19 +14,19 @@
 #   - A pre-U-2 snapshot is recommended (run 07-snapshot.sh first)
 #
 # Steps:
-#   1. Determine LONDON_BLOCK (default: current head + 20)
-#   2. Wait for chain to reach LONDON_BLOCK - 5 (preparation window)
-#   3. Update genesis.json with LONDON_BLOCK for all 14 fork parameters
+#   1. Determine LONDON_BLOCK (default: current head + 60)
+#   2. Update genesis.json with LONDON_BLOCK for all 14 fork parameters
 #      (nodes remain running; genesis.json is only read at geth init time)
-#   4. Rolling genesis reinit: for each validator in turn —
+#   3. Rolling genesis reinit: for each validator in turn —
 #        stop → geth init → restart → re-peer → wait for sync
 #      2-of-3 quorum is maintained throughout; no seal-race deadlock.
-#   5. Wait for chain to cross LONDON_BLOCK
-#   6. Verify: chain agreement, baseFeePerGas present in post-fork block
-#   7. Leave nodes running for U-3
+#      All three nodes must complete before the chain reaches LONDON_BLOCK.
+#   4. Wait for chain to cross LONDON_BLOCK
+#   5. Verify: chain agreement, baseFeePerGas present in post-fork block
+#   6. Leave nodes running for U-3
 #
 # Environment:
-#   LONDON_BLOCK  fork block height (default: current head + 20)
+#   LONDON_BLOCK  fork block height (default: current head + 60)
 #   KEEP_RUNNING=1
 set -euo pipefail
 
@@ -76,37 +76,23 @@ wait_for_ipc "$GETH" "$(val_ipc 1)" 30
 
 if [[ -z "${LONDON_BLOCK:-}" ]]; then
   _cur=$(head_number "$GETH" "$(val_ipc 1)")
-  LONDON_BLOCK=$(( _cur + 20 ))
-  log "LONDON_BLOCK not set — defaulting to current head + 20 = ${LONDON_BLOCK}"
+  LONDON_BLOCK=$(( _cur + 60 ))
+  log "LONDON_BLOCK not set — defaulting to current head + 60 = ${LONDON_BLOCK}"
 fi
 
-PREP_STOP=$(( LONDON_BLOCK - 5 ))
-[[ "$PREP_STOP" -lt 1 ]] && PREP_STOP=1
 POST_FORK=$(( LONDON_BLOCK + 3 ))
 
 log "U-2 London + BSC block forks"
-log "  LONDON_BLOCK=${LONDON_BLOCK}, PREP_STOP=${PREP_STOP}, POST_FORK=${POST_FORK}"
+log "  LONDON_BLOCK=${LONDON_BLOCK}, POST_FORK=${POST_FORK}"
 
-# Sanity: LONDON_BLOCK must be ahead of current chain tip.
+# Sanity: LONDON_BLOCK must be sufficiently ahead for rolling reinit to finish.
 _head=$(head_number "$GETH" "$(val_ipc 1)")
 if [[ "$_head" -ge "$LONDON_BLOCK" ]]; then
   die "Current head (${_head}) is already past LONDON_BLOCK (${LONDON_BLOCK}).
-Set LONDON_BLOCK to a higher value, e.g. LONDON_BLOCK=$(( _head + 50 ))"
+Set LONDON_BLOCK to a higher value, e.g. LONDON_BLOCK=$(( _head + 60 ))"
 fi
 
-# ── Phase 2: wait for preparation window ─────────────────────────────────────
-
-log "Waiting for head to reach ${PREP_STOP} (5 blocks before fork)..."
-wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$PREP_STOP" 120
-
-# Drain any in-flight blocks so all nodes are at the same tip before stopping.
-wait_for_same_head --min-height "$PREP_STOP" "$GETH" "$(val_ipc 1)" 30 \
-  "$GETH" "$(val_ipc 2)" \
-  "$GETH" "$(val_ipc 3)"
-
-log "All nodes converged at $(head_number "$GETH" "$(val_ipc 1)"). Preparing genesis reinit..."
-
-# ── Phase 3: update genesis.json while nodes are still running ───────────────
+# ── Phase 2: update genesis.json while nodes are still running ───────────────
 #
 # We set all 14 fork parameters to LONDON_BLOCK, adding fields that were
 # previously absent (nil).  Only these fields are modified; everything else
@@ -191,9 +177,16 @@ done
 wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
   "$GETH" "$(val_ipc 2)" \
   "$GETH" "$(val_ipc 3)"
-log "Rolling reinit complete. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 
-# ── Phase 7: wait for the fork block ──────────────────────────────────────────
+_post_reinit=$(head_number "$GETH" "$(val_ipc 1)")
+log "Rolling reinit complete. Head=${_post_reinit}"
+if [[ "$_post_reinit" -ge "$LONDON_BLOCK" ]]; then
+  die "Rolling reinit took too long — chain already at ${_post_reinit} >= LONDON_BLOCK ${LONDON_BLOCK}.
+Re-run with a higher LONDON_BLOCK, e.g. LONDON_BLOCK=$(( _post_reinit + 60 ))"
+fi
+log "All validators updated. Head=${_post_reinit} < LONDON_BLOCK=${LONDON_BLOCK} — fork not yet reached."
+
+# ── Phase 4: wait for the fork block ──────────────────────────────────────────
 
 log "Waiting for all nodes to cross London fork block ${LONDON_BLOCK}..."
 _pids=()
