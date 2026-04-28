@@ -138,10 +138,7 @@ fork_fields = [
     'hertzfixBlock',
 ]
 for field in fork_fields:
-    if field not in cfg:
-        print(f'WARNING: {field} not found in genesis config — skipping', flush=True)
-        continue
-    old = cfg[field]
+    old = cfg.get(field, '<nil>')
     cfg[field] = london_block
     print(f'  {field}: {old} → {london_block}')
 

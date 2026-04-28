@@ -97,40 +97,12 @@ genesis = {
         'constantinopleBlock': 0,
         'petersburgBlock': 0,
         'istanbulBlock': 0,
-        # Berlin is always active; higher forks are overridden per round.
         'berlinBlock': 0,
-        # Placeholder heights — overridden by U-2 via reinit_genesis().
-        'londonBlock':      9_999_999,
-        'mirrorSyncBlock':  9_999_999,
-        'brunoBlock':       9_999_999,
-        'eulerBlock':       9_999_999,
-        'gibbsBlock':       9_999_999,
-        'nanoBlock':        9_999_999,
-        'moranBlock':       9_999_999,
-        'planckBlock':      9_999_999,
-        'lubanBlock':       9_999_999,
-        'platoBlock':       9_999_999,
-        'hertzBlock':       9_999_999,
-        'hertzfixBlock':    9_999_999,
-        # Placeholder timestamps — overridden by U-3 through U-6.
-        'shanghaiTime':  9_999_999_999,
-        'keplerTime':    9_999_999_999,
-        'feynmanTime':   9_999_999_999,
-        'feynmanFixTime': 9_999_999_999,
-        'cancunTime':    9_999_999_999,
-        'haberTime':     9_999_999_999,
-        'haberFixTime':  9_999_999_999,
-        'bohrTime':      9_999_999_999,
-        'pragueTime':    9_999_999_999,
-        'pascalTime':    9_999_999_999,
-        'lorentzTime':   9_999_999_999,
-        'maxwellTime':   9_999_999_999,
-        # blobSchedule is required by chainconfig validation whenever cancunTime
-        # or pragueTime is present.  Use the same defaults as BSC mainnet.
-        'blobSchedule': {
-            'cancun': {'target': 3, 'max': 6, 'baseFeeUpdateFraction': 3338477},
-            'prague': {'target': 6, 'max': 9, 'baseFeeUpdateFraction': 5007716},
-        },
+        # Higher forks (London, Shanghai, Cancun, …) are intentionally absent
+        # (nil) here.  Each U-N script adds the relevant fork fields to
+        # genesis.json and calls reinit_genesis() to update the stored
+        # chainconfig.  Absent fields are never-activated, which is the correct
+        # representation of the initial v0.1 Clique chain state.
         # Both clique and parlia are required so HasCliqueAndParlia() = true,
         # which enables DualConsensus when OverrideParliaGenesisBlock is set.
         'clique':  {'period': period, 'epoch': epoch},
