@@ -3,8 +3,9 @@
 # alongside the existing secp256k1 keystores.
 #
 # Run this script ONCE after building geth, then commit the output files.
-# The output is deterministic per-validator because it depends only on the
-# fixed operator address, the generated BLS private key, and CHAIN_ID=99988.
+# When bls-* files are absent, a fresh random BLS keypair is generated per validator.
+# Given a fixed operator address, generated BLS pubkey, and CHAIN_ID=99988, the
+# proof-of-possession computation is deterministic — but the keypair itself is random.
 #
 # Output per validator (in core/systemcontracts/parliagenesis/default/keystores/validator-N/):
 #   bls-password.txt  — wallet+account password (plain text: "blspassword")

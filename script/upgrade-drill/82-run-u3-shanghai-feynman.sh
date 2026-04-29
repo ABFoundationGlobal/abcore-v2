@@ -180,8 +180,10 @@ log "Rolling reinit complete. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 # The next block produced after FORK_TIME crosses the timestamp threshold,
 # triggering IsOnFeynman = true and firing initializeFeynmanContract.
 
-log "Waiting for activation timestamp ${FORK_TIME}..."
-wait_for_timestamp "$FORK_TIME"
+_now=$(date +%s)
+_wait_timeout=$(( FORK_TIME > _now ? (FORK_TIME - _now + 30) : 30 ))
+log "Waiting for activation timestamp ${FORK_TIME} (timeout=${_wait_timeout}s)..."
+wait_for_timestamp "$FORK_TIME" "$_wait_timeout"
 
 log "Waiting for chain to include activation block (timestamp ≥ ${FORK_TIME})..."
 _deadline=$(( $(date +%s) + 60 ))
@@ -226,15 +228,17 @@ log "  createValidator selector: 0x${_CREATE_SEL}"
 
 _LOCK_SEL=$(attach_exec "$GETH" "$IPC1" "web3.sha3('LOCK_AMOUNT()').slice(2,10)")
 _LOCK_RAW=$(attach_exec "$GETH" "$IPC1" \
-  "eth.call({to:'${STAKEHUB}', data:'0x${_LOCK_SEL}'})" 2>/dev/null || echo "0x0")
+  "eth.call({to:'${STAKEHUB}', data:'0x${_LOCK_SEL}'})" 2>/dev/null || true)
 LOCK_AMOUNT_WEI=$(python3 -c \
-  "v=int('${_LOCK_RAW}',16); print(v if v>0 else 10**18)")
+  "v=int('${_LOCK_RAW}',16); assert v>0, 'LOCK_AMOUNT() must be > 0'; print(v)" 2>/dev/null) \
+  || die "Failed to query non-zero StakeHub LOCK_AMOUNT(); contract may not be activated or configured yet (got: '${_LOCK_RAW}')"
 
 _MIN_SEL=$(attach_exec "$GETH" "$IPC1" "web3.sha3('minSelfDelegationBNB()').slice(2,10)")
 _MIN_RAW=$(attach_exec "$GETH" "$IPC1" \
-  "eth.call({to:'${STAKEHUB}', data:'0x${_MIN_SEL}'})" 2>/dev/null || echo "0x0")
+  "eth.call({to:'${STAKEHUB}', data:'0x${_MIN_SEL}'})" 2>/dev/null || true)
 MIN_SELF_WEI=$(python3 -c \
-  "v=int('${_MIN_RAW}',16); print(v if v>0 else 2000*10**18)")
+  "v=int('${_MIN_RAW}',16); assert v>0, 'minSelfDelegationBNB() must be > 0'; print(v)" 2>/dev/null) \
+  || die "Failed to query non-zero StakeHub minSelfDelegationBNB(); contract may not be initialized yet (got: '${_MIN_RAW}')"
 
 TX_VALUE_WEI=$(python3 -c "print(${MIN_SELF_WEI} + ${LOCK_AMOUNT_WEI})")
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_SELF_WEI} + ${LOCK_AMOUNT_WEI}))")

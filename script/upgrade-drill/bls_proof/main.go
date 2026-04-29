@@ -23,7 +23,6 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -41,6 +40,15 @@ func main() {
 	if *keystorePath == "" || *password == "" || *operatorHex == "" || *chainID == 0 {
 		flag.Usage()
 		os.Exit(1)
+	}
+	if !common.IsHexAddress(*operatorHex) {
+		log.Fatalf("invalid -operator address: %q", *operatorHex)
+	}
+	if common.HexToAddress(*operatorHex) == (common.Address{}) {
+		log.Fatal("-operator must not be the zero address")
+	}
+	if *chainID <= 0 {
+		log.Fatalf("invalid -chainid: %d (must be > 0)", *chainID)
 	}
 
 	// Read keystore.
@@ -84,9 +92,6 @@ func main() {
 	msgHash := crypto.Keccak256(msgInput)
 
 	sig := secretKey.Sign(msgHash)
-
-	operatorHexLower := strings.ToLower(strings.TrimPrefix(*operatorHex, "0x"))
-	_ = operatorHexLower
 
 	fmt.Printf("PUBKEY=%s\n", hex.EncodeToString(pubKeyBytes))
 	fmt.Printf("PROOF=0x%s\n", hex.EncodeToString(sig.Marshal()))
