@@ -251,6 +251,22 @@ PYEOF
             }
         }
 
+        // ── Stage 7：停止旧容器 ──────────────────────────────────────
+        stage('停止旧容器') {
+            steps {
+                sh """
+                    if docker ps -a --format '{{.Names}}' | grep -q '^${CONTAINER_NAME}\$'; then
+                        echo "发现旧容器 ${CONTAINER_NAME}，正在停止..."
+                        docker stop ${CONTAINER_NAME}
+                        docker rm   ${CONTAINER_NAME}
+                        echo "旧容器已清理"
+                    else
+                        echo "未发现旧容器，跳过"
+                    fi
+                """
+            }
+        }
+
         // ── Stage 6：初始化节点（geth init）─────────────────────────
         stage('初始化节点') {
             steps {
@@ -269,22 +285,6 @@ PYEOF
                             ${IMAGE_NAME} \\
                             init --datadir /data /data/genesis.json
                         echo "✅ geth init 完成"
-                    fi
-                """
-            }
-        }
-
-        // ── Stage 7：停止旧容器 ──────────────────────────────────────
-        stage('停止旧容器') {
-            steps {
-                sh """
-                    if docker ps -a --format '{{.Names}}' | grep -q '^${CONTAINER_NAME}\$'; then
-                        echo "发现旧容器 ${CONTAINER_NAME}，正在停止..."
-                        docker stop ${CONTAINER_NAME}
-                        docker rm   ${CONTAINER_NAME}
-                        echo "旧容器已清理"
-                    else
-                        echo "未发现旧容器，跳过"
                     fi
                 """
             }
