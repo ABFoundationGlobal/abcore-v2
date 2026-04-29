@@ -1,0 +1,403 @@
+// ============================================================
+// Jenkinsfile.newchain
+// 用途：从零启动一条全新的独立链（不依赖已有测试网）
+// 每台服务器单独跑一次 Job，和 Jenkinsfile 使用方式完全一致
+//
+// 节点布局：
+//   server-1 → val-0, val-1  (13.192.61.77)
+//   server-2 → val-2, val-3  (13.113.68.176)
+//   server-3 → val-4
+//   server-4 → rpc-0
+//
+// 前置条件：
+//   1. 各服务器 keystore 和 password.txt 已就位
+//      /data/devnet/val-N/keystore/UTC--...
+//      /data/devnet/val-N/password.txt
+//   2. 先跑 val-0，从 Stage 9 日志里拿到 enode
+//      其他节点构建时填入 BOOTNODES 参数
+// ============================================================
+
+pipeline {
+    agent { label "${params.SERVER}" }
+
+    parameters {
+        choice(
+            name: 'SERVER',
+            choices: ['server-1', 'server-2', 'server-3', 'server-4'],
+            description: '目标部署服务器'
+        )
+        choice(
+            name: 'NODE_ID',
+            choices: ['val-0', 'val-1', 'val-2', 'val-3', 'val-4', 'rpc-0'],
+            description: 'val-0~val-4=验证者节点  rpc-0=RPC节点'
+        )
+        string(
+            name: 'TAG',
+            defaultValue: 'v0.1.2',
+            description: '镜像版本号'
+        )
+        string(
+            name: 'CHAIN_ID',
+            defaultValue: '17140',
+            description: '新链 Chain ID'
+        )
+        string(
+            name: 'CHAIN_NAME',
+            defaultValue: 'devnet',
+            description: '链名称，用于数据目录和容器名'
+        )
+        string(
+            name: 'BOOTNODES',
+            defaultValue: '',
+            description: 'val-0 的 enode 地址（val-0 启动后从日志获取，其他节点填入此处）'
+        )
+        booleanParam(
+            name: 'RESET',
+            defaultValue: false,
+            description: '⚠️ 勾选后清空当前节点链数据，从 block 0 重新开始（keystore 不会删除）'
+        )
+    }
+
+    environment {
+        IMAGE_NAME     = "abfoundationglobal/abcore-v2:${params.TAG}"
+        TARBALL        = "abcore-v2-${params.TAG}-linux-amd64.tar.gz"
+        GITHUB_RELEASE = "https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${params.TAG}"
+        DATADIR        = "/data/${params.CHAIN_NAME}/${params.NODE_ID}"
+        CONTAINER_NAME = "${params.CHAIN_NAME}-${params.NODE_ID}"
+
+        // 5个 validator 地址（对应 val-0 ~ val-4 的 keystore）
+        VAL0_ADDR = "0x7D3903332Fa8183FE4270384dC2f3a2e6a748972"
+        VAL1_ADDR = "0xdD10174Bf84f31Be5009ca78a878740F1A983d25"
+        VAL2_ADDR = "0xEe806ACa8B8B983475Fd801c2bb8B7D006e10ffe"
+        VAL3_ADDR = "0x91666715c4215feD9b46618034333f98cC78De36"
+        VAL4_ADDR = "0x8Ef8d9e995788097d86C51c3d66D84cC824Bb4D7"
+    }
+
+    stages {
+
+        // ── Stage 1：参数校验 + 端口映射 ────────────────────────────
+        stage('参数确认') {
+            steps {
+                script {
+                    // SERVER / NODE_ID 合法性校验
+                    def validMapping = [
+                        'server-1': ['val-0', 'val-1'],
+                        'server-2': ['val-2', 'val-3'],
+                        'server-3': ['val-4'],
+                        'server-4': ['rpc-0']
+                    ]
+                    if (!validMapping[params.SERVER].contains(params.NODE_ID)) {
+                        error "❌ ${params.NODE_ID} 不属于 ${params.SERVER}，正确映射：${validMapping[params.SERVER]}"
+                    }
+
+                    // 端口映射
+                    def rpcPortMap = [
+                        'val-0': '19545', 'val-1': '19547',
+                        'val-2': '19545', 'val-3': '19547',
+                        'val-4': '19545', 'rpc-0': '19545'
+                    ]
+                    def wsPortMap = [
+                        'val-0': '19546', 'val-1': '19548',
+                        'val-2': '19546', 'val-3': '19548',
+                        'val-4': '19546', 'rpc-0': '19546'
+                    ]
+                    def p2pPortMap = [
+                        'val-0': '31300', 'val-1': '31301',
+                        'val-2': '31300', 'val-3': '31301',
+                        'val-4': '31300', 'rpc-0': '31300'
+                    ]
+
+                    env.RPC_PORT  = rpcPortMap[params.NODE_ID]
+                    env.WS_PORT   = wsPortMap[params.NODE_ID]
+                    env.P2P_PORT  = p2pPortMap[params.NODE_ID]
+                    env.NODE_ROLE = params.NODE_ID.startsWith('val') ? 'validator' : 'rpc'
+
+                    sh """
+                        echo "========================================="
+                        echo " 新链节点部署参数"
+                        echo "========================================="
+                        echo " 服务器    : ${params.SERVER}"
+                        echo " 节点ID    : ${params.NODE_ID}"
+                        echo " 节点角色  : ${env.NODE_ROLE}"
+                        echo " 链名称    : ${params.CHAIN_NAME}"
+                        echo " Chain ID  : ${params.CHAIN_ID}"
+                        echo " 目标版本  : ${params.TAG}"
+                        echo " 容器名    : ${CONTAINER_NAME}"
+                        echo " 数据目录  : ${DATADIR}"
+                        echo " RPC端口   : ${env.RPC_PORT}"
+                        echo " WS端口    : ${env.WS_PORT}"
+                        echo " P2P端口   : ${env.P2P_PORT}"
+                        echo " BOOTNODES : ${params.BOOTNODES ?: '无（val-0 首次启动不需要）'}"
+                        echo " 重置数据  : ${params.RESET}"
+                        echo "========================================="
+                    """
+                }
+            }
+        }
+
+        // ── Stage 2：下载镜像 ────────────────────────────────────────
+        stage('下载镜像') {
+            steps {
+                sh """
+                    set -e
+                    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '${IMAGE_NAME}'; then
+                        echo "本地已存在镜像 ${IMAGE_NAME}，跳过下载"
+                    else
+                        echo "开始下载镜像压缩包..."
+                        curl -L -o /tmp/${TARBALL} ${GITHUB_RELEASE}/${TARBALL}
+                        docker load < /tmp/${TARBALL}
+                        rm -f /tmp/${TARBALL}
+                        echo "镜像加载完成"
+                    fi
+                    docker images | grep abcore-v2 || true
+                """
+            }
+        }
+
+        // ── Stage 3：检查 keystore ───────────────────────────────────
+        stage('检查 keystore') {
+            when {
+                expression { env.NODE_ROLE == 'validator' }
+            }
+            steps {
+                sh """
+                    if [ -z "\$(ls -A ${DATADIR}/keystore 2>/dev/null)" ]; then
+                        echo "❌ keystore 不存在，请先放入 ${DATADIR}/keystore/"
+                        exit 1
+                    fi
+                    if [ ! -f "${DATADIR}/password.txt" ]; then
+                        echo "❌ password.txt 不存在，请先创建 ${DATADIR}/password.txt"
+                        exit 1
+                    fi
+                    echo "✅ keystore 和 password.txt 检查通过"
+                    ADDR=\$(ls ${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
+                    echo "validator 地址: \${ADDR}"
+                """
+            }
+        }
+
+        // ── Stage 4：生成 genesis.json ──────────────────────────────
+        // 用 5 个固定 validator 地址生成，和 PR #73 逻辑一致
+        stage('生成 genesis.json') {
+            steps {
+                sh """
+                    set -e
+                    python3 << PYEOF
+import json
+
+addrs = [
+    "${VAL0_ADDR}",
+    "${VAL1_ADDR}",
+    "${VAL2_ADDR}",
+    "${VAL3_ADDR}",
+    "${VAL4_ADDR}"
+]
+
+# 地址排序（Clique 要求升序）
+sorted_addrs = sorted([a.lower().replace("0x", "") for a in addrs])
+
+# 构造 extraData：32字节vanity + N个validator地址(各20字节) + 65字节seal
+extra = "0x" + "00"*32 + "".join(sorted_addrs) + "00"*65
+
+# 给每个 validator 预分配 10000 ETH
+alloc = {}
+for addr in addrs:
+    alloc[addr.lower()] = {"balance": "0x84595161401484a000000"}
+
+genesis = {
+    "config": {
+        "chainId": ${params.CHAIN_ID},
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "clique": {
+            "period": 3,
+            "epoch": 30000
+        }
+    },
+    "difficulty": "0x1",
+    "gasLimit": "0x47b760",
+    "extradata": extra,
+    "alloc": alloc
+}
+
+with open("/tmp/genesis.json", "w") as f:
+    json.dump(genesis, f, indent=2)
+
+print("genesis.json 已生成")
+print(f"chainId: {genesis['config']['chainId']}")
+print(f"validators ({len(sorted_addrs)}): {sorted_addrs}")
+PYEOF
+                """
+            }
+        }
+
+        // ── Stage 5：重置数据（仅 RESET=true 时执行）────────────────
+        stage('重置数据') {
+            when {
+                expression { params.RESET == true }
+            }
+            steps {
+                sh """
+                    echo "⚠️  清空 ${params.NODE_ID} 链数据..."
+                    sudo rm -rf ${DATADIR}/geth
+                    echo "✅ 链数据已清空，keystore 和 password.txt 保留"
+                """
+            }
+        }
+
+        // ── Stage 6：初始化节点（geth init）─────────────────────────
+        stage('初始化节点') {
+            steps {
+                sh """
+                    set -e
+                    sudo mkdir -p ${DATADIR}
+
+                    if [ -d "${DATADIR}/geth/chaindata" ]; then
+                        echo "已有链数据，跳过 init"
+                    else
+                        echo "执行 geth init..."
+                        docker run --rm \\
+                            --entrypoint geth \\
+                            -v ${DATADIR}:/data \\
+                            -v /tmp/genesis.json:/genesis.json \\
+                            ${IMAGE_NAME} \\
+                            init --datadir /data /genesis.json
+                        echo "✅ geth init 完成"
+                    fi
+                """
+            }
+        }
+
+        // ── Stage 7：停止旧容器 ──────────────────────────────────────
+        stage('停止旧容器') {
+            steps {
+                sh """
+                    if docker ps -a --format '{{.Names}}' | grep -q '^${CONTAINER_NAME}\$'; then
+                        echo "发现旧容器 ${CONTAINER_NAME}，正在停止..."
+                        docker stop ${CONTAINER_NAME}
+                        docker rm   ${CONTAINER_NAME}
+                        echo "旧容器已清理"
+                    else
+                        echo "未发现旧容器，跳过"
+                    fi
+                """
+            }
+        }
+
+        // ── Stage 8：启动节点 ────────────────────────────────────────
+        stage('启动节点') {
+            steps {
+                sh """
+                    set -e
+
+                    # validator 需要解锁地址
+                    EXTRA_ARGS=""
+                    if [ "${env.NODE_ROLE}" = "validator" ]; then
+                        ADDR=\$(ls ${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
+                        EXTRA_ARGS="--mine --unlock \${ADDR} --password ${DATADIR}/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
+                    fi
+
+                    # bootnodes（val-0 首次启动不需要）
+                    BOOTNODE_ARG=""
+                    if [ -n "${params.BOOTNODES}" ]; then
+                        BOOTNODE_ARG="--bootnodes ${params.BOOTNODES}"
+                    fi
+
+                    docker run -d \\
+                      --name ${CONTAINER_NAME} \\
+                      --restart unless-stopped \\
+                      -v ${DATADIR}:/data \\
+                      -p 0.0.0.0:${env.RPC_PORT}:8545 \\
+                      -p 0.0.0.0:${env.WS_PORT}:8546 \\
+                      -p 0.0.0.0:${env.P2P_PORT}:30303 \\
+                      -p 0.0.0.0:${env.P2P_PORT}:30303/udp \\
+                      --entrypoint geth \\
+                      ${IMAGE_NAME} \\
+                      --datadir /data \\
+                      --networkid ${params.CHAIN_ID} \\
+                      --port 30303 \\
+                      --http --http.addr 0.0.0.0 --http.port 8545 \\
+                             --http.vhosts '*' \\
+                             --http.api 'txpool,net,web3,eth,clique,admin' \\
+                      --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
+                             --ws.api 'txpool,net,web3,eth,clique' \\
+                      --syncmode full \\
+                      --gcmode archive \\
+                      --verbosity 3 \\
+                      \${BOOTNODE_ARG} \\
+                      \${EXTRA_ARGS}
+
+                    echo "✅ 容器已启动"
+                """
+            }
+        }
+
+        // ── Stage 9：验证部署 ────────────────────────────────────────
+        stage('验证部署') {
+            steps {
+                sh """
+                    echo "等待节点启动 10 秒..."
+                    sleep 10
+
+                    echo "--- 容器状态 ---"
+                    docker ps | grep ${CONTAINER_NAME} || true
+
+                    echo "--- 最新日志（30行）---"
+                    docker logs --tail=30 ${CONTAINER_NAME} 2>&1 || true
+
+                    echo "--- RPC 健康检查 ---"
+                    curl -s -X POST http://127.0.0.1:${env.RPC_PORT} \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' || true
+
+                    # val-0 首次启动时打印 enode，供其他节点使用
+                    if [ "${params.NODE_ID}" = "val-0" ]; then
+                        echo ""
+                        sleep 5
+                        ENODE=\$(curl -s -X POST http://127.0.0.1:${env.RPC_PORT} \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'])" 2>/dev/null || echo "获取失败，请手动执行：curl -s -X POST http://127.0.0.1:${env.RPC_PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}'")
+                        echo "========================================="
+                        echo " 复制以下 enode 到其他节点构建的 BOOTNODES 参数："
+                        echo " \${ENODE}"
+                        echo "========================================="
+                    fi
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            sh """
+                echo "========================================="
+                echo " ✅ 部署成功"
+                echo " 服务器  : ${params.SERVER}"
+                echo " 节点    : ${params.NODE_ID}"
+                echo " 链名称  : ${params.CHAIN_NAME}"
+                echo " ChainID : ${params.CHAIN_ID}"
+                echo " 版本    : ${params.TAG}"
+                echo " RPC     : http://0.0.0.0:${env.RPC_PORT}"
+                echo " WS      : ws://0.0.0.0:${env.WS_PORT}"
+                echo " P2P     : ${env.P2P_PORT}"
+                echo "========================================="
+            """
+        }
+        failure {
+            sh """
+                echo "========================================="
+                echo " ❌ 部署失败，请查看上方日志"
+                echo " 服务器: ${params.SERVER}"
+                echo " 节点  : ${params.NODE_ID}"
+                echo "========================================="
+            """
+        }
+    }
+}
