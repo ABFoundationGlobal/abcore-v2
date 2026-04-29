@@ -306,7 +306,7 @@ PYEOF
                     # bootnodes（val-0 首次启动不需要）
                     BOOTNODE_ARG=""
                     if [ -n "${params.BOOTNODES}" ]; then
-                        BOOTNODE_ARG="--bootnodes ${params.BOOTNODES}"
+                        BOOTNODE_ARG="--bootnodes=${params.BOOTNODES}"
                     fi
 
                     docker run -d \\
