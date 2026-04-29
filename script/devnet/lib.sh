@@ -12,7 +12,10 @@ DATA_DIR="${DATA_DIR:-$SCRIPT_DIR/data}"
 
 # IP that Docker containers use to reach ports bound on the host.
 # On Linux with the default bridge network this is the docker0 gateway (172.17.0.1).
-# Override with DOCKER_HOST_IP if your setup differs.
+# This is used for --nat extip so containers on THIS machine can reach each other
+# via host-bound ports. It is NOT the externally advertised IP for cross-server P2P;
+# Jenkins should override DOCKER_HOST_IP with the server's LAN/public IP when wiring
+# the multi-machine mesh (e.g. DOCKER_HOST_IP=192.168.1.10 ./start-single.sh ...).
 DOCKER_HOST_IP="${DOCKER_HOST_IP:-$(docker network inspect bridge \
     --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || echo 127.0.0.1)}"
 

@@ -15,7 +15,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib.sh"
+
+# Inline only the logging helpers needed here — avoids sourcing lib.sh which
+# unconditionally runs `docker network inspect` for DOCKER_HOST_IP detection.
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()    { echo -e "${GREEN}[INFO]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+section() { echo -e "\n${BLUE}===${NC} $* ${BLUE}===${NC}"; }
 
 CHAIN_ID="${CHAIN_ID:-17140}"
 GENESIS_OUT="${GENESIS_OUT:-$SCRIPT_DIR/genesis.json}"
@@ -47,6 +54,15 @@ if [[ ${#VALIDATOR_ADDRESSES[@]} -eq 0 ]]; then
     error "No validator addresses found."
     exit 1
 fi
+
+# Validate: each address must be 0x + 40 hex chars
+for addr in "${VALIDATOR_ADDRESSES[@]}"; do
+    clean=$(echo "$addr" | tr -d '[:space:]')
+    if ! echo "$clean" | grep -qiE '^0x[0-9a-f]{40}$'; then
+        error "Invalid address: '$addr' (expected 0x + 40 hex chars)"
+        exit 1
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Generate genesis.json

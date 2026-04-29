@@ -38,13 +38,13 @@ Password: empty string (DevNet only — never reuse on Testnet/Mainnet).
 | `val-N.address` | ✅ yes    | Plain-text address (public)     |
 | `val-N.json`    | ❌ no     | Keystore file (contains private key, gitignored) |
 
-The keystore files (`val-N.json`) must be present locally before running
-`01-start.sh`. Copy them onto each server before starting the devnet.
+The keystore files (`val-N.json`) must be present on each server before running
+`start-single.sh`. Copy the relevant files to each server before starting the devnet.
 They are excluded from git via `.gitignore`.
 
 ## Deployment
 
-Before running `./01-start.sh`, ensure the keystore files exist:
+Before running `./start-single.sh`, ensure the keystore files exist:
 
 ```bash
 ls script/devnet/keystores/val-{0,1,2,3,4}.json

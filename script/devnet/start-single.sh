@@ -88,7 +88,20 @@ for node in "${NODES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Step 0: stop existing containers and wipe data for specified nodes
+# Step 0: pull image (must happen before reset, which uses the image to wipe
+# root-owned chaindata via a throw-away container)
+# ---------------------------------------------------------------------------
+section "Pulling image"
+
+if docker image inspect "$IMAGE" &>/dev/null; then
+    info "Image $IMAGE already present locally, skipping pull."
+else
+    info "Pulling $IMAGE ..."
+    docker pull "$IMAGE"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 1: stop existing containers and wipe data for specified nodes
 # ---------------------------------------------------------------------------
 section "Reset: stopping containers and wiping data"
 
@@ -109,16 +122,9 @@ for node in "${NODES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Step 1: pull image and install keystores
+# Step 2: install keystores
 # ---------------------------------------------------------------------------
 section "Installing keystores"
-
-if docker image inspect "$IMAGE" &>/dev/null; then
-    info "Image $IMAGE already present locally, skipping pull."
-else
-    info "Pulling $IMAGE ..."
-    docker pull "$IMAGE"
-fi
 
 for node in "${NODES[@]}"; do
     if node_is_validator "$node"; then
