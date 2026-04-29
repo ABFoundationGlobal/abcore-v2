@@ -1,0 +1,315 @@
+// ============================================================
+// Jenkinsfile.init
+// 用途：一键初始化并启动全新独立链
+// 调用 Kai 的脚本：
+//   generate-genesis.sh  — 生成 genesis.json
+//   start-single.sh      — 每台服务器启动节点
+//
+// Jenkins 负责：
+//   1. 生成 genesis.json（在 Jenkins 控制机上）
+//   2. scp genesis.json 到各服务器
+//   3. SSH 到每台服务器执行 start-single.sh
+//   4. 收集 enode，做 P2P mesh wiring（addPeer）
+//   5. 健康检查验证出块
+//
+// 节点布局（测试阶段）：
+//   server-1 (13.192.61.77)  → val-0, val-1
+//   server-2 (13.113.68.176) → val-2, val-3, val-4（测试阶段复用）
+//
+// 前置条件：
+//   1. keystores/val-N.json 已放到 Jenkins workspace 的
+//      script/devnet/keystores/ 目录
+//   2. Jenkins SSH 凭证 ab-testnet-server-ssh 已配置
+//   3. Jenkins 容器已安装 python3
+// ============================================================
+
+pipeline {
+    agent { label 'server-1' }
+
+    parameters {
+        string(
+            name: 'V1_IMAGE',
+            defaultValue: 'ghcr.io/abfoundationglobal/abcore:v1.13.15',
+            description: 'v1 镜像名（用于启动初始 Clique 网络）'
+        )
+        string(
+            name: 'CHAIN_ID',
+            defaultValue: '17140',
+            description: '新链 Chain ID'
+        )
+        string(
+            name: 'CHAIN_NAME',
+            defaultValue: 'devnet',
+            description: '链名称，用于数据目录'
+        )
+        booleanParam(
+            name: 'RESET',
+            defaultValue: false,
+            description: '⚠️ 勾选后清空所有节点链数据，从 block 0 重新开始'
+        )
+    }
+
+    environment {
+        SERVER1_HOST     = "13.192.61.77"
+        SERVER2_HOST     = "13.113.68.176"
+        SERVER2_USER     = "songjian"
+        SERVER2_SSH_PORT = "22"
+        DEVNET_SCRIPT    = "${WORKSPACE}/script/devnet"
+    }
+
+    stages {
+
+        // ── Stage 1：参数确认 ────────────────────────────────────────
+        stage('参数确认') {
+            steps {
+                sh """
+                    echo "========================================="
+                    echo " 初始化新链参数"
+                    echo "========================================="
+                    echo " v1 镜像   : ${params.V1_IMAGE}"
+                    echo " Chain ID  : ${params.CHAIN_ID}"
+                    echo " 链名称    : ${params.CHAIN_NAME}"
+                    echo " 重置数据  : ${params.RESET}"
+                    echo "-----------------------------------------"
+                    echo " 节点分布："
+                    echo "   val-0, val-1 → server-1 (${SERVER1_HOST})"
+                    echo "   val-2, val-3, val-4 → server-2 (${SERVER2_HOST})"
+                    echo "========================================="
+
+                    # 验证 keystores 是否就位
+                    echo "检查 keystores..."
+                    for i in 0 1 2 3 4; do
+                        if [ ! -f "${DEVNET_SCRIPT}/keystores/val-\${i}.json" ]; then
+                            echo "❌ keystores/val-\${i}.json 不存在"
+                            exit 1
+                        fi
+                        echo "✅ val-\${i}.json 存在"
+                    done
+                """
+            }
+        }
+
+        // ── Stage 2：生成 genesis.json ──────────────────────────────
+        // 调用 Kai 的 generate-genesis.sh
+        stage('生成 genesis.json') {
+            steps {
+                sh """
+                    set -e
+                    cd ${DEVNET_SCRIPT}
+                    echo "生成 genesis.json..."
+                    CHAIN_ID=${params.CHAIN_ID} \
+                    GENESIS_OUT=/tmp/genesis.json \
+                    bash generate-genesis.sh
+                    echo "✅ genesis.json 生成完成"
+                    cat /tmp/genesis.json | python3 -c "import sys,json; g=json.load(sys.stdin); print('chainId:', g['config']['chainId'])"
+                """
+            }
+        }
+
+        // ── Stage 3：分发 genesis.json 到 server-2 ──────────────────
+        stage('分发 genesis.json') {
+            steps {
+                sshagent(['ab-testnet-server-ssh']) {
+                    sh """
+                        echo "分发 genesis.json 到 server-2..."
+                        scp -o StrictHostKeyChecking=no -P ${SERVER2_SSH_PORT} \
+                            /tmp/genesis.json \
+                            ${SERVER2_USER}@${SERVER2_HOST}:/tmp/genesis.json
+                        echo "✅ genesis.json 分发完成"
+                    """
+                }
+            }
+        }
+
+        // ── Stage 4：分发 keystores 到 server-2 ─────────────────────
+        stage('分发 keystores') {
+            steps {
+                sshagent(['ab-testnet-server-ssh']) {
+                    sh """
+                        echo "分发 val-2/val-3/val-4 keystore 到 server-2..."
+
+                        # 在 server-2 上创建 keystores 目录
+                        ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} \
+                            "mkdir -p ~/devnet/script/devnet/keystores"
+
+                        # 分发脚本文件
+                        scp -o StrictHostKeyChecking=no -P ${SERVER2_SSH_PORT} \
+                            ${DEVNET_SCRIPT}/start-single.sh \
+                            ${DEVNET_SCRIPT}/lib.sh \
+                            ${SERVER2_USER}@${SERVER2_HOST}:~/devnet/script/devnet/
+
+                        # 分发 keystores
+                        for i in 2 3 4; do
+                            scp -o StrictHostKeyChecking=no -P ${SERVER2_SSH_PORT} \
+                                ${DEVNET_SCRIPT}/keystores/val-\${i}.json \
+                                ${SERVER2_USER}@${SERVER2_HOST}:~/devnet/script/devnet/keystores/val-\${i}.json
+                            echo "✅ val-\${i}.json 分发完成"
+                        done
+
+                        # 分发 address 文件
+                        for i in 2 3 4; do
+                            scp -o StrictHostKeyChecking=no -P ${SERVER2_SSH_PORT} \
+                                ${DEVNET_SCRIPT}/keystores/val-\${i}.address \
+                                ${SERVER2_USER}@${SERVER2_HOST}:~/devnet/script/devnet/keystores/val-\${i}.address
+                        done
+
+                        # 授予执行权限
+                        ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} \
+                            "chmod +x ~/devnet/script/devnet/start-single.sh ~/devnet/script/devnet/lib.sh"
+
+                        echo "✅ keystores 分发完成"
+                    """
+                }
+            }
+        }
+
+        // ── Stage 5：server-1 启动 val-0, val-1 ─────────────────────
+        // 调用 Kai 的 start-single.sh
+        stage('启动 server-1 节点') {
+            steps {
+                sh """
+                    set -e
+                    cd ${DEVNET_SCRIPT}
+
+                    GENESIS_FILE=/tmp/genesis.json \
+                    DATA_DIR=/data/${params.CHAIN_NAME} \
+                    CHAIN_ID=${params.CHAIN_ID} \
+                    DOCKER_HOST_IP=${SERVER1_HOST} \
+                    bash start-single.sh val-0 val-1 ${params.V1_IMAGE}
+
+                    echo "✅ server-1 节点启动完成"
+                """
+            }
+        }
+
+        // ── Stage 6：server-2 启动 val-2, val-3, val-4 ──────────────
+        stage('启动 server-2 节点') {
+            steps {
+                sshagent(['ab-testnet-server-ssh']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                            set -e
+                            cd ~/devnet/script/devnet
+
+                            GENESIS_FILE=/tmp/genesis.json \
+                            DATA_DIR=/data/${params.CHAIN_NAME} \
+                            CHAIN_ID=${params.CHAIN_ID} \
+                            DOCKER_HOST_IP=${SERVER2_HOST} \
+                            bash start-single.sh val-2 val-3 val-4 ${params.V1_IMAGE}
+
+                            echo '✅ server-2 节点启动完成'
+                        "
+                    """
+                }
+            }
+        }
+
+        // ── Stage 7：P2P mesh wiring（admin_addPeer）────────────────
+        // 收集所有节点 enode，全网格互联
+        // 同台服务器用 172.17.0.1，跨服务器用外网 IP（需安全组开放）
+        stage('互联节点') {
+            steps {
+                sh """
+                    echo "等待所有节点 RPC 就绪..."
+                    sleep 15
+
+                    # 收集 server-1 节点 enode（val-0=19545, val-1=19546）
+                    VAL0_ENODE=\$(curl -sf -X POST http://127.0.0.1:19545 \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
+                    VAL0_ENODE=\$(echo \${VAL0_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
+                    echo "val-0 enode: \${VAL0_ENODE}"
+
+                    VAL1_ENODE=\$(curl -sf -X POST http://127.0.0.1:19546 \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
+                    VAL1_ENODE=\$(echo \${VAL1_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
+                    echo "val-1 enode: \${VAL1_ENODE}"
+
+                    # server-1 内部互联（用 172.17.0.1）
+                    if [ -n "\${VAL0_ENODE}" ] && [ -n "\${VAL1_ENODE}" ]; then
+                        VAL0_LOCAL=\$(echo \${VAL0_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
+                        VAL1_LOCAL=\$(echo \${VAL1_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
+
+                        curl -sf -X POST http://127.0.0.1:19545 \\
+                            -H 'Content-Type: application/json' \\
+                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL1_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
+                        curl -sf -X POST http://127.0.0.1:19546 \\
+                            -H 'Content-Type: application/json' \\
+                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL0_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
+                        echo "✅ server-1 内部互联完成"
+                    fi
+
+                    echo "⚠️  跨服务器互联需要 AWS 安全组开放 31300~31304 端口 TCP+UDP"
+                """
+            }
+        }
+
+        // ── Stage 8：验证出块 ────────────────────────────────────────
+        stage('验证出块') {
+            steps {
+                sh """
+                    echo "等待链出块（最多 60 秒）..."
+                    for i in \$(seq 1 30); do
+                        BLOCK=\$(curl -sf -X POST http://127.0.0.1:19545 \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
+                        if [ "\${BLOCK}" -gt "0" ]; then
+                            echo "✅ 链正在出块，当前块高: \${BLOCK}"
+                            break
+                        fi
+                        echo "  等待中... (\${i}/30) 块高=\${BLOCK}"
+                        sleep 2
+                    done
+
+                    echo ""
+                    echo "========================================="
+                    echo " 节点状态汇总（server-1）"
+                    echo "========================================="
+                    for node_port in "val-0:19545" "val-1:19546"; do
+                        NODE=\$(echo \${node_port} | cut -d: -f1)
+                        PORT=\$(echo \${node_port} | cut -d: -f2)
+                        BN=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                        PEERS=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                        printf "  %-8s block=%-6s peers=%s\\n" "\${NODE}" "\${BN}" "\${PEERS}"
+                    done
+                    echo "========================================="
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            sh """
+                echo "========================================="
+                echo " ✅ 初始化成功"
+                echo " Chain ID : ${params.CHAIN_ID}"
+                echo " 链名称   : ${params.CHAIN_NAME}"
+                echo " 镜像     : ${params.V1_IMAGE}"
+                echo "========================================="
+                echo " 后续操作："
+                echo " 1. 确认所有节点出块正常"
+                echo " 2. 开放 AWS 安全组 31300-31304 端口后跨服务器节点自动互联"
+                echo " 3. 升级使用 Jenkinsfile.rolling"
+                echo "========================================="
+            """
+        }
+        failure {
+            sh """
+                echo "========================================="
+                echo " ❌ 初始化失败，请查看上方日志"
+                echo "========================================="
+            """
+        }
+    }
+}
