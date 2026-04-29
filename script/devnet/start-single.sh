@@ -197,12 +197,12 @@ for node in "${NODES[@]}"; do
         --http \
         --http.addr "0.0.0.0" \
         --http.port 8545 \
-        --http.api "eth,net,web3,parlia,clique,admin,personal,debug" \
+        --http.api "eth,net,web3,clique,admin,personal,debug" \
         --http.corsdomain "*" \
         --ws \
         --ws.addr "0.0.0.0" \
         --ws.port 8546 \
-        --ws.api "eth,net,web3,parlia,clique,admin,personal" \
+        --ws.api "eth,net,web3,clique,admin,personal" \
         --syncmode full \
         --gcmode archive \
         --verbosity "$LOG_LEVEL" \
