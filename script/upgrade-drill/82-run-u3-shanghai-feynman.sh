@@ -36,7 +36,7 @@
 #     - blsProof:         proof-of-possession for chain-id 99988 (96 bytes),
 #                         from bls-proof.txt alongside the public key
 #     - commission:       rate=10 maxRate=100 maxChangeRate=5 (in 1e-4 units)
-#     - description:      moniker="val<N>", other fields empty
+#     - description:      moniker="Val<N>", other fields empty (first char must be uppercase)
 #   The whitelist (pre-populated in genesis) grants WHITELIST_VOTING_POWER
 #   election priority, but StakeHub registration is still required for the
 #   validator to appear in getValidatorElectionInfo at the breathe block.
@@ -209,7 +209,7 @@ wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$(( ACT_BLOCK + 2 ))" 30
 #   - voteAddress = pre-generated BLS public key (48 bytes, from bls-pubkey.txt)
 #   - blsProof    = proof-of-possession for chain-id 99988 (96 bytes, from bls-proof.txt)
 #   - commission  = (rate=10, maxRate=100, maxChangeRate=5)
-#   - description = (moniker="val<N>", identity="", website="", details="")
+#   - description = (moniker="Val<N>", identity="", website="", details="")
 # Function selector is computed via geth's web3.sha3().
 
 STAKEHUB="0x0000000000000000000000000000000000002002"
@@ -303,7 +303,7 @@ bls_enc = enc_bytes('${_bls_proof_hex}')     # 32 (len) + 96 (data) + 0 (pad) = 
 commission_enc = to32(10) + to32(100) + to32(5)  # 96 bytes
 
 # Param 5: description tuple (dynamic)
-mon_enc = enc_str(f'val{n}')
+mon_enc = enc_str(f'Val{n}')
 id_enc  = enc_str('')
 ws_enc  = enc_str('')
 det_enc = enc_str('')
