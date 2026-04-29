@@ -141,4 +141,4 @@ GENESIS_FILE=~/devnet/script/devnet/genesis.json \
 - Block height forks (steps 1–2): the fork block N/M is hardcoded in `params/config.go` at build time. Ensure the fork block is above the current chain height before upgrading.
 - Timestamp forks (steps 3–5): the activation timestamp T is hardcoded in the binary. All nodes across all servers must be upgraded before T arrives.
 - Rolling upgrade order: val-4 → val-0 → val-1 → val-2 → val-3 → rpc-0. At most 1 validator offline at a time (4/5 majority maintained).
-- For detailed upgrade procedures, observation windows, and rollback instructions, see `.claude/devnet-upgrade-plan.md`.
+- For detailed upgrade procedures, observation windows, and rollback instructions, see the [devnet upgrade plan](https://github.com/ABFoundationGlobal/abcore-v2/blob/devnet-upgrade-plan/docs/ops/devnet-upgrade-plan.md).

@@ -131,8 +131,7 @@ for node in "${NODES[@]}"; do
 
     if container_exists "$node"; then
         info "  Stopping $name ..."
-        docker stop "$name"
-        docker rm "$name"
+        docker rm -f "$name"
     fi
 
     local_extra_flags=()

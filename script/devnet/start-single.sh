@@ -139,13 +139,17 @@ section "Initialising chaindata"
 for node in "${NODES[@]}"; do
     local_dir="$(node_datadir "$node")"
     info "Initialising $node ..."
-    docker run --rm \
+    output=$(docker run --rm \
         -v "$local_dir:/data" \
         -v "$GENESIS_FILE:/genesis.json:ro" \
         --entrypoint geth \
         "$IMAGE" \
-        init --datadir /data /genesis.json \
-        2>&1 | grep -E "(ERR|WARN|Fatal)" || true
+        init --datadir /data /genesis.json 2>&1) || {
+        error "geth init failed for $node"
+        echo "$output" >&2
+        exit 1
+    }
+    echo "$output" | grep -E "(ERR|WARN|Fatal)" || true
 done
 
 # ---------------------------------------------------------------------------

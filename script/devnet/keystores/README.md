@@ -17,7 +17,7 @@ the `INIT_VALIDATORSET_BYTES` in the system contracts genesis bytecode.
 ## How These Were Generated
 
 ```bash
-GETH=/data/kai/workspace/ab/abcore-v2/build/bin/geth   # or any abcore-v1/v2 binary
+GETH=./build/bin/geth   # or: GETH=$(which geth)
 KS_DIR=script/devnet/keystores
 
 for i in 0 1 2 3 4; do

@@ -70,7 +70,7 @@ for node in "${NODES[@]}"; do
         bn=$(block_number "$port")
         peers=$(peer_count "$port")
         mining_raw=$(rpc_call "$port" eth_mining '[]' \
-            | python3 -c "import sys,json; print(json.load(sys.stdin).get('result','?'))" 2>/dev/null || echo "?")
+            | python3 -c "import sys,json; print(str(json.load(sys.stdin).get('result','?')).lower())" 2>/dev/null || echo "?")
         if [[ "$mining_raw" == "true" ]]; then mining="yes"; else mining="no"; fi
         printf "%-10s %-14s %-8s %-8s %-8s %s\n" "$node" "$name" "$bn" "$peers" "$mining" "$img"
     else

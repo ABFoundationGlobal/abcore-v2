@@ -122,7 +122,7 @@ peer_count() {
     echo $(( 16#${hex#0x} ))
 }
 
-# Wait until block number > threshold, polling every 2s up to timeout_s
+# Wait until block number >= min_block, polling every 2s up to timeout_s
 wait_for_block() {
     local port="$1"
     local min_block="${2:-1}"
