@@ -262,12 +262,12 @@ PYEOF
                         echo "已有链数据，跳过 init"
                     else
                         echo "执行 geth init..."
+                        cp /tmp/genesis.json ${DATADIR}/genesis.json
                         docker run --rm \\
                             --entrypoint geth \\
                             -v ${DATADIR}:/data \\
-                            -v /tmp/genesis.json:/genesis.json \\
                             ${IMAGE_NAME} \\
-                            init --datadir /data /genesis.json
+                            init --datadir /data /data/genesis.json
                         echo "✅ geth init 完成"
                     fi
                 """
