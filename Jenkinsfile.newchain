@@ -306,7 +306,10 @@ PYEOF
                     # 生成 config.toml（有 BOOTNODES 时自动生成，val-0 首次启动跳过）
                     CONFIG_ARG=""
                     if [ -n "${params.BOOTNODES}" ]; then
-                        sudo bash -c 'echo "[Node.P2P]" > ${DATADIR}/config.toml && echo "StaticNodes = [\"${params.BOOTNODES}\"]" >> ${DATADIR}/config.toml'
+                        sudo tee ${DATADIR}/config.toml > /dev/null << TOMLEOF
+[Node.P2P]
+StaticNodes = ["${params.BOOTNODES}"]
+TOMLEOF
                         CONFIG_ARG="--config /data/config.toml"
                         echo "✅ config.toml 已生成"
                     fi
