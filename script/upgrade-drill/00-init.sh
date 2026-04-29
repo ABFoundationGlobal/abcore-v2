@@ -48,6 +48,15 @@ use_dev_keystore() {
   cp "${src}/address.txt" "${dir}/address.txt"
   cp "${src}/password.txt" "$(val_pw "$n")"
   log "validator-${n}: $(cat "${dir}/address.txt")"
+
+  # Copy pre-generated BLS wallet for Fast Finality (created by 09-gen-bls-keys.sh).
+  if [[ -d "${src}/bls-wallet" ]]; then
+    mkdir -p "${dir}/bls/wallet"
+    cp -r "${src}/bls-wallet/." "${dir}/bls/wallet/"
+    log "validator-${n}: BLS wallet copied"
+  else
+    log "validator-${n}: no BLS wallet found at ${src}/bls-wallet (run 09-gen-bls-keys.sh to generate)"
+  fi
 }
 
 for n in 1 2 3; do use_dev_keystore "$n"; done
