@@ -147,30 +147,30 @@ $NODE_DIR/bin/geth attach --exec \
 export REPO_DIR=/opt/abcore-v2-repo
 
 # 方式 A：在验证机上直接构建（约 10 分钟）
-docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
+docker build -t abfoundation/abcore-v2:$TAG $REPO_DIR
 
 # 方式 B：导出镜像，传输后导入（适用于多台验证机且无法访问 GitHub 的环境）
 # 构建机执行：
-docker build -t abfoundationglobal/abcore-v2:$TAG $REPO_DIR
-docker save abfoundationglobal/abcore-v2:$TAG | gzip > abcore-v2.tar.gz
+docker build -t abfoundation/abcore-v2:$TAG $REPO_DIR
+docker save abfoundation/abcore-v2:$TAG | gzip > abcore-v2.tar.gz
 
 # 验证机执行：
 scp builder:/path/abcore-v2.tar.gz /tmp/
 docker load < /tmp/abcore-v2.tar.gz
-docker images | grep abfoundationglobal
+docker images | grep abfoundation/abcore-v2
 
 # 方式 C：从 GitHub Release 下载预构建镜像（推荐，无需本地构建环境）
 gh release download $TAG -R ABFoundationGlobal/abcore-v2 \
   --pattern "abcore-v2-${TAG}-linux-amd64.tar.gz" -D /tmp/
 
 docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
-docker images | grep abfoundationglobal
+docker images | grep abfoundation/abcore-v2
 ```
 
 验证镜像：
 
 ```bash
-docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
+docker run --rm --entrypoint geth abfoundation/abcore-v2:$TAG version
 ```
 
 ### 3.2 准备 Docker 目录结构
@@ -200,7 +200,7 @@ chmod 600 $DOCKER_DIR/nodedata/password.txt
 cat > $DOCKER_DIR/docker-compose.yml << 'EOF'
 services:
   validator:
-    image: abfoundationglobal/abcore-v2:${TAG}
+    image: abfoundation/abcore-v2:${TAG}
     container_name: abcore-validator
     restart: unless-stopped
     environment:

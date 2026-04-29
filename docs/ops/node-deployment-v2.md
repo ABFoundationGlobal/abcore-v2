@@ -87,14 +87,14 @@ docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
 ### 方式 B：本地构建
 
 ```bash
-docker build -t abfoundationglobal/abcore-v2:$TAG .
+docker build -t abfoundation/abcore-v2:$TAG .
 ```
 
 ### 方式 C：离线导入
 
 ```bash
 # 构建机导出
-docker save abfoundationglobal/abcore-v2:$TAG | gzip > abcore-v2.tar.gz
+docker save abfoundation/abcore-v2:$TAG | gzip > abcore-v2.tar.gz
 # 目标机导入
 docker load < abcore-v2.tar.gz
 ```
@@ -102,7 +102,7 @@ docker load < abcore-v2.tar.gz
 验证镜像：
 
 ```bash
-docker run --rm --entrypoint geth abfoundationglobal/abcore-v2:$TAG version
+docker run --rm --entrypoint geth abfoundation/abcore-v2:$TAG version
 ```
 
 ---
@@ -125,7 +125,7 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=$NETWORK \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \
@@ -155,7 +155,7 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=$NETWORK \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \
@@ -190,7 +190,7 @@ cp /path/to/abcore-v2/script/release/configs/$NETWORK/node.toml $DATADIR/node.to
 docker run -d \
   ... \
   -e BSC_CONFIG=/data/node.toml \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   --port 33333 \
   ...
 ```
@@ -235,7 +235,7 @@ mkdir -p $DATADIR
 docker run --rm -it \
   --entrypoint geth \
   -v $DATADIR:/data \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   account new --datadir /data
 # keystore 文件自动生成在 $DATADIR/keystore/UTC--...
 
@@ -257,7 +257,7 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=$NETWORK \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   --port 33333 \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.vhosts localhost \

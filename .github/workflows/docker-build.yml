@@ -10,7 +10,7 @@ on:
       push:
         description: 'Push image to Docker Hub (abfoundation/abcore-v2:<tag>)'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 jobs:
@@ -35,14 +35,14 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: ${{ inputs.push == true }}
+        if: inputs.push
         uses: docker/login-action@v3
         with:
           username: abfoundation
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and push image
-        if: ${{ inputs.push == true }}
+        if: inputs.push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -51,7 +51,7 @@ jobs:
           tags: abfoundation/abcore-v2:${{ steps.tag.outputs.value }}
 
       - name: Build image (local artifact only)
-        if: ${{ inputs.push != true }}
+        if: ${{ !inputs.push }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -60,11 +60,11 @@ jobs:
           outputs: type=docker,dest=/tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
 
       - name: Compress image tar
-        if: ${{ inputs.push != true }}
+        if: ${{ !inputs.push }}
         run: gzip /tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
 
       - name: Upload image artifact
-        if: ${{ inputs.push != true }}
+        if: ${{ !inputs.push }}
         uses: actions/upload-artifact@v4
         with:
           name: abcore-v2-${{ steps.tag.outputs.value }}-docker

@@ -139,9 +139,13 @@ jobs:
 
       - name: Set tag
         id: tag
+        env:
+          DOCKER_TAG: ${{ inputs.docker-tag }}
         run: |
-          if [[ -n "${{ inputs.docker-tag }}" ]]; then
-            echo "value=${{ inputs.docker-tag }}" >> "$GITHUB_OUTPUT"
+          # workflow_dispatch: use provided docker-tag input
+          # push (tag trigger): derive tag from GITHUB_REF
+          if [[ -n "$DOCKER_TAG" ]]; then
+            echo "value=$DOCKER_TAG" >> "$GITHUB_OUTPUT"
           else
             echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
