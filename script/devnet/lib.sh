@@ -22,11 +22,7 @@ DOCKER_HOST_IP="${DOCKER_HOST_IP:-$(docker network inspect bridge \
 # RPC ports: 19545–19550  (chosen to avoid collisions with testnet on 8545/18545/28545)
 # P2P ports: 31300–31305
 # ---------------------------------------------------------------------------
-ALL_NODES=(val-0 val-1 val-2 val-3 val-4 rpc-0)
-VALIDATOR_NODES=(val-0 val-1 val-2 val-3 val-4)
-
-# Rolling upgrade order: val-4 first (single server), then val-0..3, rpc-0 last
-UPGRADE_ORDER=(val-4 val-0 val-1 val-2 val-3 rpc-0)
+VALID_NODES=(val-0 val-1 val-2 val-3 val-4 rpc-0)
 
 node_rpc_port() {
     case "$1" in
@@ -36,6 +32,7 @@ node_rpc_port() {
         val-3) echo 19548 ;;
         val-4) echo 19549 ;;
         rpc-0) echo 19550 ;;
+        *) error "unknown node: $1"; return 1 ;;
     esac
 }
 
@@ -47,6 +44,7 @@ node_p2p_port() {
         val-3) echo 31303 ;;
         val-4) echo 31304 ;;
         rpc-0) echo 31305 ;;
+        *) error "unknown node: $1"; return 1 ;;
     esac
 }
 
@@ -60,6 +58,14 @@ node_datadir() {
 
 node_is_validator() {
     [[ "$1" != "rpc-0" ]]
+}
+
+node_is_valid_name() {
+    local node="$1" n
+    for n in "${VALID_NODES[@]}"; do
+        [[ "$n" == "$node" ]] && return 0
+    done
+    return 1
 }
 
 # ---------------------------------------------------------------------------
