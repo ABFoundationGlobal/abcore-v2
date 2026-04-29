@@ -303,10 +303,12 @@ PYEOF
                         EXTRA_ARGS="--mine --unlock \${ADDR} --password /data/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
                     fi
 
-                    # bootnodes（val-0 首次启动不需要）
-                    BOOTNODE_ARG=""
+                    # 生成 config.toml（有 BOOTNODES 时自动生成，val-0 首次启动跳过）
+                    CONFIG_ARG=""
                     if [ -n "${params.BOOTNODES}" ]; then
-                        BOOTNODE_ARG="--bootnodes=${params.BOOTNODES}"
+                        sudo bash -c 'echo "[Node.P2P]" > ${DATADIR}/config.toml && echo "StaticNodes = [\"${params.BOOTNODES}\"]" >> ${DATADIR}/config.toml'
+                        CONFIG_ARG="--config /data/config.toml"
+                        echo "✅ config.toml 已生成"
                     fi
 
                     docker run -d \\
@@ -319,6 +321,7 @@ PYEOF
                       -p 0.0.0.0:${env.P2P_PORT}:30303/udp \\
                       --entrypoint geth \\
                       ${IMAGE_NAME} \\
+                      \${CONFIG_ARG} \\
                       --datadir /data \\
                       --networkid ${params.CHAIN_ID} \\
                       --port 30303 \\
@@ -330,7 +333,6 @@ PYEOF
                       --syncmode full \\
                       --gcmode archive \\
                       --verbosity 3 \\
-                      \${BOOTNODE_ARG} \\
                       \${EXTRA_ARGS}
 
                     echo "✅ 容器已启动"
