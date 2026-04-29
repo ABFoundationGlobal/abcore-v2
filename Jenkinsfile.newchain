@@ -300,7 +300,7 @@ PYEOF
                     EXTRA_ARGS=""
                     if [ "${env.NODE_ROLE}" = "validator" ]; then
                         ADDR=\$(ls ${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
-                        EXTRA_ARGS="--mine --unlock \${ADDR} --password ${DATADIR}/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
+                        EXTRA_ARGS="--mine --unlock \${ADDR} --password /data/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
                     fi
 
                     # bootnodes（val-0 首次启动不需要）
