@@ -74,8 +74,6 @@ SORTED_ADDRS=$(printf '%s\n' "${VALIDATOR_ADDRESSES[@]}" \
     | sed 's/^0x//' \
     | sort)
 
-ADDR_COUNT=$(echo "$SORTED_ADDRS" | wc -l | tr -d ' ')
-
 python3 - <<PYEOF
 import json
 
