@@ -1,0 +1,449 @@
+#!/usr/bin/env bash
+# U-3: Shanghai + Kepler + Feynman (timestamp activation).
+#
+# Corresponds to devnet Upgrade 3 (v0.4.0 analogue).
+# Local parameter default: FORK_TIME = now + 120 s
+#
+# Fork activations (all set to FORK_TIME):
+#   shanghaiTime, keplerTime, feynmanTime
+#
+# Prerequisites:
+#   - U-2 has completed; nodes are running with London + BSC forks active
+#   - A pre-U-3 snapshot is recommended (run 07-snapshot.sh first)
+#
+# Steps:
+#   1. Determine FORK_TIME (default: now + 120s)
+#   2. Patch genesis.json with FORK_TIME for all 3 fork fields
+#      (nodes remain running; genesis.json is only read at geth init time)
+#   3. Rolling genesis reinit: for each validator in turn —
+#        stop → geth init → restart → re-peer → wait for sync
+#      2-of-3 quorum is maintained throughout.
+#   4. Wait for chain block timestamp to reach FORK_TIME
+#      (Feynman's initializeFeynmanContract fires on the activation block,
+#       initializing StakeHub, Governor, GovToken, Timelock, TokenRecoverPortal)
+#   5. Register all 3 validators with StakeHub.createValidator() via IPC
+#      (must complete before the first breathe block = next UTC midnight)
+#   6. Verify: withdrawals field in post-fork blocks, registration confirmed,
+#      chain still advancing, parlia_getValidators returns 3 validators
+#   7. Leave nodes running for U-4
+#
+# StakeHub registration note:
+#   Each validator calls createValidator with:
+#     - consensusAddress: the validator's own address
+#     - voteAddress:      28-zero-byte prefix + validator address (48 bytes)
+#     - blsProof:         96 zero bytes (local dev — no BLS key management)
+#     - commission:       rate=10 maxRate=100 maxChangeRate=5 (in 1e-4 units)
+#     - description:      moniker="val<N>", other fields empty
+#   The whitelist (pre-populated in genesis) grants WHITELIST_VOTING_POWER
+#   election priority, but StakeHub registration is still required for the
+#   validator to appear in getValidatorElectionInfo at the breathe block.
+#
+# Environment:
+#   FORK_TIME_OFFSET  seconds from now to activation (default: 120)
+#   FORK_TIME         explicit activation timestamp (overrides FORK_TIME_OFFSET)
+#   KEEP_RUNNING=1    leave nodes running after PASS
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/lib.sh"
+
+require_exe "$GETH"
+[[ -d "${DATADIR_ROOT}" ]] || die "DATADIR_ROOT not found: ${DATADIR_ROOT} — run 00-init.sh and U-1/U-2 first"
+require_file "${GENESIS_JSON}"
+require_file "${TOML_CONFIG}"
+
+_any_running=false
+for n in 1 2 3; do
+  pidfile=$(val_pid "$n")
+  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+    _any_running=true
+    break
+  fi
+done
+"$_any_running" || die "No validators are running. U-2 must complete successfully before U-3."
+
+pass() { log "  OK: $*"; PASS=$(( PASS + 1 )); }
+fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
+PASS=0
+FAIL=0
+
+cleanup_on_exit() {
+  local code=$?
+  [[ "$code" -eq 0 ]] && return
+  echo
+  if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
+    echo "FAILED (exit=${code}). KEEP_RUNNING=1 — nodes remain running." >&2
+  else
+    echo "FAILED (exit=${code}). Stopping nodes (logs preserved: ${DATADIR_ROOT})." >&2
+    stop_all || true
+  fi
+  exit "$code"
+}
+trap cleanup_on_exit EXIT
+
+# ── Phase 1: determine FORK_TIME ─────────────────────────────────────────────
+
+wait_for_ipc "$GETH" "$(val_ipc 1)" 30
+
+if [[ -z "${FORK_TIME:-}" ]]; then
+  FORK_TIME=$(( $(date +%s) + ${FORK_TIME_OFFSET:-120} ))
+  log "FORK_TIME not set — defaulting to now + ${FORK_TIME_OFFSET:-120}s = ${FORK_TIME}"
+fi
+
+log "U-3 Shanghai + Kepler + Feynman"
+log "  FORK_TIME=${FORK_TIME}"
+
+_now=$(date +%s)
+if [[ "$_now" -ge "$FORK_TIME" ]]; then
+  die "FORK_TIME (${FORK_TIME}) is in the past. Set FORK_TIME to a future timestamp."
+fi
+
+# Breathe block fires at the next UTC day boundary (BreatheBlockInterval = 86400s in Go code).
+# Registration must complete before then.
+_next_breathe=$(( ((_now / 86400) + 1) * 86400 ))
+_breathe_in=$(( _next_breathe - _now ))
+log "Next breathe block (UTC midnight) in ${_breathe_in}s. Registration must complete before then."
+if [[ "$_breathe_in" -lt 300 ]]; then
+  log "WARNING: breathe block in < 5 minutes — registration window is tight"
+fi
+
+# ── Phase 2: patch genesis.json while nodes are still running ────────────────
+#
+# Add shanghaiTime, keplerTime, feynmanTime = FORK_TIME.
+# These were absent (nil) after U-2.  Updating the file while nodes run is
+# safe — geth reads chainconfig from the database, not genesis.json at runtime.
+
+export GENESIS_JSON FORK_TIME
+python3 - <<'PY'
+import json, os
+
+genesis_path = os.environ['GENESIS_JSON']
+fork_time = int(os.environ['FORK_TIME'])
+
+with open(genesis_path) as f:
+    genesis = json.load(f)
+
+cfg = genesis['config']
+for field in ('shanghaiTime', 'keplerTime', 'feynmanTime'):
+    old = cfg.get(field, '<nil>')
+    cfg[field] = fork_time
+    print(f'  {field}: {old} → {fork_time}')
+
+with open(genesis_path, 'w') as f:
+    json.dump(genesis, f, indent=2)
+    f.write('\n')
+print(f'Updated {genesis_path}')
+PY
+
+# ── Phase 3: rolling genesis reinit ──────────────────────────────────────────
+#
+# Stop each validator, run geth init to store the updated chainconfig, restart
+# and wait for sync.  2-of-3 quorum maintained throughout.
+
+log "Starting rolling genesis reinit (2-of-3 quorum maintained throughout)..."
+for n in 1 2 3; do
+  ref=$(( n == 1 ? 2 : 1 ))
+
+  log "Rolling reinit: stopping validator-${n}..."
+  stop_pidfile "$(val_pid "$n")"
+
+  log "Rolling reinit: geth init validator-${n}..."
+  "$GETH" init --datadir "$(val_dir "$n")" "${GENESIS_JSON}" 2>/dev/null
+
+  log "Rolling reinit: starting validator-${n}..."
+  launch_validator "$n"
+  wait_for_ipc "$GETH" "$(val_ipc "$n")" 60
+
+  for peer in 1 2 3; do
+    [[ "$peer" -eq "$n" ]] && continue
+    _enode=$(get_enode "$GETH" "$(val_ipc "$peer")" 2>/dev/null || true)
+    [[ -n "$_enode" ]] && add_peer "$GETH" "$(val_ipc "$n")" "$_enode" >/dev/null 2>&1 || true
+  done
+
+  _target=$(head_number "$GETH" "$(val_ipc "$ref")" 2>/dev/null || echo 1)
+  log "Rolling reinit: waiting for validator-${n} to reach head ${_target}..."
+  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$_target" 120
+  log "Rolling reinit: validator-${n} ready (head=$(head_number "$GETH" "$(val_ipc "$n")"))."
+done
+
+wait_for_same_head "$GETH" "$(val_ipc 1)" 60 \
+  "$GETH" "$(val_ipc 2)" \
+  "$GETH" "$(val_ipc 3)"
+log "Rolling reinit complete. Head=$(head_number "$GETH" "$(val_ipc 1)")"
+
+# ── Phase 4: wait for fork activation block ───────────────────────────────────
+#
+# wait_for_timestamp blocks until the system clock reaches FORK_TIME.
+# The next block produced after FORK_TIME crosses the timestamp threshold,
+# triggering IsOnFeynman = true and firing initializeFeynmanContract.
+
+log "Waiting for activation timestamp ${FORK_TIME}..."
+wait_for_timestamp "$FORK_TIME"
+
+log "Waiting for chain to include activation block (timestamp ≥ ${FORK_TIME})..."
+_deadline=$(( $(date +%s) + 60 ))
+ACT_BLOCK=0
+while [[ $(date +%s) -lt $_deadline ]]; do
+  _ts=$(attach_exec "$GETH" "$(val_ipc 1)" "eth.getBlock('latest').timestamp" 2>/dev/null || echo 0)
+  _bn=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo 0)
+  if [[ "${_ts:-0}" -ge "${FORK_TIME}" ]]; then
+    ACT_BLOCK=$_bn
+    log "Activation block included: block=${ACT_BLOCK}, timestamp=${_ts}."
+    break
+  fi
+  sleep 1
+done
+[[ "$ACT_BLOCK" -gt 0 ]] || die "Timed out waiting for activation block"
+
+# Allow a couple of extra blocks for system transactions to propagate.
+wait_for_head_at_least "$GETH" "$(val_ipc 1)" "$(( ACT_BLOCK + 2 ))" 30
+
+# ── Phase 5: register validators with StakeHub ───────────────────────────────
+#
+# StakeHub.createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))
+#
+# ABI encoding is computed entirely in Python (stdlib only):
+#   - voteAddress = 28-zero-byte prefix + 20-byte validator address (48 bytes)
+#   - blsProof    = 96 zero bytes
+#   - commission  = (rate=10, maxRate=100, maxChangeRate=5)
+#   - description = (moniker="val<N>", identity="", website="", details="")
+# Function selector is computed via geth's web3.sha3().
+
+STAKEHUB="0x0000000000000000000000000000000000002002"
+IPC1=$(val_ipc 1)
+
+log "Querying StakeHub contract parameters..."
+
+_CREATE_SIG="createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))"
+_CREATE_SEL=$(attach_exec "$GETH" "$IPC1" \
+  "web3.sha3('${_CREATE_SIG}').slice(2,10)")
+[[ -n "$_CREATE_SEL" && "${#_CREATE_SEL}" -eq 8 ]] \
+  || die "Failed to compute createValidator selector (got: '${_CREATE_SEL}')"
+log "  createValidator selector: 0x${_CREATE_SEL}"
+
+_LOCK_SEL=$(attach_exec "$GETH" "$IPC1" "web3.sha3('LOCK_AMOUNT()').slice(2,10)")
+_LOCK_RAW=$(attach_exec "$GETH" "$IPC1" \
+  "eth.call({to:'${STAKEHUB}', data:'0x${_LOCK_SEL}'})" 2>/dev/null || echo "0x0")
+LOCK_AMOUNT_WEI=$(python3 -c \
+  "v=int('${_LOCK_RAW}',16); print(v if v>0 else 10**18)")
+
+_MIN_SEL=$(attach_exec "$GETH" "$IPC1" "web3.sha3('minSelfDelegationBNB()').slice(2,10)")
+_MIN_RAW=$(attach_exec "$GETH" "$IPC1" \
+  "eth.call({to:'${STAKEHUB}', data:'0x${_MIN_SEL}'})" 2>/dev/null || echo "0x0")
+MIN_SELF_WEI=$(python3 -c \
+  "v=int('${_MIN_RAW}',16); print(v if v>0 else 2000*10**18)")
+
+TX_VALUE_WEI=$(python3 -c "print(${MIN_SELF_WEI} + ${LOCK_AMOUNT_WEI})")
+TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_SELF_WEI} + ${LOCK_AMOUNT_WEI}))")
+log "  LOCK_AMOUNT:           ${LOCK_AMOUNT_WEI} wei"
+log "  minSelfDelegationBNB:  ${MIN_SELF_WEI} wei"
+log "  Registration value:    ${TX_VALUE_WEI} wei (${TX_VALUE_HEX})"
+
+log "Sending StakeHub registration transactions..."
+declare -a REG_TX=()
+for n in 1 2 3; do
+  addr=$(val_addr "$n")
+  addr_lower=$(echo "$addr" | tr '[:upper:]' '[:lower:]')
+  addr_hex="${addr_lower#0x}"
+
+  # ABI-encode createValidator call body (pure Python, no external libs).
+  # Layout (offsets in bytes from start of encoded args):
+  #   [0..31]    address (static, 32 bytes)
+  #   [32..63]   offset to voteAddress data (dynamic)
+  #   [64..95]   offset to blsProof data (dynamic)
+  #   [96..191]  commission tuple (static inline: 3×32 bytes)
+  #   [192..223] offset to description data (dynamic)
+  #   [224.....]  tail: voteAddress, blsProof, description
+  calldata_body=$(python3 - <<PY
+def to32(n):
+    return n.to_bytes(32, 'big').hex()
+
+def enc_bytes(data_hex):
+    data = bytes.fromhex(data_hex)
+    n = len(data)
+    pad = (32 - n % 32) % 32
+    return to32(n) + data_hex + '00' * pad
+
+def enc_str(s):
+    return enc_bytes(s.encode().hex())
+
+addr_hex = '${addr_hex}'
+n = ${n}
+
+# Param 1: address (left-padded to 32 bytes)
+p_addr = '00' * 12 + addr_hex
+
+# Param 2: voteAddress — 28 zero bytes + 20-byte address = 48 bytes
+vote_enc = enc_bytes('00' * 28 + addr_hex)   # 96 bytes
+
+# Param 3: blsProof — 96 zero bytes
+bls_enc = enc_bytes('00' * 96)               # 128 bytes
+
+# Param 4: commission tuple (static, inline in head): rate=10 maxRate=100 maxChangeRate=5
+commission_enc = to32(10) + to32(100) + to32(5)  # 96 bytes
+
+# Param 5: description tuple (dynamic)
+mon_enc = enc_str(f'val{n}')
+id_enc  = enc_str('')
+ws_enc  = enc_str('')
+det_enc = enc_str('')
+inner_head = 4 * 32           # 128 bytes
+mon_off = inner_head
+id_off  = mon_off + len(mon_enc) // 2
+ws_off  = id_off  + len(id_enc)  // 2
+det_off = ws_off  + len(ws_enc)  // 2
+desc_enc = (to32(mon_off) + to32(id_off) + to32(ws_off) + to32(det_off)
+            + mon_enc + id_enc + ws_enc + det_enc)
+
+# Main head offsets (from position 0 of the encoded args)
+HEAD = 32 + 32 + 32 + 96 + 32   # = 224
+vote_off = HEAD
+bls_off  = vote_off + len(vote_enc) // 2
+desc_off = bls_off  + len(bls_enc)  // 2
+
+head = (p_addr
+        + to32(vote_off) + to32(bls_off)
+        + commission_enc
+        + to32(desc_off))
+
+print(head + vote_enc + bls_enc + desc_enc)
+PY
+)
+
+  CALLDATA="0x${_CREATE_SEL}${calldata_body}"
+
+  log "  Registering validator-${n} (${addr})..."
+  _tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \
+    "eth.sendTransaction({from:'${addr}',to:'${STAKEHUB}',value:'${TX_VALUE_HEX}',gas:2000000,data:'${CALLDATA}'})" \
+    2>/dev/null || echo "")
+  log "    tx=${_tx}"
+  REG_TX+=("$_tx")
+done
+
+# Wait for registration txs to be mined (1-block latency on 1s blocks).
+log "Waiting for registration transactions to be mined (5s)..."
+sleep 5
+
+# Verify receipt status for each registration.
+for i in 0 1 2; do
+  n=$(( i + 1 ))
+  tx="${REG_TX[$i]:-}"
+  if [[ -z "$tx" || "$tx" == "null" ]]; then
+    fail "validator-${n}: registration tx not sent"
+    continue
+  fi
+  _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+    "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:null;})()" \
+    2>/dev/null || echo "null")
+  if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
+    pass "validator-${n}: StakeHub registration confirmed (tx=${tx:0:14}…)"
+  else
+    fail "validator-${n}: registration tx failed or not mined (status=${_status}, tx=${tx})"
+  fi
+done
+
+# ── Phase 6: wait for post-fork observation window ───────────────────────────
+
+POST_OBS=$(( ACT_BLOCK + 5 ))
+log "Waiting for nodes to reach block ${POST_OBS} for verification..."
+_pids=()
+for n in 1 2 3; do
+  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$POST_OBS" 180 &
+  _pids+=($!)
+done
+for p in "${_pids[@]}"; do wait "$p"; done
+log "All nodes at or past block ${POST_OBS}. Head=$(head_number "$GETH" "$(val_ipc 1)")"
+
+log "Observing chain for 3 minutes..."
+_obs_end=$(( $(date +%s) + 180 ))
+while [[ $(date +%s) -lt $_obs_end ]]; do
+  _rem=$(( _obs_end - $(date +%s) ))
+  _h=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
+  log "  ${_rem}s remaining, head=${_h}"
+  sleep 30
+done
+
+# ── Phase 7: verify ──────────────────────────────────────────────────────────
+
+log "Running U-3 verification..."
+
+# 1. All 3 nodes agree on block hash at activation block.
+ref_hash=$(block_hash_at "$GETH" "$IPC1" "$ACT_BLOCK")
+for n in 2 3; do
+  h=$(block_hash_at "$GETH" "$(val_ipc "$n")" "$ACT_BLOCK")
+  if [[ "$h" == "$ref_hash" && -n "$h" && "$h" != "null" ]]; then
+    pass "val-${n} agrees on hash at activation block ${ACT_BLOCK}: ${ref_hash:0:14}…"
+  else
+    fail "val-${n} hash mismatch at block ${ACT_BLOCK}: got ${h}, expected ${ref_hash}"
+  fi
+done
+
+# 2. Post-fork block has withdrawals field (Shanghai EIP-4895).
+# Use an explicit null/undefined guard: typeof null === "object" in JS, so
+# checking typeof alone would false-positive when geth returns null.
+_wval=$(attach_exec "$GETH" "$IPC1" \
+  "(function(){var w=eth.getBlock(${ACT_BLOCK}).withdrawals;return(w!==null&&w!==undefined)?'present':'absent';})()" \
+  2>/dev/null || echo "absent")
+if [[ "$_wval" == "present" ]]; then
+  pass "block ${ACT_BLOCK} withdrawals field present (Shanghai EIP-4895 active)"
+else
+  fail "block ${ACT_BLOCK} withdrawals absent (Shanghai not activated?)"
+fi
+
+# 3. Pre-fork block does NOT have withdrawals.
+if [[ "$ACT_BLOCK" -gt 1 ]]; then
+  _pre_wval=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var w=eth.getBlock($((ACT_BLOCK-1))).withdrawals;return(w!==null&&w!==undefined)?'present':'absent';})()" \
+    2>/dev/null || echo "absent")
+  if [[ "$_pre_wval" == "absent" ]]; then
+    pass "block $(( ACT_BLOCK - 1 )) has no withdrawals (pre-fork, expected)"
+  else
+    fail "block $(( ACT_BLOCK - 1 )) withdrawals present (fork fired too early?)"
+  fi
+fi
+
+# 4. Chain still advancing.
+tip=$(head_number "$GETH" "$IPC1")
+if [[ "$tip" -gt "$POST_OBS" ]]; then
+  pass "Chain advancing: current head=${tip}"
+else
+  fail "Chain stalled at head=${tip} (expected > ${POST_OBS})"
+fi
+
+# 5. parlia_getValidators returns 3 validators.
+HTTP1="http://127.0.0.1:$(http_port 1)"
+parlia_raw=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","method":"parlia_getValidators","params":["latest"],"id":1}' \
+  2>/dev/null || true)
+if echo "$parlia_raw" | grep -q '"result"'; then
+  parlia_count=$(echo "$parlia_raw" | python3 -c \
+    "import json,sys; print(len(json.load(sys.stdin).get('result') or []))" 2>/dev/null || echo 0)
+  if [[ "$parlia_count" -eq 3 ]]; then
+    pass "parlia_getValidators(latest) returned ${parlia_count} validators"
+  else
+    fail "parlia_getValidators(latest) returned ${parlia_count} validators (expected 3)"
+  fi
+else
+  fail "parlia_getValidators HTTP call failed: ${parlia_raw}"
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+echo
+echo "===================================="
+echo "  U-3 results: PASS=${PASS} FAIL=${FAIL}"
+echo "===================================="
+
+if [[ "$FAIL" -gt 0 ]]; then
+  echo "FAILED" >&2
+  exit 1
+fi
+
+if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
+  echo "PASS (U-3). Nodes remain running. Run 07-snapshot.sh before U-4."
+  exit 0
+fi
+
+echo "PASS (U-3). Nodes remain running in Feynman mode."
+echo "Next: bash script/upgrade-drill/07-snapshot.sh && bash script/upgrade-drill/83-run-u4-cancun-haber.sh"
