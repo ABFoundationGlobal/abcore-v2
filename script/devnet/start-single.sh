@@ -147,10 +147,10 @@ for node in "${NODES[@]}"; do
     info "Initialising $node ..."
     output=$(docker run --rm \
         -v "$local_dir:/data" \
-        -v "$GENESIS_FILE:/genesis.json:ro" \
+        -v "$GENESIS_FILE:/tmp/genesis.json:ro" \
         --entrypoint geth \
         "$IMAGE" \
-        init --datadir /data /genesis.json 2>&1) || {
+        init --datadir /data /tmp/genesis.json 2>&1) || {
         error "geth init failed for $node"
         echo "$output" >&2
         exit 1
