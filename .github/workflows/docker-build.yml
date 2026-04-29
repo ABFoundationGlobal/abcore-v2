@@ -7,6 +7,11 @@ on:
         description: 'Image tag (e.g. v1.0.0) — defaults to short commit SHA'
         required: false
         default: ''
+      push:
+        description: 'Push image to Docker Hub (abfoundation/abcore-v2:<tag>)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   build:
@@ -29,7 +34,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Log in to Docker Hub
+        if: ${{ inputs.push == true }}
+        uses: docker/login-action@v3
+        with:
+          username: abfoundation
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build and push image
+        if: ${{ inputs.push == true }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: abfoundation/abcore-v2:${{ steps.tag.outputs.value }}
+
+      - name: Build image (local artifact only)
+        if: ${{ inputs.push != true }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -38,9 +60,11 @@ jobs:
           outputs: type=docker,dest=/tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
 
       - name: Compress image tar
+        if: ${{ inputs.push != true }}
         run: gzip /tmp/abcore-v2-${{ steps.tag.outputs.value }}.tar
 
       - name: Upload image artifact
+        if: ${{ inputs.push != true }}
         uses: actions/upload-artifact@v4
         with:
           name: abcore-v2-${{ steps.tag.outputs.value }}-docker
