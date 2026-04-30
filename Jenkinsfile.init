@@ -606,14 +606,14 @@ PYEOF
                             -H 'Content-Type: application/json' \\
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
+                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
 
                     def val1Enode = sh(script: """
                         curl -sf -X POST http://${dockerGw}:19547 \\
                             -H 'Content-Type: application/json' \\
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
+                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
 
                     echo "val-0 enode: ${val0Enode}"
                     echo "val-1 enode: ${val1Enode}"
@@ -643,7 +643,7 @@ PYEOF
                                     -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
                                     | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
                             "
-                        """, returnStdout: true).trim()
+                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
 
                         def val3Enode = sh(script: """
                             ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
@@ -652,7 +652,7 @@ PYEOF
                                     -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
                                     | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
                             "
-                        """, returnStdout: true).trim()
+                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
 
                         echo "val-2 enode: ${val2Enode}"
                         echo "val-3 enode: ${val3Enode}"
