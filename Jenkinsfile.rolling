@@ -358,22 +358,22 @@ ENDSSH
                     """
                     sshagent(['ab-testnet-server-ssh']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                for node_port in val-2:19545 val-3:19547; do
-                                    NODE=\\\$(echo \\\$node_port | cut -d: -f1)
-                                    PORT=\\\$(echo \\\$node_port | cut -d: -f2)
-                                    BN=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
-                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '?')
-                                    PEERS=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \\\\
-                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '?')
-                                    IMG=\\\$(docker inspect --format '{{.Config.Image}}' devnet-\\\$NODE 2>/dev/null || echo 'unknown')
-                                    printf '  %-8s %-8s %-8s %s\n' \\\$NODE \\\$BN \\\$PEERS \\\$IMG
-                                done
-                            "
+                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} /bin/bash << 'ENDSSH'
+                            for node_port in val-2:19545 val-3:19547; do
+                                NODE=\$(echo \$node_port | cut -d: -f1)
+                                PORT=\$(echo \$node_port | cut -d: -f2)
+                                BN=\$(curl -sf -X POST http://127.0.0.1:\$PORT \\
+                                    -H 'Content-Type: application/json' \\
+                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                                    | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                                PEERS=\$(curl -sf -X POST http://127.0.0.1:\$PORT \\
+                                    -H 'Content-Type: application/json' \\
+                                    -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
+                                    | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                                IMG=\$(docker inspect --format '{{.Config.Image}}' devnet-\$NODE 2>/dev/null || echo "unknown")
+                                printf "  %-8s %-8s %-8s %s\n" \$NODE \$BN \$PEERS \$IMG
+                            done
+ENDSSH
                             echo "========================================="
                         """
                     }
