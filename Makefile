@@ -76,7 +76,7 @@ devtools:
 
 #? docker: Build docker image
 docker:
-	docker build --pull -t abfoundationglobal/abcore-v2:latest -f Dockerfile .
+	docker build --pull -t abfoundation/abcore-v2:latest -f Dockerfile .
 
 #? help: Get more info on make commands.
 help: Makefile
