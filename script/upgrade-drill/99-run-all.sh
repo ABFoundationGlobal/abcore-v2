@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-shot upgrade drill: init → U-1 (Clique→Parlia) → U-2 (London + BSC forks)
-#                              → U-3 (Shanghai + Kepler + Feynman).
+#                              → U-3 (Shanghai + Kepler + Feynman)
+#                              → U-4 (Cancun + Haber + HaberFix).
 #
 # Mirrors the structure of transition-test/99-run-all.sh.
 # Each round leaves nodes running so the next round can read the current chain
@@ -15,7 +16,7 @@
 #   GETH                  geth binary path (auto-built if unset)
 #   PARLIA_GENESIS_BLOCK  U-1 Clique→Parlia fork block height (default: 30)
 #   LONDON_BLOCK          U-2 London fork block height (default: U-1 head + 60)
-#   FORK_TIME_OFFSET      U-3 seconds from now to Shanghai/Feynman activation (default: 120)
+#   FORK_TIME_OFFSET      U-3/U-4 seconds from now to fork activation (default: 120)
 #   KEEP_RUNNING=1        leave nodes running after PASS (for manual inspection)
 set -euo pipefail
 
@@ -90,6 +91,13 @@ run bash "${SCRIPT_DIR}/81-run-u2-london-forks.sh"
 # validators with StakeHub (FORK_TIME_OFFSET defaults to 120s from now).
 
 run bash "${SCRIPT_DIR}/82-run-u3-shanghai-feynman.sh"
+
+# ── U-4: Cancun + Haber + HaberFix ───────────────────────────────────────────
+# Nodes are still running from U-3; 83-run-u4 patches genesis.json with
+# cancunTime/haberTime/haberFixTime + blobSchedule.cancun, does a rolling
+# genesis reinit, then verifies blob headers and sends a test blob transaction.
+
+run bash "${SCRIPT_DIR}/83-run-u4-cancun-haber.sh"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
