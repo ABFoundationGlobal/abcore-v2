@@ -359,7 +359,7 @@ pipeline {
                     sshagent(['ab-testnet-server-ssh']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                for node_port in 'val-2:19545' 'val-3:19547'; do
+                                for node_port in val-2:19545 val-3:19547; do
                                     NODE=\\\$(echo \\\$node_port | cut -d: -f1)
                                     PORT=\\\$(echo \\\$node_port | cut -d: -f2)
                                     BN=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
