@@ -219,9 +219,12 @@ pipeline {
                         EXTRA_ARGS="--mine --unlock \${ADDR} --password /data/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
                     fi
 
-                    # 生成 config.toml（有 BOOTNODES 时自动生成，val-0 首次启动跳过）
+                    # config.toml 优先级：已有文件 > BOOTNODES 参数
                     CONFIG_ARG=""
-                    if [ -n "${params.BOOTNODES}" ]; then
+                    if [ -f "${DATADIR}/config.toml" ]; then
+                        CONFIG_ARG="--config /data/config.toml"
+                        echo "✅ 使用已有 config.toml"
+                    elif [ -n "${params.BOOTNODES}" ]; then
                         sudo tee ${DATADIR}/config.toml > /dev/null << TOMLEOF
 [Node.P2P]
 StaticNodes = ["${params.BOOTNODES}"]
