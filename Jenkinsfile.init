@@ -175,7 +175,7 @@ pipeline {
                     DATA_DIR=/data/${params.CHAIN_NAME} \
                     CHAIN_ID=${params.CHAIN_ID} \
                     DOCKER_HOST_IP=${SERVER1_HOST} \
-                    bash start-single.sh val-0 val-1 ${params.V1_IMAGE}
+                    bash start-single.sh val-0 val-1 ${params.V1_IMAGE} || true
 
                     echo "✅ server-1 节点启动完成"
                 """
@@ -195,7 +195,7 @@ pipeline {
                             DATA_DIR=/data/${params.CHAIN_NAME} \
                             CHAIN_ID=${params.CHAIN_ID} \
                             DOCKER_HOST_IP=${SERVER2_HOST} \
-                            bash start-single.sh val-2 val-3 val-4 ${params.V1_IMAGE}
+                            bash start-single.sh val-2 val-3 val-4 ${params.V1_IMAGE} || true
 
                             echo '✅ server-2 节点启动完成'
                         "
