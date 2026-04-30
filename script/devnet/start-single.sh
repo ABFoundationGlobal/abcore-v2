@@ -145,9 +145,9 @@ section "Initialising chaindata"
 for node in "${NODES[@]}"; do
     local_dir="$(node_datadir "$node")"
     info "Initialising $node ..."
+    cp "$GENESIS_FILE" "$local_dir/genesis.json"
     output=$(docker run --rm \
         -v "$local_dir:/data" \
-        -v "$GENESIS_FILE:/data/genesis.json:ro" \
         --entrypoint geth \
         "$IMAGE" \
         init --datadir /data /data/genesis.json 2>&1) || {
