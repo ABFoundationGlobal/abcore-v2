@@ -340,6 +340,10 @@ PY
   _tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \
     "eth.sendTransaction({from:'${addr}',to:'${STAKEHUB}',value:'${TX_VALUE_HEX}',gas:2000000,data:'${CALLDATA}'})" \
     2>/dev/null || echo "")
+  # A valid tx hash is 0x + 64 hex chars; fail fast if the node rejected the tx.
+  if [[ ! "$_tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    die "validator-${n}: sendTransaction rejected or returned invalid hash (got: '${_tx}')"
+  fi
   log "    tx=${_tx}"
   REG_TX+=("$_tx")
 done

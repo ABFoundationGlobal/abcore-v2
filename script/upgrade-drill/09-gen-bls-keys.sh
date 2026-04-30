@@ -40,7 +40,7 @@ for n in 1 2 3; do
   addr=$(cat "${dest}/address.txt" | tr -d '[:space:]')
   addr_lower=$(echo "$addr" | tr '[:upper:]' '[:lower:]')
 
-  if [[ -f "${dest}/bls-pubkey.txt" && -f "${dest}/bls-proof.txt" ]]; then
+  if [[ -f "${dest}/bls-pubkey.txt" && -f "${dest}/bls-proof.txt" && -d "${dest}/bls-wallet" ]]; then
     log "validator-${n}: BLS keys already exist — skipping (delete bls-* files and bls-wallet/ to regenerate)"
     continue
   fi
