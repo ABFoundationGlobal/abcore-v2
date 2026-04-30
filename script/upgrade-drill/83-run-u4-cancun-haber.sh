@@ -274,14 +274,53 @@ fi
 #    TransactionArgs.Blobs field (internal/ethapi/transaction_args.go) accepts
 #    raw blob bytes; geth computes KZG commitment and proof internally.
 #    One all-zero blob (131072 bytes = 262144 hex chars).
+#    The geth JavaScript console (web3.js) strips unknown fields from transaction
+#    objects, so blobs cannot be passed via IPC attach --exec.  Use the HTTP
+#    JSON-RPC endpoint directly via Python (urllib stdlib, no external deps).
 log "Sending EIP-4844 blob transaction..."
 _addr=$(val_addr 1)
+_http_url="http://127.0.0.1:$(http_port 1)"
 
-_blob_hex=$(python3 -c "print('0x' + '00' * 131072)")
+export _addr _http_url
+_blob_tx=$(python3 - <<'PY'
+import json, sys, urllib.request
 
-_blob_tx=$(attach_exec "$GETH" "$IPC1" \
-  "eth.sendTransaction({from:'${_addr}',to:'${_addr}',type:'0x3',gas:'0x5208',maxFeePerGas:'0x3b9aca00',maxPriorityFeePerGas:'0x3b9aca00',maxFeePerBlobGas:'0x3b9aca00',value:'0x0',blobs:['${_blob_hex}']})" \
-  2>/dev/null || echo "")
+addr     = __import__('os').environ['_addr']
+url      = __import__('os').environ['_http_url']
+blob_hex = '0x' + '00' * 131072
+
+payload = json.dumps({
+    'jsonrpc': '2.0',
+    'method':  'eth_sendTransaction',
+    'params':  [{
+        'from':                 addr,
+        'to':                   addr,
+        'type':                 '0x3',
+        'gas':                  '0x5208',
+        'maxFeePerGas':         '0x3b9aca00',
+        'maxPriorityFeePerGas': '0x3b9aca00',
+        'maxFeePerBlobGas':     '0x3b9aca00',
+        'value':                '0x0',
+        'blobs':                [blob_hex],
+    }],
+    'id': 1,
+}).encode()
+
+try:
+    req  = urllib.request.Request(url, data=payload,
+                                  headers={'Content-Type': 'application/json'})
+    resp = urllib.request.urlopen(req, timeout=15)
+    body = json.loads(resp.read())
+    if body.get('result'):
+        print(body['result'])
+    else:
+        print(f"ERROR: {body.get('error', body)}", file=sys.stderr)
+        sys.exit(1)
+except Exception as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+2>/dev/null || echo "")
 
 if [[ ! "$_blob_tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
   fail "Blob tx sendTransaction rejected or returned invalid hash (got: '${_blob_tx}')"
