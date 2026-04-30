@@ -8,7 +8,8 @@
 #   cancunTime, haberTime, haberFixTime
 #
 # Prerequisites:
-#   - U-3 has completed; nodes are running with Feynman active, StakeHub registered
+#   - U-3 has completed; nodes are running with Feynman + FeynmanFix active,
+#     StakeHub registered (U-3 sets feynmanTime = feynmanFixTime per BSC convention)
 #   - A pre-U-4 snapshot is recommended (run 07-snapshot.sh first)
 #
 # Steps:
@@ -117,16 +118,6 @@ with open(genesis_path) as f:
     genesis = json.load(f)
 
 cfg = genesis['config']
-
-# feynmanFixTime must be set before cancunTime (fork ordering enforced by geth).
-# U-3 only sets feynmanTime; feynmanFixTime was never set, so the database has
-# it as nil.  Setting it to a past timestamp fails the chainconfig compatibility
-# check ("rewindto" error) because the chain has already passed feynmanTime.
-# Setting it to FORK_TIME (future) satisfies both the ordering requirement
-# feynmanTime ≤ feynmanFixTime ≤ cancunTime and the compatibility check.
-if cfg.get('feynmanFixTime') is None:
-    cfg['feynmanFixTime'] = fork_time
-    print(f'  feynmanFixTime: <nil> → {fork_time} (= FORK_TIME, activates with Cancun)')
 
 for field in ('cancunTime', 'haberTime', 'haberFixTime'):
     old = cfg.get(field, '<nil>')

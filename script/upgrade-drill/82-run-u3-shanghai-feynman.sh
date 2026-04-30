@@ -127,7 +127,8 @@ with open(genesis_path) as f:
     genesis = json.load(f)
 
 cfg = genesis['config']
-for field in ('shanghaiTime', 'keplerTime', 'feynmanTime'):
+# FeynmanFixTime is always set equal to FeynmanTime (BSC convention).
+for field in ('shanghaiTime', 'keplerTime', 'feynmanTime', 'feynmanFixTime'):
     old = cfg.get(field, '<nil>')
     cfg[field] = fork_time
     print(f'  {field}: {old} → {fork_time}')
