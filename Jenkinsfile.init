@@ -377,9 +377,7 @@ PYEOF
                                 echo "\${node}: 已有链数据，跳过 init"
                             else
                                 echo "\${node}: 执行 geth init..."
-                                # 参照 Kai：先 cp genesis.json 到 datadir，通过 datadir 挂载进容器
                                 cp /tmp/genesis.json \${DATADIR}/genesis.json
-                                # 参照 Kai：创建空密码文件
                                 echo -n "" > \${DATADIR}/password.txt
                                 docker run --rm \\
                                     --entrypoint geth \\
@@ -391,10 +389,10 @@ PYEOF
                         done
                     """
 
-                    // server-2 初始化 val-2, val-3, val-4
+                    // server-2 初始化 val-2, val-3（去掉 val-4，测试阶段端口冲突）
                     sshagent(['ab-testnet-server-ssh']) {
                         sh """
-                            for node in val-2 val-3 val-4; do
+                            for node in val-2 val-3; do
                                 ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
                                     DATADIR=/data/${params.CHAIN_NAME}/\${node}
                                     sudo mkdir -p \\\$DATADIR
