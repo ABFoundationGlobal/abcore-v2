@@ -13,7 +13,14 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 
 ## Scenario coverage
 
-| ID | Script | Simulated upgrade | Activation | Description | Status |
+The local drill uses a **single abcore-v2 binary** throughout — no binary is replaced at
+any round.  Each round is activated by adding new fork fields to `genesis.json` (or
+`config.toml` for U-1 and U-4) and doing a rolling reinit/restart so that the updated
+chainconfig takes effect on each node.  The upgrade-round labels (v0.x→v0.y) match the
+rounds in `docs/ops/devnet-upgrade-plan.md` for cross-reference only; they do not imply
+any code-version change in this local drill.
+
+| ID | Script | Upgrade round | Activation | Description | Status |
 |---|---|---|---|---|---|
 | U-1 | `80-run-u1-parlia-switch.sh` | v0.1→v0.2 | block height | Clique→Parlia switch | 🔲 |
 | U-2 | `81-run-u2-london-forks.sh` | v0.2→v0.3 | block height | London + 13 BSC block forks | 🔲 |
@@ -35,7 +42,7 @@ For isolated edge-case tests of the Clique→Parlia transition itself, see
 
 | Parameter | devnet | local drill |
 |---|---|---|
-| Binary | Replace binary at each round | **Single abcore-v2 binary; only TOML changes** |
+| Binary | Replace binary at each round | **Single abcore-v2 binary; only genesis.json / TOML fork fields change** |
 | Node count | 5 validators + 1 RPC | 3 validators |
 | U-1 / U-2 block heights | 30001 / 60001 | 30 / head+60 (≤90 block intervals) |
 | Timestamp observation window | 24–168 hours | 2–10 minutes |
@@ -152,17 +159,21 @@ Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
 
 Corresponds to devnet Upgrade 3 (v0.4.0).
 
-**Critical constraint:** The first breathe block after Feynman activation (fired
-roughly every 10 minutes) triggers StakeHub initialization. All 3 validators must
-each submit a StakeHub registration transaction **before** that breathe block
-arrives; if registration is missing, the chain enters a state with no active
-validators and stops producing blocks.
+**Critical constraint:** The Go consensus engine fires `updateValidatorSetV2` at the
+first breathe block after Feynman activation.  A breathe block occurs whenever two
+consecutive block timestamps cross a UTC day boundary (`BreatheBlockInterval = 86400s`
+in `params/protocol_params.go`).  With 1-second local blocks using wall-clock time, the
+first breathe block falls at the next UTC midnight — anywhere from 0 to 24 hours after
+activation.  All 3 validators must each call `StakeHub.createValidator()` **before** that
+breathe block; if none are registered, `updateValidatorSetV2` produces an empty validator
+set and the chain stops producing blocks.
 
 The genesis pre-populates the validator whitelist (granting
 `WHITELIST_VOTING_POWER` election priority), but whitelist membership is
 independent of StakeHub registration — both steps are required.
 
-The script sends registration transactions automatically via IPC.
+The script sends registration transactions automatically via IPC immediately after
+the activation block is confirmed.
 
 **Local parameters:** `ShanghaiTime = KeplerTime = FeynmanTime = now + 120 s`
 
@@ -172,11 +183,12 @@ The script sends registration transactions automatically via IPC.
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Append the 3 timestamps (now + 2 minutes) to TOML; rolling restart
-3. Wait for timestamp activation
-4. Script monitors for the approaching breathe block and sends one StakeHub
-   registration tx per validator via `eth_sendTransaction` over IPC
-5. Wait for the breathe block to pass; observe for 3 minutes
+2. Patch genesis.json with 3 timestamps (now + 2 minutes); rolling genesis reinit (stop →
+   `geth init` → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
+3. Wait for chain block timestamp to reach activation time
+4. Script sends one `StakeHub.createValidator()` tx per validator over IPC
+   (registration must complete before the next UTC midnight breathe block)
+5. Observe for 3 minutes
 
 **Verification:**
 - Post-activation blocks include a `withdrawals` field (Shanghai EIP-4895)
@@ -289,7 +301,13 @@ bash script/upgrade-drill/07-snapshot.sh
 # U-2: London + BSC forks (nodes still running from U-1)
 GETH=./build/bin/geth bash script/upgrade-drill/81-run-u2-london-forks.sh
 
-# U-3 through U-6: planned — see individual sections above
+# Optional: snapshot before U-3
+bash script/upgrade-drill/07-snapshot.sh
+
+# U-3: Shanghai + Kepler + Feynman (nodes still running from U-2)
+GETH=./build/bin/geth bash script/upgrade-drill/82-run-u3-shanghai-feynman.sh
+
+# U-4 through U-6: planned — see individual sections above
 ```
 
 ### Cleanup and rollback
