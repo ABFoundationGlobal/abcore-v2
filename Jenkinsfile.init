@@ -213,30 +213,34 @@ pipeline {
                     echo "等待所有节点 RPC 就绪..."
                     sleep 15
 
-                    # 收集 server-1 节点 enode（val-0=19545, val-1=19546）
-                    VAL0_ENODE=\$(curl -sf -X POST http://127.0.0.1:19545 \\
+                    # 动态获取 Docker 网关 IP（兼容任何服务器）
+                    DOCKER_GW=\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+                    echo "Docker 网关: \${DOCKER_GW}"
+
+                    # 收集 server-1 节点 enode
+                    VAL0_ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:19545 \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                         | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
                     VAL0_ENODE=\$(echo \${VAL0_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
                     echo "val-0 enode: \${VAL0_ENODE}"
 
-                    VAL1_ENODE=\$(curl -sf -X POST http://127.0.0.1:19546 \\
+                    VAL1_ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:19546 \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                         | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
                     VAL1_ENODE=\$(echo \${VAL1_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
                     echo "val-1 enode: \${VAL1_ENODE}"
 
-                    # server-1 内部互联（用 172.17.0.1）
+                    # server-1 内部互联（用 Docker 网关）
                     if [ -n "\${VAL0_ENODE}" ] && [ -n "\${VAL1_ENODE}" ]; then
-                        VAL0_LOCAL=\$(echo \${VAL0_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
-                        VAL1_LOCAL=\$(echo \${VAL1_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
+                        VAL0_LOCAL=\$(echo \${VAL0_ENODE} | sed "s/@[^:]*:/@\${DOCKER_GW}:/")
+                        VAL1_LOCAL=\$(echo \${VAL1_ENODE} | sed "s/@[^:]*:/@\${DOCKER_GW}:/")
 
-                        curl -sf -X POST http://127.0.0.1:19545 \\
+                        curl -sf -X POST http://\${DOCKER_GW}:19545 \\
                             -H 'Content-Type: application/json' \\
                             -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\${VAL1_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
-                        curl -sf -X POST http://127.0.0.1:19546 \\
+                        curl -sf -X POST http://\${DOCKER_GW}:19546 \\
                             -H 'Content-Type: application/json' \\
                             -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\${VAL0_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
                         echo "✅ server-1 内部互联完成"
