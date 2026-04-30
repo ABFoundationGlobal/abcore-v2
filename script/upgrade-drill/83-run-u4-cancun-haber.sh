@@ -119,14 +119,14 @@ with open(genesis_path) as f:
 cfg = genesis['config']
 
 # feynmanFixTime must be set before cancunTime (fork ordering enforced by geth).
-# U-3 only sets feynmanTime; set feynmanFixTime = feynmanTime so FeynmanFix
-# activates at the same block as Feynman (already in the past for U-4).
+# U-3 only sets feynmanTime; feynmanFixTime was never set, so the database has
+# it as nil.  Setting it to a past timestamp fails the chainconfig compatibility
+# check ("rewindto" error) because the chain has already passed feynmanTime.
+# Setting it to FORK_TIME (future) satisfies both the ordering requirement
+# feynmanTime ≤ feynmanFixTime ≤ cancunTime and the compatibility check.
 if cfg.get('feynmanFixTime') is None:
-    feynman_time = cfg.get('feynmanTime')
-    if feynman_time is None:
-        raise SystemExit('feynmanTime not set in genesis.json — U-3 must complete first')
-    cfg['feynmanFixTime'] = feynman_time
-    print(f'  feynmanFixTime: <nil> → {feynman_time} (same as feynmanTime)')
+    cfg['feynmanFixTime'] = fork_time
+    print(f'  feynmanFixTime: <nil> → {fork_time} (= FORK_TIME, activates with Cancun)')
 
 for field in ('cancunTime', 'haberTime', 'haberFixTime'):
     old = cfg.get(field, '<nil>')
