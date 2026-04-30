@@ -105,7 +105,7 @@ rpc_call() {
     local port="$1"
     local method="$2"
     local params="${3:-[]}"
-    curl -sf -X POST "http://${DOCKER_HOST_IP}:$port" \
+    curl -sf -X POST "http://127.0.0.1:$port" \
         -H "Content-Type: application/json" \
         -d "{\"jsonrpc\":\"2.0\",\"method\":\"$method\",\"params\":$params,\"id\":1}" \
         2>/dev/null
