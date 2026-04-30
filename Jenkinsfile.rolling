@@ -1,61 +1,24 @@
-// ============================================================
 // Jenkinsfile.rolling
-// 用途：滚动升级所有节点到新镜像（对应 PR #73 的 02-upgrade.sh）
-// 多机版本：server-1 本机执行，server-2 通过 SSH 远程执行
-//
-// 升级顺序（与 PR #73 一致）：
-//   val-4 → val-0 → val-1 → val-2 → val-3 → rpc-0
-//   任意时刻最多 1 个 validator 离线（4/5 始终在线）
-//
-// 节点布局：
-//   server-1 (13.192.61.77)  → val-0, val-1
-//   server-2 (13.113.68.176) → val-2, val-3, val-4（测试阶段复用）
-//   server-3                 → val-4（正式环境）
-//   server-4                 → rpc-0（正式环境）
-//
-// 前置条件：
-//   1. 所有节点正在运行（Jenkinsfile.init 已完成初始化）
-//   2. Jenkins SSH 凭证 ab-testnet-server-ssh 已配置
-//   3. AWS 安全组 31300/31301 端口 TCP+UDP 已开放
-// ============================================================
+// 用途：滚动升级所有节点到新镜像
+// 升级顺序：val-0 → val-1 → val-2 → val-3
+// server-1 (13.192.61.77)  → val-0, val-1
+// server-2 (13.113.68.176) → val-2, val-3
 
 pipeline {
-    agent { label 'server-1' }   // 主控节点，始终在 server-1 上运行
+    agent { label 'server-1' }
 
     parameters {
-        string(
-            name: 'TAG',
-            defaultValue: 'v0.1.2',
-            description: '目标镜像版本号，例如 v0.1.3'
-        )
-        string(
-            name: 'CHAIN_ID',
-            defaultValue: '17140',
-            description: '链 Chain ID'
-        )
-        string(
-            name: 'CHAIN_NAME',
-            defaultValue: 'devnet',
-            description: '链名称，用于数据目录和容器名'
-        )
-        string(
-            name: 'BLOCK_WAIT',
-            defaultValue: '2',
-            description: '每个节点重启后等待的块数（确认出块正常后再继续）'
-        )
-        string(
-            name: 'RESTART_WAIT',
-            defaultValue: '10',
-            description: '每个节点重启后额外等待秒数'
-        )
+        string(name: 'TAG',          defaultValue: 'v0.1.2', description: '目标镜像版本号')
+        string(name: 'CHAIN_ID',     defaultValue: '17140',  description: '链 Chain ID')
+        string(name: 'CHAIN_NAME',   defaultValue: 'devnet', description: '链名称')
+        string(name: 'BLOCK_WAIT',   defaultValue: '2',      description: '每节点重启后等待块数')
+        string(name: 'RESTART_WAIT', defaultValue: '10',     description: '每节点重启后额外等待秒数')
     }
 
     environment {
         IMAGE_NAME     = "abfoundationglobal/abcore-v2:${params.TAG}"
         TARBALL        = "abcore-v2-${params.TAG}-linux-amd64.tar.gz"
         GITHUB_RELEASE = "https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${params.TAG}"
-
-        // 服务器配置
         SERVER1_HOST     = "13.192.61.77"
         SERVER2_HOST     = "13.113.68.176"
         SERVER2_USER     = "songjian"
@@ -64,7 +27,6 @@ pipeline {
 
     stages {
 
-        // ── Stage 1：参数确认 ────────────────────────────────────────
         stage('参数确认') {
             steps {
                 sh """
@@ -77,40 +39,31 @@ pipeline {
                     echo " 等待块数  : ${params.BLOCK_WAIT}"
                     echo " 等待秒数  : ${params.RESTART_WAIT}"
                     echo "-----------------------------------------"
-                    echo " 升级顺序（与 PR #73 一致）："
-                    echo "   val-4 → val-0 → val-1 → val-2 → val-3 → rpc-0"
+                    echo " 升级顺序：val-0 → val-1 → val-2 → val-3"
                     echo "========================================="
                 """
             }
         }
 
-        // ── Stage 2：下载新镜像到所有服务器 ─────────────────────────
-        // 先下载镜像再开始滚动，避免升级中途因下载失败中断
         stage('下载镜像') {
             steps {
                 script {
-                    // server-1 本机下载
                     sh """
-                        set -e
                         if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '${IMAGE_NAME}'; then
-                            echo "server-1: 本地已存在镜像 ${IMAGE_NAME}，跳过下载"
+                            echo "server-1: 已存在 ${IMAGE_NAME}，跳过"
                         else
-                            echo "server-1: 开始下载镜像..."
                             curl -L -o /tmp/${TARBALL} ${GITHUB_RELEASE}/${TARBALL}
                             docker load < /tmp/${TARBALL}
                             rm -f /tmp/${TARBALL}
                             echo "server-1: 镜像加载完成"
                         fi
                     """
-
-                    // server-2 远程下载
                     sshagent(['ab-testnet-server-ssh']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
                                 if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '${IMAGE_NAME}'; then
-                                    echo 'server-2: 本地已存在镜像 ${IMAGE_NAME}，跳过下载'
+                                    echo 'server-2: 已存在 ${IMAGE_NAME}，跳过'
                                 else
-                                    echo 'server-2: 开始下载镜像...'
                                     curl -L -o /tmp/${TARBALL} ${GITHUB_RELEASE}/${TARBALL}
                                     docker load < /tmp/${TARBALL}
                                     rm -f /tmp/${TARBALL}
@@ -123,342 +76,308 @@ pipeline {
             }
         }
 
-        // ── Stage 3：升级前检查（对应 PR #73 Pre-upgrade checks）────
         stage('升级前检查') {
             steps {
-                sh """
-                    set -e
-                    echo "检查当前链状态..."
-
-                    # 检查 val-0 RPC 是否可达（用 val-0 作为基准）
-                    for i in \$(seq 1 10); do
-                        if curl -sf -X POST http://127.0.0.1:19545 \\
+                script {
+                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
+                    sh """
+                        DOCKER_GW=${dockerGw}
+                        for i in \$(seq 1 10); do
+                            if curl -sf -X POST http://\${DOCKER_GW}:19545 \\
+                                -H 'Content-Type: application/json' \\
+                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
+                                echo "✅ val-0 RPC 可达"
+                                break
+                            fi
+                            if [ \${i} -eq 10 ]; then echo "❌ val-0 RPC 不可达"; exit 1; fi
+                            sleep 2
+                        done
+                        BLOCK=\$(curl -sf -X POST http://\${DOCKER_GW}:19545 \\
                             -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
-                            echo "✅ val-0 RPC 可达"
-                            break
-                        fi
-                        if [ \${i} -eq 10 ]; then
-                            echo "❌ val-0 RPC 不可达，请确认网络是否正在运行"
-                            exit 1
-                        fi
-                        echo "  等待 val-0 RPC... (\${i}/10)"
-                        sleep 2
-                    done
-
-                    BLOCK=\$(curl -sf -X POST http://127.0.0.1:19545 \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
-                    echo "当前块高: \${BLOCK}"
-                    echo "✅ 升级前检查通过，开始滚动升级"
-                """
+                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
+                        echo "当前块高: \${BLOCK}"
+                        echo "✅ 升级前检查通过"
+                    """
+                }
             }
         }
 
-        // ── Stage 4：滚动升级（对应 PR #73 Rolling upgrade）─────────
-        // 顺序：val-4 → val-0 → val-1 → val-2 → val-3 → rpc-0
         stage('滚动升级') {
             steps {
                 script {
+                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // ── 升级单个节点的函数（server-1 本机）──────────
-                    def upgradeLocalNode = { node, rpcPort, wsPort, p2pPort, isValidator ->
+                    def upgradeLocalNode = { node, rpcPort, wsPort, p2pPort ->
                         sh """
                             set -e
-                            echo "========================================="
-                            echo " 升级 ${node} (server-1 本机)"
-                            echo "========================================="
-
+                            echo "===== 升级 ${node} (server-1) ====="
                             DATADIR="/data/${params.CHAIN_NAME}/${node}"
-                            CONTAINER_NAME="${params.CHAIN_NAME}-${node}"
+                            CONTAINER="${params.CHAIN_NAME}-${node}"
+                            DOCKER_GW=${dockerGw}
 
-                            # 停止旧容器
-                            if docker ps -a --format '{{.Names}}' | grep -q "^\${CONTAINER_NAME}\$"; then
-                                echo "  停止旧容器 \${CONTAINER_NAME}..."
-                                docker stop \${CONTAINER_NAME}
-                                docker rm   \${CONTAINER_NAME}
-                                echo "  旧容器已清理"
+                            if docker ps -a --format '{{.Names}}' | grep -q "^\${CONTAINER}\$"; then
+                                docker stop \${CONTAINER} && docker rm \${CONTAINER}
                             fi
 
-                            # 构建 validator 参数
-                            EXTRA_ARGS=""
-                            if [ "${isValidator}" = "true" ]; then
-                                ADDR=\$(ls \${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
-                                EXTRA_ARGS="--mine --unlock \${ADDR} --password /data/password.txt --miner.etherbase \${ADDR} --allow-insecure-unlock"
-                            fi
-
-                            # config.toml
+                            ADDR=\$(ls \${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
                             CONFIG_ARG=""
-                            if [ -f "\${DATADIR}/config.toml" ]; then
-                                CONFIG_ARG="--config /data/config.toml"
-                            fi
+                            if [ -f "\${DATADIR}/config.toml" ]; then CONFIG_ARG="--config /data/config.toml"; fi
 
-                            # 启动新容器
-                            echo "  启动新容器（镜像: ${IMAGE_NAME}）..."
                             docker run -d \\
-                                --name \${CONTAINER_NAME} \\
-                                --restart unless-stopped \\
+                                --name \${CONTAINER} --restart unless-stopped \\
                                 -v \${DATADIR}:/data \\
                                 -p 0.0.0.0:${rpcPort}:8545 \\
                                 -p 0.0.0.0:${wsPort}:8546 \\
                                 -p 0.0.0.0:${p2pPort}:30303 \\
                                 -p 0.0.0.0:${p2pPort}:30303/udp \\
-                                --entrypoint geth \\
-                                ${IMAGE_NAME} \\
-                                \${CONFIG_ARG} \\
-                                --datadir /data \\
-                                --networkid ${params.CHAIN_ID} \\
-                                --port 30303 \\
+                                --entrypoint geth ${IMAGE_NAME} \\
+                                \${CONFIG_ARG} --datadir /data \\
+                                --networkid ${params.CHAIN_ID} --port 30303 \\
                                 --http --http.addr 0.0.0.0 --http.port 8545 \\
-                                       --http.vhosts '*' \\
-                                       --http.api 'txpool,net,web3,eth,clique,admin' \\
+                                       --http.vhosts '*' --http.api 'txpool,net,web3,eth,clique,admin' \\
                                 --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
                                        --ws.api 'txpool,net,web3,eth,clique' \\
-                                --syncmode full \\
-                                --gcmode archive \\
-                                --verbosity 3 \\
-                                \${EXTRA_ARGS}
+                                --syncmode full --gcmode archive --verbosity 3 \\
+                                --nat extip:${SERVER1_HOST} \\
+                                --mine --unlock \${ADDR} --password /data/password.txt \\
+                                --miner.etherbase \${ADDR} --allow-insecure-unlock
 
-                            # 等待 RPC 就绪
-                            echo "  等待 ${node} RPC 就绪..."
                             for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                                if curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
                                     -H 'Content-Type: application/json' \\
                                     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
-                                    echo "  ✅ ${node} RPC 就绪"
-                                    break
+                                    echo "✅ ${node} RPC 就绪"; break
                                 fi
                                 if [ \${i} -eq 30 ]; then
-                                    echo "  ❌ ${node} RPC 30s 内未响应"
-                                    docker logs --tail=20 \${CONTAINER_NAME} 2>&1
-                                    exit 1
+                                    echo "❌ ${node} RPC 30s 未响应"
+                                    docker logs --tail=20 \${CONTAINER} 2>&1; exit 1
                                 fi
-                                sleep 2
+                                sleep 1
                             done
 
-                            # 等待块高增加（确认出块正常）
-                            BEFORE=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                            BEFORE=\$(curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
                                 -H 'Content-Type: application/json' \\
                                 -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
                             TARGET=\$(( BEFORE + ${params.BLOCK_WAIT} ))
-                            echo "  等待块高从 \${BEFORE} 增加到 \${TARGET}..."
-
+                            echo "等待块高 \${BEFORE} → \${TARGET}..."
                             for i in \$(seq 1 30); do
-                                BN=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                                BN=\$(curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
                                     -H 'Content-Type: application/json' \\
                                     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
                                     | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
-                                if [ "\${BN}" -ge "\${TARGET}" ]; then
-                                    echo "  ✅ ${node} 块高已达 \${BN}"
-                                    break
-                                fi
-                                if [ \${i} -eq 30 ]; then
-                                    echo "  ⚠️  ${node} 60s 内未达到目标块高（可能仍在同步）"
-                                fi
+                                if [ "\${BN}" -ge "\${TARGET}" ]; then echo "✅ 块高 \${BN}"; break; fi
+                                if [ \${i} -eq 30 ]; then echo "⚠️  未达目标块高"; fi
                                 sleep 2
                             done
-
-                            PEERS=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
-                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
-                            BN=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
-                            echo "  ${node} 就绪: block=\${BN} peers=\${PEERS}"
-
                             sleep ${params.RESTART_WAIT}
                         """
                     }
 
-                    // ── 升级单个节点的函数（server-2 远程）──────────
-                    def upgradeRemoteNode = { node, rpcPort, wsPort, p2pPort, isValidator ->
+                    def upgradeRemoteNode = { node, rpcPort, wsPort, p2pPort ->
                         sshagent(['ab-testnet-server-ssh']) {
                             sh """
                                 set -e
-                                echo "========================================="
-                                echo " 升级 ${node} (server-2 远程)"
-                                echo "========================================="
-
+                                echo "===== 升级 ${node} (server-2) ====="
                                 ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
                                     set -e
                                     DATADIR=/data/${params.CHAIN_NAME}/${node}
-                                    CONTAINER_NAME=${params.CHAIN_NAME}-${node}
+                                    CONTAINER=${params.CHAIN_NAME}-${node}
 
-                                    # 停止旧容器
-                                    if docker ps -a --format '{{.Names}}' | grep -q ^\\\${CONTAINER_NAME}\\\$; then
-                                        echo '  停止旧容器 '\\\${CONTAINER_NAME}'...'
-                                        docker stop \\\${CONTAINER_NAME}
-                                        docker rm   \\\${CONTAINER_NAME}
-                                        echo '  旧容器已清理'
+                                    if docker ps -a --format '{{.Names}}' | grep -q ^\\\${CONTAINER}\\\$; then
+                                        docker stop \\\${CONTAINER} && docker rm \\\${CONTAINER}
                                     fi
 
-                                    # 构建 validator 参数
-                                    EXTRA_ARGS=''
-                                    if [ '${isValidator}' = 'true' ]; then
-                                        ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
-                                        EXTRA_ARGS='--mine --unlock '\\\$ADDR' --password /data/password.txt --miner.etherbase '\\\$ADDR' --allow-insecure-unlock'
-                                    fi
-
-                                    # config.toml
+                                    ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
                                     CONFIG_ARG=''
-                                    if [ -f \\\$DATADIR/config.toml ]; then
-                                        CONFIG_ARG='--config /data/config.toml'
-                                    fi
+                                    if [ -f \\\$DATADIR/config.toml ]; then CONFIG_ARG='--config /data/config.toml'; fi
 
-                                    # 启动新容器
-                                    echo '  启动新容器（镜像: ${IMAGE_NAME}）...'
                                     docker run -d \\\\
-                                        --name \\\${CONTAINER_NAME} \\\\
-                                        --restart unless-stopped \\\\
+                                        --name \\\${CONTAINER} --restart unless-stopped \\\\
                                         -v \\\$DATADIR:/data \\\\
                                         -p 0.0.0.0:${rpcPort}:8545 \\\\
                                         -p 0.0.0.0:${wsPort}:8546 \\\\
                                         -p 0.0.0.0:${p2pPort}:30303 \\\\
                                         -p 0.0.0.0:${p2pPort}:30303/udp \\\\
-                                        --entrypoint geth \\\\
-                                        ${IMAGE_NAME} \\\\
-                                        \\\${CONFIG_ARG} \\\\
-                                        --datadir /data \\\\
-                                        --networkid ${params.CHAIN_ID} \\\\
-                                        --port 30303 \\\\
+                                        --entrypoint geth ${IMAGE_NAME} \\\\
+                                        \\\${CONFIG_ARG} --datadir /data \\\\
+                                        --networkid ${params.CHAIN_ID} --port 30303 \\\\
                                         --http --http.addr 0.0.0.0 --http.port 8545 \\\\
-                                               --http.vhosts '*' \\\\
-                                               --http.api 'txpool,net,web3,eth,clique,admin' \\\\
+                                               --http.vhosts '*' --http.api 'txpool,net,web3,eth,clique,admin' \\\\
                                         --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\\\
                                                --ws.api 'txpool,net,web3,eth,clique' \\\\
-                                        --syncmode full \\\\
-                                        --gcmode archive \\\\
-                                        --verbosity 3 \\\\
-                                        \\\${EXTRA_ARGS}
+                                        --syncmode full --gcmode archive --verbosity 3 \\\\
+                                        --nat extip:${SERVER2_HOST} \\\\
+                                        --mine --unlock \\\$ADDR --password /data/password.txt \\\\
+                                        --miner.etherbase \\\$ADDR --allow-insecure-unlock
 
-                                    # 等待 RPC 就绪
-                                    echo '  等待 ${node} RPC 就绪...'
                                     for i in \\\$(seq 1 30); do
                                         if curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
                                             -H 'Content-Type: application/json' \\\\
                                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1; then
-                                            echo '  ✅ ${node} RPC 就绪'
-                                            break
+                                            echo '✅ ${node} RPC 就绪'; break
                                         fi
-                                        sleep 2
+                                        if [ \\\$i -eq 30 ]; then
+                                            echo '❌ ${node} RPC 30s 未响应'
+                                            docker logs --tail=20 \\\${CONTAINER} 2>&1; exit 1
+                                        fi
+                                        sleep 1
                                     done
 
-                                    # 等待块高增加
                                     BEFORE=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
                                         -H 'Content-Type: application/json' \\\\
                                         -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
                                         | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
                                     TARGET=\\\$(( BEFORE + ${params.BLOCK_WAIT} ))
-                                    echo '  等待块高从 '\\\$BEFORE' 增加到 '\\\$TARGET'...'
-
+                                    echo '等待块高 '\\\$BEFORE' → '\\\$TARGET'...'
                                     for i in \\\$(seq 1 30); do
                                         BN=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
                                             -H 'Content-Type: application/json' \\\\
                                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
                                             | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
-                                        if [ \\\"\\\${BN}\\\" -ge \\\"\\\${TARGET}\\\" ]; then
-                                            echo '  ✅ ${node} 块高已达 '\\\$BN
-                                            break
-                                        fi
+                                        if [ \\\"\\\${BN}\\\" -ge \\\"\\\${TARGET}\\\" ]; then echo '✅ 块高 '\\\$BN; break; fi
+                                        if [ \\\$i -eq 30 ]; then echo '⚠️  未达目标块高'; fi
                                         sleep 2
                                     done
-
-                                    PEERS=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \\\\
-                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
-                                    BN=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
-                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
-                                    echo '  ${node} 就绪: block='\\\$BN' peers='\\\$PEERS
                                 "
                                 sleep ${params.RESTART_WAIT}
                             """
                         }
                     }
 
-                    // ── 按顺序滚动升级（val-4 → val-0 → val-1 → val-2 → val-3 → rpc-0）
-                    upgradeRemoteNode('val-4', '19545', '19546', '31300', 'true')
-                    upgradeLocalNode ('val-0', '19545', '19546', '31300', 'true')
-                    upgradeLocalNode ('val-1', '19547', '19548', '31301', 'true')
-                    upgradeRemoteNode('val-2', '19545', '19546', '31300', 'true')
-                    upgradeRemoteNode('val-3', '19547', '19548', '31301', 'true')
-                    upgradeRemoteNode('rpc-0', '19547', '19548', '31301', 'false')
+                    upgradeLocalNode ('val-0', '19545', '19546', '31300')
+                    upgradeLocalNode ('val-1', '19547', '19548', '31301')
+                    upgradeRemoteNode('val-2', '19545', '19546', '31300')
+                    upgradeRemoteNode('val-3', '19547', '19548', '31301')
                 }
             }
         }
 
-        // ── Stage 5：重新互联（对应 PR #73 Re-wiring P2P full mesh）─
-        // 节点重启后 in-memory peer list 丢失，重新 addPeer
         stage('重新互联') {
             steps {
-                sh """
-                    echo "重新互联所有节点..."
-                    sleep 5
+                script {
+                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    # 收集 server-1 节点 enode
-                    VAL0_ENODE=\$(curl -sf -X POST http://127.0.0.1:19545 \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
-                    VAL0_ENODE=\$(echo \${VAL0_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
-
-                    VAL1_ENODE=\$(curl -sf -X POST http://127.0.0.1:19547 \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; d=json.load(sys.stdin); e=d['result']['enode']; print(e.split('?')[0])" 2>/dev/null || echo "")
-                    VAL1_ENODE=\$(echo \${VAL1_ENODE} | sed "s/@[^:]*:/@${SERVER1_HOST}:/")
-
-                    # server-1 内部互联（用 172.17.0.1）
-                    if [ -n "\${VAL0_ENODE}" ] && [ -n "\${VAL1_ENODE}" ]; then
-                        VAL0_LOCAL=\$(echo \${VAL0_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
-                        VAL1_LOCAL=\$(echo \${VAL1_ENODE} | sed 's/@[^:]*:/@172.17.0.1:/')
-                        curl -sf -X POST http://127.0.0.1:19545 \\
+                    def val0Enode = sh(script: """
+                        curl -sf -X POST http://${dockerGw}:19545 \\
                             -H 'Content-Type: application/json' \\
-                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL1_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
-                        curl -sf -X POST http://127.0.0.1:19547 \\
-                            -H 'Content-Type: application/json' \\
-                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL0_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
-                        echo "✅ server-1 内部节点互联完成"
-                    fi
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
 
-                    echo "⚠️  跨服务器互联需要 AWS 安全组开放 31300/31301 端口"
-                """
+                    def val1Enode = sh(script: """
+                        curl -sf -X POST http://${dockerGw}:19547 \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
+
+                    if (val0Enode && val1Enode) {
+                        def val0Local = val0Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
+                        def val1Local = val1Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
+                        sh """
+                            curl -sf -X POST http://${dockerGw}:19545 \\
+                                -H 'Content-Type: application/json' \\
+                                -d '{"jsonrpc":"2.0","method":"admin_addPeer","params":["${val1Local}"],"id":1}' > /dev/null
+                            curl -sf -X POST http://${dockerGw}:19547 \\
+                                -H 'Content-Type: application/json' \\
+                                -d '{"jsonrpc":"2.0","method":"admin_addPeer","params":["${val0Local}"],"id":1}' > /dev/null
+                            echo "✅ server-1 互联完成（val-0 ↔ val-1）"
+                        """
+                    }
+
+                    sshagent(['ab-testnet-server-ssh']) {
+                        def val2Enode = sh(script: """
+                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                curl -sf -X POST http://127.0.0.1:19545 \\\\
+                                    -H 'Content-Type: application/json' \\\\
+                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
+                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
+                            "
+                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
+
+                        def val3Enode = sh(script: """
+                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                curl -sf -X POST http://127.0.0.1:19547 \\\\
+                                    -H 'Content-Type: application/json' \\\\
+                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
+                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
+                            "
+                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
+
+                        if (val2Enode && val3Enode) {
+                            sh """
+                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                    DOCKER_GW=\\\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+                                    VAL2_LOCAL=\\\$(echo '${val2Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
+                                    VAL3_LOCAL=\\\$(echo '${val3Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
+                                    curl -sf -X POST http://127.0.0.1:19545 \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$VAL3_LOCAL\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                    curl -sf -X POST http://127.0.0.1:19547 \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$VAL2_LOCAL\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                    echo '✅ server-2 互联完成（val-2 ↔ val-3）'
+                                "
+                            """
+                        }
+                    }
+
+                    sh "echo '⚠️  跨服务器互联需要 AWS 安全组开放 31300/31301 端口 TCP+UDP'"
+                }
             }
         }
 
-        // ── Stage 6：升级后状态汇总（对应 PR #73 Post-upgrade status）
         stage('状态汇总') {
             steps {
-                sh """
-                    echo ""
-                    echo "========================================="
-                    echo " 升级后节点状态"
-                    echo "========================================="
-                    printf "  %-8s %-8s %-8s %s\\n" "节点" "块高" "peers" "镜像"
-                    printf "  %-8s %-8s %-8s %s\\n" "----" "----" "-----" "----"
-
-                    for node_port in "val-0:19545" "val-1:19547"; do
-                        NODE=\$(echo \${node_port} | cut -d: -f1)
-                        PORT=\$(echo \${node_port} | cut -d: -f2)
-                        BN=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                        PEERS=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
-                            | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                        IMG=\$(docker inspect --format '{{.Config.Image}}' ${params.CHAIN_NAME}-\${NODE} 2>/dev/null || echo "unknown")
-                        printf "  %-8s %-8s %-8s %s\\n" "\${NODE}" "\${BN}" "\${PEERS}" "\${IMG}"
-                    done
-                    echo "========================================="
-                """
+                script {
+                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
+                    sh """
+                        DOCKER_GW=${dockerGw}
+                        echo ""
+                        echo "========================================="
+                        echo " 升级后节点状态"
+                        echo "========================================="
+                        printf "  %-8s %-8s %-8s %s\\n" "节点" "块高" "peers" "镜像"
+                        printf "  %-8s %-8s %-8s %s\\n" "----" "----" "-----" "----"
+                        for node_port in "val-0:19545" "val-1:19547"; do
+                            NODE=\$(echo \${node_port} | cut -d: -f1)
+                            PORT=\$(echo \${node_port} | cut -d: -f2)
+                            BN=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
+                                -H 'Content-Type: application/json' \\
+                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                            PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
+                                -H 'Content-Type: application/json' \\
+                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
+                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+                            IMG=\$(docker inspect --format '{{.Config.Image}}' ${params.CHAIN_NAME}-\${NODE} 2>/dev/null || echo "unknown")
+                            printf "  %-8s %-8s %-8s %s\\n" "\${NODE}" "\${BN}" "\${PEERS}" "\${IMG}"
+                        done
+                    """
+                    sshagent(['ab-testnet-server-ssh']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                for node_port in 'val-2:19545' 'val-3:19547'; do
+                                    NODE=\\\$(echo \\\$node_port | cut -d: -f1)
+                                    PORT=\\\$(echo \\\$node_port | cut -d: -f2)
+                                    BN=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
+                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '?')
+                                    PEERS=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \\\\
+                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '?')
+                                    IMG=\\\$(docker inspect --format '{{.Config.Image}}' devnet-\\\$NODE 2>/dev/null || echo 'unknown')
+                                    printf '  %-8s %-8s %-8s %s\n' \\\$NODE \\\$BN \\\$PEERS \\\$IMG
+                                done
+                            "
+                            echo "========================================="
+                        """
+                    }
+                }
             }
         }
     }
