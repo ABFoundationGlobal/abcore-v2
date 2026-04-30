@@ -219,7 +219,7 @@ section "Waiting for RPC"
 for node in "${NODES[@]}"; do
     rpc_port="$(node_rpc_port "$node")"
     name="$(node_container_name "$node")"
-    if ! wait_for_rpc "$rpc_port" 30; then
+    if ! wait_for_rpc "$rpc_port" 60; then
         error "$node RPC did not respond within 30s"
         echo "  Check: docker logs $name"
         exit 1
