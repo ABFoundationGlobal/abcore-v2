@@ -118,6 +118,16 @@ with open(genesis_path) as f:
 
 cfg = genesis['config']
 
+# feynmanFixTime must be set before cancunTime (fork ordering enforced by geth).
+# U-3 only sets feynmanTime; set feynmanFixTime = feynmanTime so FeynmanFix
+# activates at the same block as Feynman (already in the past for U-4).
+if cfg.get('feynmanFixTime') is None:
+    feynman_time = cfg.get('feynmanTime')
+    if feynman_time is None:
+        raise SystemExit('feynmanTime not set in genesis.json — U-3 must complete first')
+    cfg['feynmanFixTime'] = feynman_time
+    print(f'  feynmanFixTime: <nil> → {feynman_time} (same as feynmanTime)')
+
 for field in ('cancunTime', 'haberTime', 'haberFixTime'):
     old = cfg.get(field, '<nil>')
     cfg[field] = fork_time
