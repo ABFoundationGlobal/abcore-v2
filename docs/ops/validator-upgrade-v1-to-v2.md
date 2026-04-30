@@ -159,11 +159,8 @@ scp builder:/path/abcore-v2.tar.gz /tmp/
 docker load < /tmp/abcore-v2.tar.gz
 docker images | grep abfoundation/abcore-v2
 
-# 方式 C：从 GitHub Release 下载预构建镜像（推荐，无需本地构建环境）
-gh release download $TAG -R ABFoundationGlobal/abcore-v2 \
-  --pattern "abcore-v2-${TAG}-linux-amd64.tar.gz" -D /tmp/
-
-docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
+# 方式 C：从 Docker Hub 拉取（推荐，无需本地构建环境）
+docker pull abfoundation/abcore-v2:$TAG
 docker images | grep abfoundation/abcore-v2
 ```
 

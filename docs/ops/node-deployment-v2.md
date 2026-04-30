@@ -75,13 +75,10 @@ curl -fsSL https://get.docker.com | sh
 
 ## 3. 获取镜像
 
-### 方式 A：从 GitHub Release 加载（推荐）
+### 方式 A：从 Docker Hub 拉取（推荐）
 
 ```bash
-curl -L -o /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz \
-  https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${TAG}/abcore-v2-${TAG}-linux-amd64.tar.gz
-
-docker load < /tmp/abcore-v2-${TAG}-linux-amd64.tar.gz
+docker pull abfoundation/abcore-v2:${TAG}
 ```
 
 ### 方式 B：本地构建
