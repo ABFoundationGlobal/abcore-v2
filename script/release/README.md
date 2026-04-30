@@ -18,7 +18,7 @@ docker run -d \
   -p 0.0.0.0:33333:33333 \
   -p 0.0.0.0:33333:33333/udp \
   -e NAT=extip:YOUR_PUBLIC_IP \
-  abfoundationglobal/abcore-v2:VERSION
+  abfoundation/abcore-v2:VERSION
 ```
 
 `NETWORK` defaults to `testnet`. Set `-e NETWORK=mainnet` for mainnet.
@@ -36,7 +36,7 @@ docker run -d \
   -p 0.0.0.0:33333:33333/udp \
   -e NETWORK=mainnet \
   -e NAT=extip:YOUR_PUBLIC_IP \
-  abfoundationglobal/abcore-v2:VERSION
+  abfoundation/abcore-v2:VERSION
 ```
 
 ### Validator node
@@ -57,7 +57,7 @@ docker run -d \
   -e MINE=true \
   -e MINER_ADDR=0xYourValidatorAddress \
   -e PASSWORD_FILE=/data/password.txt \
-  abfoundationglobal/abcore-v2:VERSION
+  abfoundation/abcore-v2:VERSION
 ```
 
 ## Environment variables
@@ -118,7 +118,7 @@ docker compose up -d
 
 ```bash
 ./launch.sh \
-  --image abfoundationglobal/abcore-v2:VERSION \
+  --image abfoundation/abcore-v2:VERSION \
   --network testnet \
   --datadir /data/abcore/testnet \
   --external-ip YOUR_PUBLIC_IP
@@ -141,7 +141,7 @@ docker exec -it abcore-testnet geth attach /data/geth.ipc
    ```bash
    docker run --rm -it \
      -v /data/abcore/testnet:/data \
-     abfoundationglobal/abcore-v2:VERSION \
+     abfoundation/abcore-v2:VERSION \
      geth account new --datadir /data
    ```
    Note the printed address.

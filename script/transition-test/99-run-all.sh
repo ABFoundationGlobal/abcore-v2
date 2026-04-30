@@ -199,10 +199,10 @@ log "All nodes past fork block."
 # ── Phase 7: verify ───────────────────────────────────────────────────────────
 run "${SCRIPT_DIR}/05-verify.sh"
 
-# ── Phase 8: stop and clean ───────────────────────────────────────────────────
+# ── Phase 8: stop T-1 nodes ───────────────────────────────────────────────────
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo
-  echo "PASS. KEEP_RUNNING=1 — nodes remain running."
+  echo "PASS (T-1). KEEP_RUNNING=1 — nodes remain running; sub-tests skipped."
   exit 0
 fi
 
@@ -210,8 +210,23 @@ echo
 echo "==> Stopping nodes"
 "${SCRIPT_DIR}/03-stop.sh"
 
+# ── T-3: transaction across fork boundary ─────────────────────────────────────
 echo
-echo "PASS"
+log "Running T-3 tx-across-fork test..."
+PORT_BASE="$PORT_BASE" \
+DATADIR_ROOT="${DATADIR_ROOT}-tx" \
+GETH="$GETH" \
+PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+"${SCRIPT_DIR}/94-run-tx-test.sh"
+
+# ── T-5: single-node rolling restart in Parlia mode ───────────────────────────
+echo
+log "Running T-5 rolling restart test..."
+PORT_BASE="$PORT_BASE" \
+DATADIR_ROOT="${DATADIR_ROOT}-rolling-restart" \
+GETH="$GETH" \
+PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK" \
+"${SCRIPT_DIR}/92-run-rolling-restart-test.sh"
 
 # ── T-2: Parlia epoch boundary (opt-in; ~3 minutes) ───────────────────────────
 if [[ "${RUN_EPOCH_TEST:-0}" -eq 1 ]]; then
@@ -246,3 +261,6 @@ if [[ "${RUN_CLIQUE_EPOCH_FORK_TEST:-0}" -eq 1 ]]; then
   bash -c 'unset PARLIA_GENESIS_BLOCK; exec "$0" "$@"' \
     "${SCRIPT_DIR}/93-run-clique-epoch-fork-test.sh"
 fi
+
+echo
+echo "PASS"

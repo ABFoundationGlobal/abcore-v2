@@ -1,6 +1,6 @@
 services:
   node:
-    image: abfoundationglobal/abcore-v2:${TAG}
+    image: abfoundation/abcore-v2:${TAG}
     container_name: abcore-mainnet
     restart: unless-stopped
     environment:

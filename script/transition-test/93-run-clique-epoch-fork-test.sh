@@ -53,7 +53,6 @@ if [[ "${_DATADIR_ROOT_EXPLICIT:-}" != "set" ]]; then
 fi
 
 TOML_CONFIG="${DATADIR_ROOT}/override.toml"
-DEV_KEYSTORES="${REPO_ROOT}/core/systemcontracts/parliagenesis/default/keystores"
 
 # Key block heights
 PRE_STOP=$(( PARLIA_GENESIS_BLOCK - 3 ))
@@ -89,23 +88,8 @@ run() {
 }
 
 # ── Phase 1: setup ─────────────────────────────────────────────────────────────
-# Use fixed dev keystores so validator addresses match INIT_VALIDATORSET_BYTES
-# baked into parliagenesis/default/ValidatorContract (same requirement as T-2).
-log "Copying fixed dev keystores from ${DEV_KEYSTORES}"
-for n in 1 2 3; do
-  d=$(val_dir "$n")
-  mkdir -p "$d"
-  src="${DEV_KEYSTORES}/validator-${n}"
-  [[ -d "$src" ]] || die "dev keystore for validator-${n} not found at ${src}"
-  if ls "${src}"/UTC--* >/dev/null 2>&1; then
-    mkdir -p "${d}/keystore"
-    cp "${src}"/UTC--* "${d}/keystore/"
-  fi
-  cp "${src}/address.txt" "${d}/address.txt"
-  cp "${src}/password.txt" "${d}/password.txt" 2>/dev/null || printf 'password\n' > "${d}/password.txt"
-  log "validator-${n}: $(cat "${d}/address.txt")"
-done
-
+# 01-setup.sh uses use_dev_keystore() to install the fixed keystores whose
+# addresses match INIT_VALIDATORSET_BYTES in the defaultNet bytecode.
 partial_clean
 run "${SCRIPT_DIR}/01-setup.sh"
 

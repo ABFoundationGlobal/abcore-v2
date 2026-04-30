@@ -40,6 +40,32 @@ require_exe() {
   [[ -x "$1" ]] || die "missing executable: $1"
 }
 
+# ensure_python_deps <pip-package> [...]
+# Installs any listed packages that are not already importable.
+# Must be called from an activated venv; fails fast to avoid polluting the
+# system Python on PEP-668 systems.
+ensure_python_deps() {
+  [[ -n "${VIRTUAL_ENV:-}" ]] || \
+    die "ensure_python_deps: no active venv detected (VIRTUAL_ENV is unset). Activate a venv before calling this function."
+  local missing=()
+  for pkg in "$@"; do
+    local mod="${pkg//-/_}"
+    python3 -c "import ${mod}" 2>/dev/null || missing+=("$pkg")
+  done
+  [[ "${#missing[@]}" -eq 0 ]] && return 0
+
+  log "Installing missing Python packages: ${missing[*]}"
+  python3 -m pip install --quiet "${missing[@]}" || \
+    die "Failed to install Python packages: ${missing[*]}"
+
+  for pkg in "$@"; do
+    local mod="${pkg//-/_}"
+    python3 -c "import ${mod}" 2>/dev/null \
+      || die "Package installed but import still fails: ${mod}"
+  done
+  log "Python packages ready: $*"
+}
+
 val_dir() { echo "${DATADIR_ROOT}/validator-${1}"; }
 val_ipc()  { echo "$(val_dir "$1")/geth.ipc"; }
 val_log()  { echo "$(val_dir "$1")/geth.log"; }
