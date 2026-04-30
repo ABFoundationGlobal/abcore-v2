@@ -180,67 +180,67 @@ pipeline {
                             sh """
                                 set -e
                                 echo "===== 升级 ${node} (server-2) ====="
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "/bin/bash -c '
-                                    set -e
-                                    DATADIR=/data/${params.CHAIN_NAME}/${node}
-                                    CONTAINER=${params.CHAIN_NAME}-${node}
+                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} /bin/bash << 'ENDSSH'
+                                set -e
+                                DATADIR=/data/${params.CHAIN_NAME}/${node}
+                                CONTAINER=${params.CHAIN_NAME}-${node}
 
-                                    if docker ps -a --format '{{.Names}}' | grep -q ^\\\${CONTAINER}\\\$; then
-                                        docker stop \\\${CONTAINER} && docker rm \\\${CONTAINER}
+                                if docker ps -a --format '{{.Names}}' | grep -q "^\${CONTAINER}\$"; then
+                                    docker stop \${CONTAINER} && docker rm \${CONTAINER}
+                                fi
+
+                                ADDR=\$(ls \$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
+                                CONFIG_ARG=""
+                                if [ -f \$DATADIR/config.toml ]; then CONFIG_ARG="--config /data/config.toml"; fi
+
+                                docker run -d \\
+                                    --name \${CONTAINER} --restart unless-stopped \\
+                                    -v \$DATADIR:/data \\
+                                    -p 0.0.0.0:${rpcPort}:8545 \\
+                                    -p 0.0.0.0:${wsPort}:8546 \\
+                                    -p 0.0.0.0:${p2pPort}:30303 \\
+                                    -p 0.0.0.0:${p2pPort}:30303/udp \\
+                                    --entrypoint geth ${IMAGE_NAME} \\
+                                    \${CONFIG_ARG} --datadir /data \\
+                                    --networkid ${params.CHAIN_ID} --port 30303 \\
+                                    --http --http.addr 0.0.0.0 --http.port 8545 \\
+                                           --http.vhosts '*' --http.api txpool,net,web3,eth,clique,admin \\
+                                    --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
+                                           --ws.api txpool,net,web3,eth,clique \\
+                                    --syncmode full --gcmode archive --verbosity 3 \\
+                                    --nat extip:${SERVER2_HOST} \\
+                                    --mine --unlock \$ADDR --password /data/password.txt \\
+                                    --miner.etherbase \$ADDR --allow-insecure-unlock
+
+                                for i in \$(seq 1 30); do
+                                    if curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                                        -H 'Content-Type: application/json' \\
+                                        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
+                                        echo "✅ ${node} RPC 就绪"; break
                                     fi
+                                    if [ \$i -eq 30 ]; then
+                                        echo "❌ ${node} RPC 30s 未响应"
+                                        docker logs --tail=20 \${CONTAINER} 2>&1; exit 1
+                                    fi
+                                    sleep 1
+                                done
 
-                                    ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
-                                    CONFIG_ARG=''
-                                    if [ -f \\\$DATADIR/config.toml ]; then CONFIG_ARG='--config /data/config.toml'; fi
-
-                                    docker run -d \\\\
-                                        --name \\\${CONTAINER} --restart unless-stopped \\\\
-                                        -v \\\$DATADIR:/data \\\\
-                                        -p 0.0.0.0:${rpcPort}:8545 \\\\
-                                        -p 0.0.0.0:${wsPort}:8546 \\\\
-                                        -p 0.0.0.0:${p2pPort}:30303 \\\\
-                                        -p 0.0.0.0:${p2pPort}:30303/udp \\\\
-                                        --entrypoint geth ${IMAGE_NAME} \\\\
-                                        \\\${CONFIG_ARG} --datadir /data \\\\
-                                        --networkid ${params.CHAIN_ID} --port 30303 \\\\
-                                        --http --http.addr 0.0.0.0 --http.port 8545 \\\\
-                                               --http.vhosts '*' --http.api 'txpool,net,web3,eth,clique,admin' \\\\
-                                        --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\\\
-                                               --ws.api 'txpool,net,web3,eth,clique' \\\\
-                                        --syncmode full --gcmode archive --verbosity 3 \\\\
-                                        --nat extip:${SERVER2_HOST} \\\\
-                                        --mine --unlock \\\$ADDR --password /data/password.txt \\\\
-                                        --miner.etherbase \\\$ADDR --allow-insecure-unlock
-
-                                    for i in \\\$(seq 1 30); do
-                                        if curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
-                                            -H 'Content-Type: application/json' \\\\
-                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1; then
-                                            echo '✅ ${node} RPC 就绪'; break
-                                        fi
-                                        if [ \\\$i -eq 30 ]; then
-                                            echo '❌ ${node} RPC 30s 未响应'
-                                            docker logs --tail=20 \\\${CONTAINER} 2>&1; exit 1
-                                        fi
-                                        sleep 1
-                                    done
-
-                                    BEFORE=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
-                                        | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
-                                    TARGET=\\\$(( BEFORE + ${params.BLOCK_WAIT} ))
-                                    echo '等待块高 '\\\$BEFORE' → '\\\$TARGET'...'
-                                    for i in \\\$(seq 1 30); do
-                                        BN=\\\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\\\
-                                            -H 'Content-Type: application/json' \\\\
-                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
-                                            | python3 -c \"import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))\" 2>/dev/null || echo '0')
-                                        if [ \\\"\\\${BN}\\\" -ge \\\"\\\${TARGET}\\\" ]; then echo '✅ 块高 '\\\$BN; break; fi
-                                        if [ \\\$i -eq 30 ]; then echo '⚠️  未达目标块高'; fi
-                                        sleep 2
-                                    done
-                                "
+                                BEFORE=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                                    -H 'Content-Type: application/json' \\
+                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                                    | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
+                                TARGET=\$(( BEFORE + ${params.BLOCK_WAIT} ))
+                                echo "等待块高 \${BEFORE} → \${TARGET}..."
+                                for i in \$(seq 1 30); do
+                                    BN=\$(curl -sf -X POST http://127.0.0.1:${rpcPort} \\
+                                        -H 'Content-Type: application/json' \\
+                                        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                                        | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
+                                    if [ "\${BN}" -ge "\${TARGET}" ]; then echo "✅ 块高 \${BN}"; break; fi
+                                    if [ \$i -eq 30 ]; then echo "⚠️  未达目标块高"; fi
+                                    sleep 2
+                                done
+ENDSSH
                                 sleep ${params.RESTART_WAIT}
                             """
                         }
