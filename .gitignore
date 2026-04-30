@@ -78,3 +78,8 @@ script/transition-test/.venv
 
 # Release script runtime data (chain state, keystore, configs staged for docker)
 script/release/data/
+
+# DevNet scripts — runtime data and keystore files (private keys)
+script/devnet/data/
+script/devnet/genesis.json
+script/devnet/keystores/*.json
