@@ -142,7 +142,7 @@ docker run -d \
   -v $DATADIR:/data \
   -p 127.0.0.1:8545:8545 \
   -p 127.0.0.1:8546:8546 \
-  abfoundationglobal/abcore-v2:$TAG \
+  abfoundation/abcore-v2:$TAG \
   --http --http.addr 0.0.0.0 --http.port 8545 \
          --http.api 'debug,net,web3,eth,clique' \
   --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
