@@ -235,10 +235,10 @@ pipeline {
 
                         curl -sf -X POST http://127.0.0.1:19545 \\
                             -H 'Content-Type: application/json' \\
-                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL1_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
+                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\${VAL1_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
                         curl -sf -X POST http://127.0.0.1:19546 \\
                             -H 'Content-Type: application/json' \\
-                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\\${VAL0_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
+                            -d "{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_addPeer\\\",\\\"params\\\":[\\\"\${VAL0_LOCAL}\\\"],\\\"id\\\":1}" > /dev/null
                         echo "✅ server-1 内部互联完成"
                     fi
 
