@@ -34,9 +34,11 @@
 #   params.DefaultCancunBlobConfig in params/config.go.
 #
 # Blob transaction note:
-#   TransactionArgs in internal/ethapi/transaction_args.go supports a blobs
-#   field; geth computes KZG commitments and proofs from the raw blob data.
-#   We send one all-zero blob (131072 bytes) via eth.sendTransaction over IPC.
+#   eth_sendTransaction rejects blob txs (errBlobTxNotSupported in api.go).
+#   Instead: eth_signTransaction (supports blobs) → eth_sendRawTransaction.
+#   TransactionArgs.Blobs field (transaction_args.go) accepts raw blob bytes;
+#   geth computes KZG commitments and proofs internally.
+#   We send one all-zero blob (131072 bytes) via HTTP JSON-RPC (Python urllib).
 #
 # Environment:
 #   FORK_TIME_OFFSET  seconds from now to activation (default: 120)
@@ -271,12 +273,13 @@ else
 fi
 
 # 5. Send one EIP-4844 blob transaction and confirm receipt.status == 0x1.
-#    TransactionArgs.Blobs field (internal/ethapi/transaction_args.go) accepts
-#    raw blob bytes; geth computes KZG commitment and proof internally.
-#    One all-zero blob (131072 bytes = 262144 hex chars).
-#    The geth JavaScript console (web3.js) strips unknown fields from transaction
-#    objects, so blobs cannot be passed via IPC attach --exec.  Use the HTTP
-#    JSON-RPC endpoint directly via Python (urllib stdlib, no external deps).
+#    eth_sendTransaction rejects blob txs ("signing blob transactions not
+#    supported" — internal/ethapi/api.go).  Use the two-step approach instead:
+#      a) eth_signTransaction  → returns signed raw bytes (supports blobs)
+#      b) eth_sendRawTransaction → broadcasts the pre-signed tx
+#    nonce is fetched first via eth_getTransactionCount.
+#    One all-zero blob (131072 bytes = 262144 hex chars); geth computes KZG
+#    commitments and proofs from raw blob bytes (transaction_args.go).
 log "Sending EIP-4844 blob transaction..."
 _addr=$(val_addr 1)
 _http_url="http://127.0.0.1:$(http_port 1)"
@@ -285,37 +288,40 @@ export _addr _http_url
 _blob_tx=$(python3 - <<'PY'
 import json, sys, urllib.request
 
-addr     = __import__('os').environ['_addr']
-url      = __import__('os').environ['_http_url']
-blob_hex = '0x' + '00' * 131072
+addr = __import__('os').environ['_addr']
+url  = __import__('os').environ['_http_url']
 
-payload = json.dumps({
-    'jsonrpc': '2.0',
-    'method':  'eth_sendTransaction',
-    'params':  [{
+def rpc(method, params):
+    payload = json.dumps({'jsonrpc':'2.0','method':method,'params':params,'id':1}).encode()
+    req  = urllib.request.Request(url, data=payload,
+                                  headers={'Content-Type': 'application/json'})
+    resp = urllib.request.urlopen(req, timeout=15)
+    body = json.loads(resp.read())
+    if 'error' in body:
+        print(f"ERROR ({method}): {body['error']}", file=sys.stderr)
+        sys.exit(1)
+    return body['result']
+
+try:
+    nonce    = rpc('eth_getTransactionCount', [addr, 'pending'])
+    blob_hex = '0x' + '00' * 131072
+
+    sign_result = rpc('eth_signTransaction', [{
         'from':                 addr,
         'to':                   addr,
         'type':                 '0x3',
+        'nonce':                nonce,
         'gas':                  '0x5208',
         'maxFeePerGas':         '0x3b9aca00',
         'maxPriorityFeePerGas': '0x3b9aca00',
         'maxFeePerBlobGas':     '0x3b9aca00',
         'value':                '0x0',
         'blobs':                [blob_hex],
-    }],
-    'id': 1,
-}).encode()
+    }])
+    raw = sign_result['raw']
 
-try:
-    req  = urllib.request.Request(url, data=payload,
-                                  headers={'Content-Type': 'application/json'})
-    resp = urllib.request.urlopen(req, timeout=15)
-    body = json.loads(resp.read())
-    if body.get('result'):
-        print(body['result'])
-    else:
-        print(f"ERROR: {body.get('error', body)}", file=sys.stderr)
-        sys.exit(1)
+    tx_hash = rpc('eth_sendRawTransaction', [raw])
+    print(tx_hash)
 except Exception as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(1)
