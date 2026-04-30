@@ -261,10 +261,35 @@ PYEOF
             }
         }
 
-        // ── Stage 7：初始化所有节点（geth init）─────────────────────
+// ── Stage 7：初始化所有节点（geth init）─────────────────────
         stage('初始化节点') {
             steps {
                 script {
+                    // 先停止 server-1 旧容器，释放 datadir
+                    sh """
+                        for node in val-0 val-1; do
+                            if docker ps -a --format '{{.Names}}' | grep -q "^${params.CHAIN_NAME}-\${node}\$"; then
+                                docker stop ${params.CHAIN_NAME}-\${node} && docker rm ${params.CHAIN_NAME}-\${node}
+                                echo "旧容器 \${node} 已停止"
+                            fi
+                        done
+                    """
+
+                    // 先停止 server-2 旧容器，释放 datadir
+                    sshagent(['ab-testnet-server-ssh']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                for node in val-2 val-3; do
+                                    if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-'\\\$node'\$'; then
+                                        docker stop ${params.CHAIN_NAME}-\\\$node && docker rm ${params.CHAIN_NAME}-\\\$node
+                                        echo '旧容器 '\\\$node' 已停止'
+                                    fi
+                                done
+                            "
+                        """
+                    }
+
+                    // server-1 初始化 val-0, val-1
                     sh """
                         set -e
                         for node in val-0 val-1; do
@@ -285,6 +310,8 @@ PYEOF
                             fi
                         done
                     """
+
+                    // server-2 初始化 val-2, val-3
                     sshagent(['ab-testnet-server-ssh']) {
                         sh """
                             for node in val-2 val-3; do
