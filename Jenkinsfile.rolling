@@ -180,7 +180,7 @@ pipeline {
                             sh """
                                 set -e
                                 echo "===== 升级 ${node} (server-2) ====="
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "/bin/bash -c '
                                     set -e
                                     DATADIR=/data/${params.CHAIN_NAME}/${node}
                                     CONTAINER=${params.CHAIN_NAME}-${node}
