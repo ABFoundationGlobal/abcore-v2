@@ -654,7 +654,7 @@ PYEOF
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
                     sshagent([SSH_CRED]) {
-                        sh """
+                        sh """#!/bin/bash
                             DOCKER_GW=${dockerGw}
                             declare -A READY
                             echo "开始轮询所有节点 enode..."
