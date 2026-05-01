@@ -597,63 +597,6 @@ PYEOF
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
                     echo "Docker 网关: ${dockerGw}"
 
-                    // server-1 本地检查（通过 Docker 网关访问宿主机端口）
-                    sh """
-                        DOCKER_GW=${dockerGw}
-                        for node_port in "val-0:19545" "val-1:19547"; do
-                            NODE=\$(echo \${node_port} | cut -d: -f1)
-                            PORT=\$(echo \${node_port} | cut -d: -f2)
-                            echo "等待 \${NODE} RPC 就绪..."
-                            for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \
-                                    -H 'Content-Type: application/json' \
-                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
-                                    echo "✅ \${NODE} RPC 就绪"
-                                    break
-                                fi
-                                [ \${i} -eq 30 ] && echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
-                                sleep 1
-                            done
-                        done
-                    """
-
-                    // server-2, server-3, server-4 远程检查
-                    sshagent([SSH_CRED]) {
-                        for (def entry : [
-                            [host: SERVER2_HOST, nodes: [['val-2', '19545'], ['val-3', '19547']]],
-                            [host: SERVER3_HOST, nodes: [['val-4', '19545']]],
-                            [host: SERVER4_HOST, nodes: [['rpc-0', '19545']]]
-                        ]) {
-                            for (def node : entry.nodes) {
-                                sh """
-                                    echo "等待 ${node[0]} RPC 就绪..."
-                                    for i in \$(seq 1 30); do
-                                        RESULT=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
-                                            "curl -sf -X POST http://127.0.0.1:${node[1]} \
-                                                -H 'Content-Type: application/json' \
-                                                -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1 && echo ok || echo fail")
-                                        if [ "\${RESULT}" = "ok" ]; then
-                                            echo "✅ ${node[0]} RPC 就绪"
-                                            break
-                                        fi
-                                        [ \${i} -eq 30 ] && echo "⚠️  ${node[0]} RPC 30s 内未响应，继续..."
-                                        sleep 1
-                                    done
-                                """
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Stage 9：等待所有节点 RPC 就绪 ──────────────────────────
-        stage('等待 RPC 就绪') {
-            steps {
-                script {
-                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
-                    echo "Docker 网关: ${dockerGw}"
-
                     sh """
                         DOCKER_GW=${dockerGw}
                         for node_port in "val-0:19545" "val-1:19547"; do
