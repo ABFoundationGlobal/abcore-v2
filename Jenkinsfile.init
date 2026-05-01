@@ -769,7 +769,7 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // 重新收集全部公网 enode（复用 Stage 10 的逻辑）
+                    // 重新收集全部公网 enode
                     def val0Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
                     """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
                     def val1Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19547 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -788,36 +788,65 @@ PYEOF
                     }
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
-                    def staticNodesJson = '[' + allEnodes.collect { '"' + it + '"' }.join(',') + ']'
 
-                    // server-1: val-0, val-1 写入所有其他节点
+                    // 同台节点互联时用 127.0.0.1 替换公网 IP（解决 AWS hairpin NAT 问题）
+                    def val0StaticNodes = allEnodes.findAll { it != val0Enode }.collect { enode ->
+                        enode.contains(SERVER1_HOST) ? enode.replace(SERVER1_HOST, '127.0.0.1') : enode
+                    }
+                    def val1StaticNodes = allEnodes.findAll { it != val1Enode }.collect { enode ->
+                        enode.contains(SERVER1_HOST) ? enode.replace(SERVER1_HOST, '127.0.0.1') : enode
+                    }
+                    def val2StaticNodes = allEnodes.findAll { it != val2Enode }.collect { enode ->
+                        enode.contains(SERVER2_HOST) ? enode.replace(SERVER2_HOST, '127.0.0.1') : enode
+                    }
+                    def val3StaticNodes = allEnodes.findAll { it != val3Enode }.collect { enode ->
+                        enode.contains(SERVER2_HOST) ? enode.replace(SERVER2_HOST, '127.0.0.1') : enode
+                    }
+                    // val-4, rpc-0 各自单独一台，直接用全量公网 enode
+                    def val4StaticNodes = allEnodes.findAll { it != val4Enode }
+                    def rpc0StaticNodes = allEnodes.findAll { it != rpc0Enode }
+
+                    def toJson = { list -> '[' + list.collect { '"' + it + '"' }.join(',') + ']' }
+
+                    def val0Json  = toJson(val0StaticNodes)
+                    def val1Json  = toJson(val1StaticNodes)
+                    def val2Json  = toJson(val2StaticNodes)
+                    def val3Json  = toJson(val3StaticNodes)
+                    def val4Json  = toJson(val4StaticNodes)
+                    def rpc0Json  = toJson(rpc0StaticNodes)
+
+                    // server-1: val-0, val-1 各自写入
                     sh """
-                        for node in val-0 val-1; do
-                            sudo mkdir -p /data/${params.CHAIN_NAME}/\${node}/geth
-                            echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/\${node}/geth/static-nodes.json > /dev/null
-                            echo "✅ \${node} static-nodes.json 写入完成"
-                        done
+                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-0/geth
+                        echo '${val0Json}' | sudo tee /data/${params.CHAIN_NAME}/val-0/geth/static-nodes.json > /dev/null
+                        echo "✅ val-0 static-nodes.json 写入完成"
+
+                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-1/geth
+                        echo '${val1Json}' | sudo tee /data/${params.CHAIN_NAME}/val-1/geth/static-nodes.json > /dev/null
+                        echo "✅ val-1 static-nodes.json 写入完成"
                     """
 
                     sshagent([SSH_CRED]) {
                         sh """
-                            for node in val-2 val-3; do
-                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
-                                    sudo mkdir -p /data/${params.CHAIN_NAME}/\${node}/geth
-                                    echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/\${node}/geth/static-nodes.json > /dev/null
-                                    echo '✅ \${node} static-nodes.json 写入完成'
-                                "
-                            done
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-2/geth
+                                echo '${val2Json}' | sudo tee /data/${params.CHAIN_NAME}/val-2/geth/static-nodes.json > /dev/null
+                                echo '✅ val-2 static-nodes.json 写入完成'
+
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-3/geth
+                                echo '${val3Json}' | sudo tee /data/${params.CHAIN_NAME}/val-3/geth/static-nodes.json > /dev/null
+                                echo '✅ val-3 static-nodes.json 写入完成'
+                            "
 
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
                                 sudo mkdir -p /data/${params.CHAIN_NAME}/val-4/geth
-                                echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/val-4/geth/static-nodes.json > /dev/null
+                                echo '${val4Json}' | sudo tee /data/${params.CHAIN_NAME}/val-4/geth/static-nodes.json > /dev/null
                                 echo '✅ val-4 static-nodes.json 写入完成'
                             "
 
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
                                 sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0/geth
-                                echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/geth/static-nodes.json > /dev/null
+                                echo '${rpc0Json}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/geth/static-nodes.json > /dev/null
                                 echo '✅ rpc-0 static-nodes.json 写入完成'
                             "
                         """
