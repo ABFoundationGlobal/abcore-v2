@@ -647,56 +647,35 @@ PYEOF
             }
         }
 
-        // ── Stage 9.5：等待所有节点 enode 就绪（并行轮询）───────────
-        stage('等待节点稳定') {
+        // ── Stage 9：等待所有节点 RPC 就绪 ──────────────────────────
+        stage('等待 RPC 就绪') {
             steps {
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
+                    echo "Docker 网关: ${dockerGw}"
 
-                    sshagent([SSH_CRED]) {
-                        sh """#!/bin/bash
-                            DOCKER_GW=${dockerGw}
-                            declare -A READY
-                            echo "开始轮询所有节点 enode..."
-                            for i in \$(seq 1 60); do
-
-                                # server-1 本地
-                                for port in 19545 19547; do
-                                    KEY="local:\${port}"
-                                    if [ -z "\${READY[\$KEY]+x}" ]; then
-                                        ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:\${port} -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["result"]["enode"].split("?")[0])' 2>/dev/null || echo "")
-                                        if [ -n "\${ENODE}" ]; then
-                                            READY[\$KEY]=1
-                                            echo "✅ server-1:\${port} enode 就绪"
-                                        fi
-                                    fi
-                                done
-
-                                # server-2/3/4 远端
-                                for target in "${SERVER2_HOST}:19545" "${SERVER2_HOST}:19547" "${SERVER3_HOST}:19545" "${SERVER4_HOST}:19545"; do
-                                    HOST=\$(echo \${target} | cut -d: -f1)
-                                    PORT=\$(echo \${target} | cut -d: -f2)
-                                    KEY="\${HOST}:\${PORT}"
-                                    if [ -z "\${READY[\$KEY]+x}" ]; then
-                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@\${HOST} "curl -sf -X POST http://127.0.0.1:\${PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d[\"result\"][\"enode\"].split(\"?\")[0])' 2>/dev/null || echo \"\"")
-                                        if [ -n "\${ENODE}" ]; then
-                                            READY[\$KEY]=1
-                                            echo "✅ \${HOST}:\${PORT} enode 就绪"
-                                        fi
-                                    fi
-                                done
-
-                                # 检查是否全部就绪（6个节点）
-                                if [ \${#READY[@]} -eq 6 ]; then
-                                    echo "✅ 所有节点 enode 就绪，共等待 \${i} 秒"
+                    sh """
+                        DOCKER_GW=${dockerGw}
+                        for node_port in "val-0:19545" "val-1:19547"; do
+                            NODE=\$(echo \${node_port} | cut -d: -f1)
+                            PORT=\$(echo \${node_port} | cut -d: -f2)
+                            echo "等待 \${NODE} RPC 就绪..."
+                            for i in \$(seq 1 30); do
+                                if curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \
+                                    -H 'Content-Type: application/json' \
+                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
+                                    echo "✅ \${NODE} RPC 就绪"
                                     break
                                 fi
-
-                                [ \${i} -eq 60 ] && echo "⚠️  60s 后仍有节点未就绪，已就绪: \${#READY[@]}/6，继续执行"
+                                [ \${i} -eq 30 ] && echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
                                 sleep 1
                             done
-                        """
-                    }
+                        done
+                    """
+
+                    // 远端节点固定等待 10s，不串行轮询
+                    echo "等待远端节点启动（10s）..."
+                    sleep 10
                 }
             }
         }
@@ -707,7 +686,25 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // 收集所有节点 enode，替换 IP 为宿主机公网 IP，替换端口为宿主机映射端口
+                    // 生成查询 enode 的脚本并分发到远端
+                    sshagent([SSH_CRED]) {
+                        sh """
+                            cat > /tmp/get_enode.sh << 'SCRIPT'
+                            #!/bin/bash
+                            PORT=\$1
+                            curl -sf -X POST http://127.0.0.1:\$PORT \\
+                            -H 'Content-Type: application/json' \\
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                            2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                            SCRIPT
+                            chmod +x /tmp/get_enode.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER2_HOST}:/tmp/get_enode.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER3_HOST}:/tmp/get_enode.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER4_HOST}:/tmp/get_enode.sh
+                        """
+                    }
+
+                    // 收集本地 val-0, val-1 enode
                     def val0Enode = sh(script: """
                         curl -sf -X POST http://${dockerGw}:19545 \
                             -H 'Content-Type: application/json' \
@@ -724,34 +721,16 @@ PYEOF
                     """, returnStdout: true).trim()
                         .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
 
+                    // 收集远端 enode
                     def val2Enode, val3Enode, val4Enode, rpc0Enode
                     sshagent([SSH_CRED]) {
-                        val2Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \
-                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
-                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
-                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim()
+                        val2Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
-
-                        val3Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \
-                            "curl -sf -X POST http://127.0.0.1:19547 -H 'Content-Type: application/json' \
-                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
-                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim()
+                        val3Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31301')
-
-                        val4Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} \
-                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
-                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
-                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim()
+                        val4Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER3_HOST}:").replaceAll(':[0-9]+$', ':31300')
-
-                        rpc0Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} \
-                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
-                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
-                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim()
+                        rpc0Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER4_HOST}:").replaceAll(':[0-9]+$', ':31300')
                     }
 
@@ -763,9 +742,8 @@ PYEOF
                     echo "rpc-0 enode: ${rpc0Enode}"
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
-                    def enodesJson = '[' + allEnodes.collect { '"' + it + '"' }.join(',') + ']'
 
-                    // server-1：val-0, val-1 添加其他所有节点
+                    // server-1 互联
                     sh """
                         DOCKER_GW=${dockerGw}
                         for port in 19545 19547; do
@@ -779,7 +757,6 @@ PYEOF
                     """
 
                     sshagent([SSH_CRED]) {
-                        // server-2：val-2, val-3
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                 for port in 19545 19547; do
@@ -793,7 +770,6 @@ PYEOF
                             "
                         """
 
-                        // server-3：val-4
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
                                 for enode in ${allEnodes.join(' ')}; do
@@ -805,7 +781,6 @@ PYEOF
                             "
                         """
 
-                        // server-4：rpc-0
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
                                 for enode in ${allEnodes.join(' ')}; do
@@ -827,21 +802,34 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    def val0Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
-                    def val1Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19547 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
+                    // 收集本地 enode
+                    def val0Enode = sh(script: """
+                        curl -sf -X POST http://${dockerGw}:19545 \
+                            -H 'Content-Type: application/json' \
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
+                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim()
+                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
 
+                    def val1Enode = sh(script: """
+                        curl -sf -X POST http://${dockerGw}:19547 \
+                            -H 'Content-Type: application/json' \
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
+                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim()
+                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
+
+                    // 收集远端 enode（复用 Stage 10 分发的脚本）
                     def val2Enode, val3Enode, val4Enode, rpc0Enode
                     sshagent([SSH_CRED]) {
-                        val2Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
-                        val3Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "curl -sf -X POST http://127.0.0.1:19547 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31301')
-                        val4Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER3_HOST}:").replaceAll(':[0-9]+$', ':31300')
-                        rpc0Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
-                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER4_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        val2Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        val3Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31301')
+                        val4Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER3_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        rpc0Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER4_HOST}:").replaceAll(':[0-9]+$', ':31300')
                     }
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
@@ -849,7 +837,7 @@ PYEOF
                     echo "收集到 ${allEnodes.size()} 个 enode"
                     allEnodes.each { echo "  ${it}" }
 
-                    // 同台节点用 127.0.0.1，解决 AWS hairpin NAT 问题
+                    // 同台节点用 127.0.0.1，解决 AWS hairpin NAT
                     def val0StaticNodes = allEnodes.findAll { it != val0Enode }.collect { enode ->
                         enode.contains(SERVER1_HOST) ? enode.replace(SERVER1_HOST, '127.0.0.1') : enode
                     }
@@ -877,7 +865,7 @@ PYEOF
                     def val4Toml = toToml(val4StaticNodes)
                     def rpc0Toml = toToml(rpc0StaticNodes)
 
-                    // server-1 本地直接写
+                    // server-1 本地写入
                     sh """
                         sudo mkdir -p /data/${params.CHAIN_NAME}/val-0
                         printf '%s' '${val0Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-0/config.toml > /dev/null
@@ -888,7 +876,7 @@ PYEOF
                         echo "✅ val-1 config.toml 写入完成"
                     """
 
-                    // 远端用 scp 传文件，避免 ssh 引号嵌套导致 TOML 格式损坏
+                    // 远端用 scp 传文件
                     sh """
                         printf '%s' '${val2Toml}' > /tmp/config-val-2.toml
                         printf '%s' '${val3Toml}' > /tmp/config-val-3.toml
