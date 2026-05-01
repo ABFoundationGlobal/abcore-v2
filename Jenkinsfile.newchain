@@ -51,7 +51,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_NAME     = "abcore-v2:${params.TAG}"
+        IMAGE_NAME     = "abfoundationglobal/abcore-v2:${params.TAG}"
         TARBALL        = "abcore-v2-${params.TAG}-linux-amd64.tar.gz"
         GITHUB_RELEASE = "https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${params.TAG}"
         DATADIR        = "/data/${params.CHAIN_NAME}/${params.NODE_ID}"
