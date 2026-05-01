@@ -891,8 +891,28 @@ SCRIPT
                         echo "========================================="
                     """
 
-                    // server-2, server-3, server-4 状态
+                    // server-2, server-3, server-4 状态（复用 get_enode.sh 同目录脚本）
                     sshagent([SSH_CRED]) {
+                        sh """
+                            cat > /tmp/get_stats.sh << 'SCRIPT'
+#!/bin/bash
+PORT=\$1
+BN=\$(curl -sf -X POST http://127.0.0.1:\$PORT \\
+  -H 'Content-Type: application/json' \\
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+  2>/dev/null | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+PEERS=\$(curl -sf -X POST http://127.0.0.1:\$PORT \\
+  -H 'Content-Type: application/json' \\
+  -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
+  2>/dev/null | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
+echo "\$BN \$PEERS"
+SCRIPT
+                            chmod +x /tmp/get_stats.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_stats.sh ${SSH_USER}@${SERVER2_HOST}:/tmp/get_stats.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_stats.sh ${SSH_USER}@${SERVER3_HOST}:/tmp/get_stats.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_stats.sh ${SSH_USER}@${SERVER4_HOST}:/tmp/get_stats.sh
+                        """
+
                         for (def entry : [
                             [host: SERVER2_HOST, nodes: [['val-2', '19545'], ['val-3', '19547']]],
                             [host: SERVER3_HOST, nodes: [['val-4', '19545']]],
@@ -900,14 +920,9 @@ SCRIPT
                         ]) {
                             for (def node : entry.nodes) {
                                 sh """
-                                    BN=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
-                                        "curl -sf -X POST http://127.0.0.1:${node[1]} -H 'Content-Type: application/json' \
-                                         -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \
-                                         | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?'")
-                                    PEERS=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
-                                        "curl -sf -X POST http://127.0.0.1:${node[1]} -H 'Content-Type: application/json' \
-                                         -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \
-                                         | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?'")
+                                    RESULT=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} 'bash /tmp/get_stats.sh ${node[1]}')
+                                    BN=\$(echo \$RESULT | cut -d' ' -f1)
+                                    PEERS=\$(echo \$RESULT | cut -d' ' -f2)
                                     printf "  %-8s block=%-6s peers=%s\\n" "${node[0]}" "\${BN}" "\${PEERS}"
                                 """
                             }
