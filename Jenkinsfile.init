@@ -660,10 +660,11 @@ PYEOF
                             echo "开始轮询所有节点 enode..."
                             for i in \$(seq 1 60); do
 
+                                # server-1 本地
                                 for port in 19545 19547; do
                                     KEY="local:\${port}"
                                     if [ -z "\${READY[\$KEY]+x}" ]; then
-                                        ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:\${port} -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo "")
+                                        ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:\${port} -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["result"]["enode"].split("?")[0])' 2>/dev/null || echo "")
                                         if [ -n "\${ENODE}" ]; then
                                             READY[\$KEY]=1
                                             echo "✅ server-1:\${port} enode 就绪"
@@ -671,12 +672,13 @@ PYEOF
                                     fi
                                 done
 
+                                # server-2/3/4 远端
                                 for target in "${SERVER2_HOST}:19545" "${SERVER2_HOST}:19547" "${SERVER3_HOST}:19545" "${SERVER4_HOST}:19545"; do
                                     HOST=\$(echo \${target} | cut -d: -f1)
                                     PORT=\$(echo \${target} | cut -d: -f2)
                                     KEY="\${HOST}:\${PORT}"
                                     if [ -z "\${READY[\$KEY]+x}" ]; then
-                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@\${HOST} "curl -sf -X POST http://127.0.0.1:\${PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\" 2>/dev/null || echo ''")
+                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@\${HOST} "curl -sf -X POST http://127.0.0.1:\${PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d[\"result\"][\"enode\"].split(\"?\")[0])' 2>/dev/null || echo ''")
                                         if [ -n "\${ENODE}" ]; then
                                             READY[\$KEY]=1
                                             echo "✅ \${HOST}:\${PORT} enode 就绪"
@@ -684,6 +686,7 @@ PYEOF
                                     fi
                                 done
 
+                                # 检查是否全部就绪（6个节点）
                                 if [ \${#READY[@]} -eq 6 ]; then
                                     echo "✅ 所有节点 enode 就绪，共等待 \${i} 秒"
                                     break
