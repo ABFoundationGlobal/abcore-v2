@@ -445,6 +445,7 @@ PYEOF
                                 -p 0.0.0.0:\${P2P}:30303/udp \
                                 --entrypoint geth \
                                 ${params.V1_IMAGE} \
+                                --config /data/config.toml \
                                 --datadir /data \
                                 --networkid ${params.CHAIN_ID} \
                                 --port 30303 \
@@ -491,6 +492,7 @@ PYEOF
                                         -p 0.0.0.0:\${P2P}:30303/udp \\\\
                                         --entrypoint geth \\\\
                                         ${params.V1_IMAGE} \\\\
+                                        --config /data/config.toml \\\\
                                         --datadir /data \\\\
                                         --networkid ${params.CHAIN_ID} \\\\
                                         --port 30303 \\\\
@@ -531,6 +533,7 @@ PYEOF
                                     -p 0.0.0.0:31300:30303/udp \\\\
                                     --entrypoint geth \\\\
                                     ${params.V1_IMAGE} \\\\
+                                    --config /data/config.toml \\\\
                                     --datadir /data \\\\
                                     --networkid ${params.CHAIN_ID} \\\\
                                     --port 30303 \\\\
@@ -568,6 +571,7 @@ PYEOF
                                     -p 0.0.0.0:31300:30303/udp \\\\
                                     --entrypoint geth \\\\
                                     ${params.V1_IMAGE} \\\\
+                                    --config /data/config.toml \\\\
                                     --datadir /data \\\\
                                     --networkid ${params.CHAIN_ID} \\\\
                                     --port 30303 \\\\
@@ -649,7 +653,6 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // server-1 本地轮询
                     sh """
                         DOCKER_GW=${dockerGw}
                         for port in 19545 19547; do
@@ -669,7 +672,6 @@ PYEOF
                         done
                     """
 
-                    // server-2/3/4 远程轮询
                     sshagent([SSH_CRED]) {
                         for (def entry : [
                             [host: SERVER2_HOST, ports: ['19545', '19547']],
@@ -682,9 +684,9 @@ PYEOF
                                     for i in \$(seq 1 30); do
                                         ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
                                             "curl -sf -X POST http://127.0.0.1:${port} \
-                                            -H 'Content-Type: application/json' \
-                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
-                                            | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"result\"][\"enode\"])' 2>/dev/null || echo ''")
+                                             -H 'Content-Type: application/json' \
+                                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                                             | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"result\"][\"enode\"])' 2>/dev/null || echo ''")
                                         if [ -n "\${ENODE}" ]; then
                                             echo "✅ ${entry.host}:${port} enode 就绪"
                                             break
@@ -826,7 +828,6 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // 重新收集全部公网 enode
                     def val0Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
                     """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
                     def val1Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19547 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -846,7 +847,7 @@ PYEOF
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
 
-                    // 同台节点互联时用 127.0.0.1 替换公网 IP（解决 AWS hairpin NAT 问题）
+                    // 同台节点用 127.0.0.1，解决 AWS hairpin NAT 问题
                     def val0StaticNodes = allEnodes.findAll { it != val0Enode }.collect { enode ->
                         enode.contains(SERVER1_HOST) ? enode.replace(SERVER1_HOST, '127.0.0.1') : enode
                     }
@@ -859,52 +860,54 @@ PYEOF
                     def val3StaticNodes = allEnodes.findAll { it != val3Enode }.collect { enode ->
                         enode.contains(SERVER2_HOST) ? enode.replace(SERVER2_HOST, '127.0.0.1') : enode
                     }
-                    // val-4, rpc-0 各自单独一台，直接用全量公网 enode
                     def val4StaticNodes = allEnodes.findAll { it != val4Enode }
                     def rpc0StaticNodes = allEnodes.findAll { it != rpc0Enode }
 
-                    def toJson = { list -> '[' + list.collect { '"' + it + '"' }.join(',') + ']' }
+                    def toToml = { list ->
+                        def json = '[' + list.collect { '"' + it + '"' }.join(',') + ']'
+                        "[Node.P2P]\nStaticNodes = ${json}"
+                    }
 
-                    def val0Json  = toJson(val0StaticNodes)
-                    def val1Json  = toJson(val1StaticNodes)
-                    def val2Json  = toJson(val2StaticNodes)
-                    def val3Json  = toJson(val3StaticNodes)
-                    def val4Json  = toJson(val4StaticNodes)
-                    def rpc0Json  = toJson(rpc0StaticNodes)
+                    def val0Toml = toToml(val0StaticNodes)
+                    def val1Toml = toToml(val1StaticNodes)
+                    def val2Toml = toToml(val2StaticNodes)
+                    def val3Toml = toToml(val3StaticNodes)
+                    def val4Toml = toToml(val4StaticNodes)
+                    def rpc0Toml = toToml(rpc0StaticNodes)
 
-                    // server-1: val-0, val-1 各自写入
+                    // server-1
                     sh """
-                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-0/geth
-                        echo '${val0Json}' | sudo tee /data/${params.CHAIN_NAME}/val-0/geth/static-nodes.json > /dev/null
-                        echo "✅ val-0 static-nodes.json 写入完成"
+                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-0
+                        printf '%s' '${val0Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-0/config.toml > /dev/null
+                        echo "✅ val-0 config.toml 写入完成"
 
-                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-1/geth
-                        echo '${val1Json}' | sudo tee /data/${params.CHAIN_NAME}/val-1/geth/static-nodes.json > /dev/null
-                        echo "✅ val-1 static-nodes.json 写入完成"
+                        sudo mkdir -p /data/${params.CHAIN_NAME}/val-1
+                        printf '%s' '${val1Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-1/config.toml > /dev/null
+                        echo "✅ val-1 config.toml 写入完成"
                     """
 
                     sshagent([SSH_CRED]) {
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-2/geth
-                                echo '${val2Json}' | sudo tee /data/${params.CHAIN_NAME}/val-2/geth/static-nodes.json > /dev/null
-                                echo '✅ val-2 static-nodes.json 写入完成'
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-2
+                                printf '%s' '${val2Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-2/config.toml > /dev/null
+                                echo '✅ val-2 config.toml 写入完成'
 
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-3/geth
-                                echo '${val3Json}' | sudo tee /data/${params.CHAIN_NAME}/val-3/geth/static-nodes.json > /dev/null
-                                echo '✅ val-3 static-nodes.json 写入完成'
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-3
+                                printf '%s' '${val3Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-3/config.toml > /dev/null
+                                echo '✅ val-3 config.toml 写入完成'
                             "
 
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-4/geth
-                                echo '${val4Json}' | sudo tee /data/${params.CHAIN_NAME}/val-4/geth/static-nodes.json > /dev/null
-                                echo '✅ val-4 static-nodes.json 写入完成'
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-4
+                                printf '%s' '${val4Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-4/config.toml > /dev/null
+                                echo '✅ val-4 config.toml 写入完成'
                             "
 
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0/geth
-                                echo '${rpc0Json}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/geth/static-nodes.json > /dev/null
-                                echo '✅ rpc-0 static-nodes.json 写入完成'
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0
+                                printf '%s' '${rpc0Toml}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/config.toml > /dev/null
+                                echo '✅ rpc-0 config.toml 写入完成'
                             "
                         """
                     }
