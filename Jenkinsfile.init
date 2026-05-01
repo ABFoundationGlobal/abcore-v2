@@ -846,6 +846,9 @@ PYEOF
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
 
+                    echo "收集到 ${allEnodes.size()} 个 enode"
+                    allEnodes.each { echo "  ${it}" }
+
                     // 同台节点用 127.0.0.1，解决 AWS hairpin NAT 问题
                     def val0StaticNodes = allEnodes.findAll { it != val0Enode }.collect { enode ->
                         enode.contains(SERVER1_HOST) ? enode.replace(SERVER1_HOST, '127.0.0.1') : enode
@@ -863,8 +866,8 @@ PYEOF
                     def rpc0StaticNodes = allEnodes.findAll { it != rpc0Enode }
 
                     def toToml = { list ->
-                        def json = '[' + list.collect { '"' + it + '"' }.join(',') + ']'
-                        "[Node.P2P]\nStaticNodes = ${json}"
+                        def quoted = list.collect { '"' + it + '"' }.join(',')
+                        "[Node.P2P]\nStaticNodes = [${quoted}]"
                     }
 
                     def val0Toml = toToml(val0StaticNodes)
@@ -874,7 +877,7 @@ PYEOF
                     def val4Toml = toToml(val4StaticNodes)
                     def rpc0Toml = toToml(rpc0StaticNodes)
 
-                    // server-1
+                    // server-1 本地直接写
                     sh """
                         sudo mkdir -p /data/${params.CHAIN_NAME}/val-0
                         printf '%s' '${val0Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-0/config.toml > /dev/null
@@ -885,29 +888,29 @@ PYEOF
                         echo "✅ val-1 config.toml 写入完成"
                     """
 
+                    // 远端用 scp 传文件，避免 ssh 引号嵌套导致 TOML 格式损坏
+                    sh """
+                        printf '%s' '${val2Toml}' > /tmp/config-val-2.toml
+                        printf '%s' '${val3Toml}' > /tmp/config-val-3.toml
+                        printf '%s' '${val4Toml}' > /tmp/config-val-4.toml
+                        printf '%s' '${rpc0Toml}' > /tmp/config-rpc-0.toml
+                    """
+
                     sshagent([SSH_CRED]) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-2
-                                printf '%s' '${val2Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-2/config.toml > /dev/null
-                                echo '✅ val-2 config.toml 写入完成'
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "sudo mkdir -p /data/${params.CHAIN_NAME}/val-2 /data/${params.CHAIN_NAME}/val-3"
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/config-val-2.toml ${SSH_USER}@${SERVER2_HOST}:/tmp/config-val-2.toml
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/config-val-3.toml ${SSH_USER}@${SERVER2_HOST}:/tmp/config-val-3.toml
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "sudo mv /tmp/config-val-2.toml /data/${params.CHAIN_NAME}/val-2/config.toml && echo '✅ val-2 config.toml 写入完成'"
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "sudo mv /tmp/config-val-3.toml /data/${params.CHAIN_NAME}/val-3/config.toml && echo '✅ val-3 config.toml 写入完成'"
 
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-3
-                                printf '%s' '${val3Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-3/config.toml > /dev/null
-                                echo '✅ val-3 config.toml 写入完成'
-                            "
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "sudo mkdir -p /data/${params.CHAIN_NAME}/val-4"
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/config-val-4.toml ${SSH_USER}@${SERVER3_HOST}:/tmp/config-val-4.toml
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "sudo mv /tmp/config-val-4.toml /data/${params.CHAIN_NAME}/val-4/config.toml && echo '✅ val-4 config.toml 写入完成'"
 
-                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-4
-                                printf '%s' '${val4Toml}' | sudo tee /data/${params.CHAIN_NAME}/val-4/config.toml > /dev/null
-                                echo '✅ val-4 config.toml 写入完成'
-                            "
-
-                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
-                                sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0
-                                printf '%s' '${rpc0Toml}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/config.toml > /dev/null
-                                echo '✅ rpc-0 config.toml 写入完成'
-                            "
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0"
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/config-rpc-0.toml ${SSH_USER}@${SERVER4_HOST}:/tmp/config-rpc-0.toml
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "sudo mv /tmp/config-rpc-0.toml /data/${params.CHAIN_NAME}/rpc-0/config.toml && echo '✅ rpc-0 config.toml 写入完成'"
                         """
                     }
                 }
