@@ -643,6 +643,63 @@ PYEOF
             }
         }
 
+        // ── Stage 9.5：等待所有节点 enode 就绪 ──────────────────────
+        stage('等待节点稳定') {
+            steps {
+                script {
+                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
+
+                    // server-1 本地轮询
+                    sh """
+                        DOCKER_GW=${dockerGw}
+                        for port in 19545 19547; do
+                            echo "等待 port:\${port} enode 就绪..."
+                            for i in \$(seq 1 30); do
+                                ENODE=\$(curl -sf -X POST http://\${DOCKER_GW}:\${port} \
+                                    -H 'Content-Type: application/json' \
+                                    -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
+                                    | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['enode'])" 2>/dev/null || echo "")
+                                if [ -n "\${ENODE}" ]; then
+                                    echo "✅ port:\${port} enode 就绪"
+                                    break
+                                fi
+                                [ \${i} -eq 30 ] && echo "⚠️  port:\${port} enode 30s 内未就绪"
+                                sleep 1
+                            done
+                        done
+                    """
+
+                    // server-2/3/4 远程轮询
+                    sshagent([SSH_CRED]) {
+                        for (def entry : [
+                            [host: SERVER2_HOST, ports: ['19545', '19547']],
+                            [host: SERVER3_HOST, ports: ['19545']],
+                            [host: SERVER4_HOST, ports: ['19545']]
+                        ]) {
+                            for (def port : entry.ports) {
+                                sh """
+                                    echo "等待 ${entry.host}:${port} enode 就绪..."
+                                    for i in \$(seq 1 30); do
+                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
+                                            "curl -sf -X POST http://127.0.0.1:${port} \
+                                            -H 'Content-Type: application/json' \
+                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                                            | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"result\"][\"enode\"])' 2>/dev/null || echo ''")
+                                        if [ -n "\${ENODE}" ]; then
+                                            echo "✅ ${entry.host}:${port} enode 就绪"
+                                            break
+                                        fi
+                                        [ \${i} -eq 30 ] && echo "⚠️  ${entry.host}:${port} enode 30s 内未就绪"
+                                        sleep 1
+                                    done
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Stage 10：P2P 全网格互联（admin_addPeer）────────────────
         stage('互联节点') {
             steps {
