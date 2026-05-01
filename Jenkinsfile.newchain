@@ -11,8 +11,6 @@
 //
 // 前置条件：
 //   1. 各服务器 keystore 和 password.txt 已就位
-//      /data/devnet/val-N/keystore/UTC--...
-//      /data/devnet/val-N/password.txt
 //   2. Jenkinsfile.init 已完成初始化（genesis + geth init + config.toml）
 // ============================================================
 
@@ -31,9 +29,9 @@ pipeline {
             description: 'val-0~val-4=验证者节点  rpc-0=RPC节点'
         )
         string(
-            name: 'IMAGE',
-            defaultValue: 'abcore:testnet',
-            description: '镜像名（本地已加载的镜像，如 abcore:v0.1.2）'
+            name: 'TAG',
+            defaultValue: 'v0.1.2',
+            description: '镜像版本号，从 GitHub Releases 下载'
         )
         string(
             name: 'CHAIN_ID',
@@ -53,6 +51,9 @@ pipeline {
     }
 
     environment {
+        IMAGE_NAME     = "abcore-v2:${params.TAG}"
+        TARBALL        = "abcore-v2-${params.TAG}-linux-amd64.tar.gz"
+        GITHUB_RELEASE = "https://github.com/ABFoundationGlobal/abcore-v2/releases/download/${params.TAG}"
         DATADIR        = "/data/${params.CHAIN_NAME}/${params.NODE_ID}"
         CONTAINER_NAME = "${params.CHAIN_NAME}-${params.NODE_ID}"
 
@@ -68,7 +69,6 @@ pipeline {
         stage('参数确认') {
             steps {
                 script {
-                    // SERVER / NODE_ID 合法性校验
                     def validMapping = [
                         'server-1': ['val-0', 'val-1'],
                         'server-2': ['val-2', 'val-3'],
@@ -79,7 +79,6 @@ pipeline {
                         error "❌ ${params.NODE_ID} 不属于 ${params.SERVER}，正确映射：${validMapping[params.SERVER]}"
                     }
 
-                    // 端口映射
                     def rpcPortMap = [
                         'val-0': '19545', 'val-1': '19547',
                         'val-2': '19545', 'val-3': '19547',
@@ -117,7 +116,8 @@ pipeline {
                         echo " 节点角色  : ${env.NODE_ROLE}"
                         echo " 链名称    : ${params.CHAIN_NAME}"
                         echo " Chain ID  : ${params.CHAIN_ID}"
-                        echo " 镜像      : ${params.IMAGE}"
+                        echo " 目标版本  : ${params.TAG}"
+                        echo " 镜像      : ${IMAGE_NAME}"
                         echo " 容器名    : ${CONTAINER_NAME}"
                         echo " 数据目录  : ${DATADIR}"
                         echo " RPC端口   : ${env.RPC_PORT}"
@@ -130,19 +130,22 @@ pipeline {
             }
         }
 
-        // ── Stage 2：检查镜像 ────────────────────────────────────────
-        stage('检查镜像') {
+        // ── Stage 2：下载镜像 ────────────────────────────────────────
+        stage('下载镜像') {
             steps {
                 sh """
-                    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^${params.IMAGE}\$'; then
-                        echo "✅ 本地已存在镜像 ${params.IMAGE}"
+                    set -e
+                    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^${IMAGE_NAME}\$'; then
+                        echo "✅ 本地已存在镜像 ${IMAGE_NAME}，跳过下载"
                     else
-                        echo "❌ 镜像不存在: ${params.IMAGE}"
-                        echo "请先手动加载镜像到本服务器，例如："
-                        echo "  docker load < abcore-xxx.tar.gz"
-                        exit 1
+                        echo "开始下载镜像压缩包: ${TARBALL}"
+                        curl -L -o /tmp/${TARBALL} ${GITHUB_RELEASE}/${TARBALL}
+                        echo "加载镜像..."
+                        docker load < /tmp/${TARBALL}
+                        rm -f /tmp/${TARBALL}
+                        echo "✅ 镜像加载完成"
                     fi
-                    docker images | grep -E 'REPOSITORY|abcore' || true
+                    docker images | grep -E 'abcore-v2' || true
                 """
             }
         }
@@ -177,7 +180,6 @@ pipeline {
                         cat ${DATADIR}/config.toml
                     else
                         echo "⚠️  config.toml 不存在，节点将无 StaticNodes 启动"
-                        echo "如需配置静态节点，请先运行 Jenkinsfile.init 或手动创建 config.toml"
                     fi
                 """
             }
@@ -221,12 +223,6 @@ pipeline {
                         ? 'eth,net,web3,clique,admin,personal,debug,txpool'
                         : 'eth,net,web3,clique,admin,personal'
 
-                    def mineArgs = env.NODE_ROLE == 'validator'
-                        ? '--mine --unlock $(ls ${DATADIR}/keystore/UTC--* | head -1 | sed \'s/.*--//\') --password /data/password.txt --miner.etherbase $(ls ${DATADIR}/keystore/UTC--* | head -1 | sed \'s/.*--//\') --allow-insecure-unlock'
-                        : ''
-
-                    def configArg = "--config /data/config.toml"
-
                     sh """
                         set -e
 
@@ -250,7 +246,7 @@ pipeline {
                             -p 0.0.0.0:${env.P2P_PORT}:30303 \\
                             -p 0.0.0.0:${env.P2P_PORT}:30303/udp \\
                             --entrypoint geth \\
-                            ${params.IMAGE} \\
+                            ${IMAGE_NAME} \\
                             \${CONFIG_ARG} \\
                             --datadir /data \\
                             --networkid ${params.CHAIN_ID} \\
@@ -318,7 +314,8 @@ pipeline {
                 echo " ✅ 部署成功"
                 echo " 服务器  : ${params.SERVER} (${env.EXT_IP})"
                 echo " 节点    : ${params.NODE_ID}"
-                echo " 镜像    : ${params.IMAGE}"
+                echo " 版本    : ${params.TAG}"
+                echo " 镜像    : ${IMAGE_NAME}"
                 echo " RPC     : http://${env.EXT_IP}:${env.RPC_PORT}"
                 echo " WS      : ws://${env.EXT_IP}:${env.WS_PORT}"
                 echo "========================================="
