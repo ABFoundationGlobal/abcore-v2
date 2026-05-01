@@ -705,7 +705,7 @@ PYEOF
                     echo "rpc-0 enode: ${rpc0Enode}"
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
-                    def enodesJson = groovy.json.JsonOutput.toJson(allEnodes)
+                    def enodesJson = '[' + allEnodes.collect { '"' + it + '"' }.join(',') + ']'
 
                     // server-1：val-0, val-1 添加其他所有节点
                     sh """
@@ -788,7 +788,7 @@ PYEOF
                     }
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
-                    def staticNodesJson = groovy.json.JsonOutput.toJson(allEnodes)
+                    def staticNodesJson = '[' + allEnodes.collect { '"' + it + '"' }.join(',') + ']'
 
                     // server-1: val-0, val-1 写入所有其他节点
                     sh """
