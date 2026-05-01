@@ -220,8 +220,8 @@ pipeline {
             steps {
                 script {
                     def apiModules = env.NODE_ROLE == 'rpc'
-                        ? 'eth,net,web3,clique,admin,personal,debug,txpool'
-                        : 'eth,net,web3,clique,admin,personal'
+                        ? 'eth,net,web3,clique,admin,debug,txpool'
+                        : 'eth,net,web3,clique,admin'
 
                     sh """
                         set -e
