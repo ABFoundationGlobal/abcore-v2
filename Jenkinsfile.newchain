@@ -279,6 +279,9 @@ pipeline {
                     echo "等待节点启动（15s）..."
                     sleep 15
 
+                    DOCKER_GW=\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+                    echo "Docker 网关: \${DOCKER_GW}"
+
                     echo "--- 容器状态 ---"
                     docker ps | grep ${CONTAINER_NAME} || echo "⚠️  容器未运行"
 
@@ -286,20 +289,20 @@ pipeline {
                     docker logs --tail=30 ${CONTAINER_NAME} 2>&1 || true
 
                     echo "--- RPC 健康检查 ---"
-                    BLOCK=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
+                    BLOCK=\$(curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
                         | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
                     echo "当前块高: \${BLOCK}"
 
-                    PEERS=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
+                    PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
                         | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
                     echo "当前 peers: \${PEERS}"
 
                     echo "--- enode 信息 ---"
-                    curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
+                    curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                         | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'])" 2>/dev/null || echo "enode 获取失败"
