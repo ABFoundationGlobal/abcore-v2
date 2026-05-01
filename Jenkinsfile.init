@@ -1,17 +1,20 @@
 // ============================================================
 // Jenkinsfile.init
 // 用途：一键初始化并启动全新独立链
-// 思路参照 Kai 的 PR #73，但完全由 Jenkins 实现多机编排
 //
-// 节点布局（测试阶段）：
-//   server-1 (13.192.61.77)  → val-0, val-1
-//   server-2 (13.113.68.176) → val-2, val-3
+// 节点布局（新服务器）：
+//   server-1 (13.192.136.101) → val-0, val-1
+//   server-2 (52.193.15.175)  → val-2, val-3
+//   server-3 (54.150.101.239) → val-4
+//   server-4 (52.198.163.178) → rpc-0
 //
 // 端口规划：
 //   val-0: RPC=19545 WS=19546 P2P=31300  (server-1)
 //   val-1: RPC=19547 WS=19548 P2P=31301  (server-1)
 //   val-2: RPC=19545 WS=19546 P2P=31300  (server-2)
 //   val-3: RPC=19547 WS=19548 P2P=31301  (server-2)
+//   val-4: RPC=19545 WS=19546 P2P=31300  (server-3)
+//   rpc-0: RPC=19545 WS=19546 P2P=31300  (server-4，不出块)
 //
 // keystore 路径：
 //   /data/devnet/val-N/keystore/UTC--...
@@ -20,7 +23,7 @@
 // 前置条件：
 //   1. 各服务器 keystore 已就位（空密码）
 //   2. Jenkins SSH 凭证 ab-testnet-server-ssh 已配置
-//   3. Jenkins 容器已安装 python3
+//   3. 各服务器已安装 python3、docker
 // ============================================================
 
 pipeline {
@@ -50,10 +53,14 @@ pipeline {
     }
 
     environment {
-        SERVER1_HOST     = "13.192.61.77"
-        SERVER2_HOST     = "13.113.68.176"
-        SERVER2_USER     = "songjian"
-        SERVER2_SSH_PORT = "22"
+        SSH_CRED        = "ab-testnet-server-ssh"
+        SSH_USER        = "leon"
+        SSH_PORT        = "62222"
+
+        SERVER1_HOST    = "13.192.136.101"
+        SERVER2_HOST    = "52.193.15.175"
+        SERVER3_HOST    = "54.150.101.239"
+        SERVER4_HOST    = "52.198.163.178"
     }
 
     stages {
@@ -71,10 +78,12 @@ pipeline {
                     echo " 重置数据  : ${params.RESET}"
                     echo "-----------------------------------------"
                     echo " 节点分布："
-                    echo "   val-0 → server-1 RPC:19545 P2P:31300"
-                    echo "   val-1 → server-1 RPC:19547 P2P:31301"
-                    echo "   val-2 → server-2 RPC:19545 P2P:31300"
-                    echo "   val-3 → server-2 RPC:19547 P2P:31301"
+                    echo "   val-0 → server-1(${SERVER1_HOST}) RPC:19545 P2P:31300"
+                    echo "   val-1 → server-1(${SERVER1_HOST}) RPC:19547 P2P:31301"
+                    echo "   val-2 → server-2(${SERVER2_HOST}) RPC:19545 P2P:31300"
+                    echo "   val-3 → server-2(${SERVER2_HOST}) RPC:19547 P2P:31301"
+                    echo "   val-4 → server-3(${SERVER3_HOST}) RPC:19545 P2P:31300"
+                    echo "   rpc-0 → server-4(${SERVER4_HOST}) RPC:19545 P2P:31300"
                     echo "========================================="
                 """
             }
@@ -84,6 +93,7 @@ pipeline {
         stage('检查 keystores') {
             steps {
                 script {
+                    // server-1: val-0, val-1（Jenkins 运行在 server-1，直接本地执行）
                     sh """
                         for node in val-0 val-1; do
                             DATADIR="/data/${params.CHAIN_NAME}/\${node}"
@@ -95,49 +105,72 @@ pipeline {
                             echo "✅ \${node} → \${ADDR}"
                         done
                     """
-                    sshagent(['ab-testnet-server-ssh']) {
+
+                    // server-2: val-2, val-3
+                    // server-3: val-4
+                    // server-4: rpc-0（无 keystore，不出块，跳过检查）
+                    sshagent([SSH_CRED]) {
                         sh """
                             for node in val-2 val-3; do
-                                DATADIR="/data/${params.CHAIN_NAME}/\${node}"
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                    if [ -z \\\"\\\$(ls -A \${DATADIR}/keystore 2>/dev/null)\\\" ]; then
+                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
+                                    DATADIR=/data/${params.CHAIN_NAME}/\${node}
+                                    if [ -z \\\"\\\$(ls -A \\\$DATADIR/keystore 2>/dev/null)\\\" ]; then
                                         echo '❌ \${node}: keystore 不存在 on server-2'
                                         exit 1
                                     fi
-                                    ADDR=\\\$(ls \${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
+                                    ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
                                     echo '✅ \${node} → '\\\$ADDR
                                 "
                             done
-                            echo "✅ 所有 keystore 检查通过"
+
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                DATADIR=/data/${params.CHAIN_NAME}/val-4
+                                if [ -z \\\"\\\$(ls -A \\\$DATADIR/keystore 2>/dev/null)\\\" ]; then
+                                    echo '❌ val-4: keystore 不存在 on server-3'
+                                    exit 1
+                                fi
+                                ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
+                                echo '✅ val-4 → '\\\$ADDR
+                            "
+                            echo "✅ 所有 validator keystore 检查通过"
                         """
                     }
                 }
             }
         }
 
-        // ── Stage 3：下载镜像 ────────────────────────────────────────
-        stage('下载镜像') {
+        // ── Stage 3：检查镜像 ────────────────────────────────────────
+        stage('检查镜像') {
             steps {
                 script {
+                    // server-1 本地检查
                     sh """
                         if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^${params.V1_IMAGE}\$'; then
-                            echo "server-1: 本地已存在镜像 ${params.V1_IMAGE}，跳过"
+                            echo "server-1: ✅ 镜像已存在 ${params.V1_IMAGE}"
                         else
-                            echo "server-1: 镜像不存在，请先手动加载 ${params.V1_IMAGE}"
+                            echo "server-1: ❌ 镜像不存在，请先手动加载 ${params.V1_IMAGE}"
                             exit 1
                         fi
                     """
-                    sshagent(['ab-testnet-server-ssh']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^${params.V1_IMAGE}\$'; then
-                                    echo 'server-2: 本地已存在镜像 ${params.V1_IMAGE}，跳过'
-                                else
-                                    echo 'server-2: 镜像不存在，请先手动加载 ${params.V1_IMAGE}'
-                                    exit 1
-                                fi
-                            "
-                        """
+
+                    // server-2, server-3, server-4 远程检查
+                    sshagent([SSH_CRED]) {
+                        for (def entry : [
+                            [host: SERVER2_HOST, name: 'server-2'],
+                            [host: SERVER3_HOST, name: 'server-3'],
+                            [host: SERVER4_HOST, name: 'server-4']
+                        ]) {
+                            sh """
+                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} "
+                                    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^${params.V1_IMAGE}\$'; then
+                                        echo '${entry.name}: ✅ 镜像已存在 ${params.V1_IMAGE}'
+                                    else
+                                        echo '${entry.name}: ❌ 镜像不存在，请先手动加载 ${params.V1_IMAGE}'
+                                        exit 1
+                                    fi
+                                "
+                            """
+                        }
                     }
                 }
             }
@@ -155,14 +188,24 @@ pipeline {
                             echo "  \${node} 链数据已清空"
                         done
                     """
-                    sshagent(['ab-testnet-server-ssh']) {
+                    sshagent([SSH_CRED]) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                 echo '⚠️  清空 server-2 链数据...'
                                 for node in val-2 val-3; do
                                     sudo rm -rf /data/${params.CHAIN_NAME}/\\\$node/geth
                                     echo '  '\\\$node' 链数据已清空'
                                 done
+                            "
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                echo '⚠️  清空 server-3 链数据...'
+                                sudo rm -rf /data/${params.CHAIN_NAME}/val-4/geth
+                                echo '  val-4 链数据已清空'
+                            "
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
+                                echo '⚠️  清空 server-4 链数据...'
+                                sudo rm -rf /data/${params.CHAIN_NAME}/rpc-0/geth
+                                echo '  rpc-0 链数据已清空'
                             "
                         """
                     }
@@ -171,23 +214,24 @@ pipeline {
         }
 
         // ── Stage 5：收集地址 + 生成 genesis.json ───────────────────
-        // 动态从各服务器读取 keystore 地址，生成 genesis.json
         stage('生成 genesis.json') {
             steps {
                 script {
                     def val0Addr = sh(script: "ls /data/${params.CHAIN_NAME}/val-0/keystore/UTC--* | head -1 | sed 's/.*--//' | tr -d '\\n'", returnStdout: true).trim()
                     def val1Addr = sh(script: "ls /data/${params.CHAIN_NAME}/val-1/keystore/UTC--* | head -1 | sed 's/.*--//' | tr -d '\\n'", returnStdout: true).trim()
 
-                    def val2Addr, val3Addr
-                    sshagent(['ab-testnet-server-ssh']) {
-                        val2Addr = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} \"ls /data/${params.CHAIN_NAME}/val-2/keystore/UTC--* | head -1 | sed 's/.*--//'\" | tr -d '\\n'", returnStdout: true).trim()
-                        val3Addr = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} \"ls /data/${params.CHAIN_NAME}/val-3/keystore/UTC--* | head -1 | sed 's/.*--//'\" | tr -d '\\n'", returnStdout: true).trim()
+                    def val2Addr, val3Addr, val4Addr
+                    sshagent([SSH_CRED]) {
+                        val2Addr = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \"ls /data/${params.CHAIN_NAME}/val-2/keystore/UTC--* | head -1 | sed 's/.*--//'\" | tr -d '\\n'", returnStdout: true).trim()
+                        val3Addr = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \"ls /data/${params.CHAIN_NAME}/val-3/keystore/UTC--* | head -1 | sed 's/.*--//'\" | tr -d '\\n'", returnStdout: true).trim()
+                        val4Addr = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} \"ls /data/${params.CHAIN_NAME}/val-4/keystore/UTC--* | head -1 | sed 's/.*--//'\" | tr -d '\\n'", returnStdout: true).trim()
                     }
 
                     echo "val-0: 0x${val0Addr}"
                     echo "val-1: 0x${val1Addr}"
                     echo "val-2: 0x${val2Addr}"
                     echo "val-3: 0x${val3Addr}"
+                    echo "val-4: 0x${val4Addr}"
 
                     sh """
                         python3 << PYEOF
@@ -197,7 +241,8 @@ addrs = [
     "0x${val0Addr}",
     "0x${val1Addr}",
     "0x${val2Addr}",
-    "0x${val3Addr}"
+    "0x${val3Addr}",
+    "0x${val4Addr}"
 ]
 
 sorted_addrs = sorted([a.lower().replace('0x', '') for a in addrs])
@@ -247,77 +292,62 @@ PYEOF
             }
         }
 
-        // ── Stage 6：分发 genesis.json 到 server-2 ──────────────────
+        // ── Stage 6：分发 genesis.json 到所有远端服务器 ─────────────
         stage('分发 genesis.json') {
             steps {
-                sshagent(['ab-testnet-server-ssh']) {
+                sshagent([SSH_CRED]) {
                     sh """
-                        scp -o StrictHostKeyChecking=no -P ${SERVER2_SSH_PORT} \
-                            /tmp/genesis.json \
-                            ${SERVER2_USER}@${SERVER2_HOST}:/tmp/genesis.json
-                        echo "✅ genesis.json 分发到 server-2 完成"
+                        for host in ${SERVER2_HOST} ${SERVER3_HOST} ${SERVER4_HOST}; do
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} \
+                                /tmp/genesis.json \
+                                ${SSH_USER}@\${host}:/tmp/genesis.json
+                            echo "✅ genesis.json 分发到 \${host} 完成"
+                        done
                     """
                 }
             }
         }
 
-// ── Stage 7：初始化所有节点（geth init）─────────────────────
+        // ── Stage 7：初始化所有节点（geth init）─────────────────────
         stage('初始化节点') {
             steps {
                 script {
-                    // 先停止 server-1 旧容器，释放 datadir
-                    sh """
-                        for node in val-0 val-1; do
-                            if docker ps -a --format '{{.Names}}' | grep -q "^${params.CHAIN_NAME}-\${node}\$"; then
-                                docker stop ${params.CHAIN_NAME}-\${node} && docker rm ${params.CHAIN_NAME}-\${node}
-                                echo "旧容器 \${node} 已停止"
-                            fi
-                        done
-                    """
-
-                    // 先停止 server-2 旧容器，释放 datadir
-                    sshagent(['ab-testnet-server-ssh']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                for node in val-2 val-3; do
-                                    if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-'\\\$node'\$'; then
-                                        docker stop ${params.CHAIN_NAME}-\\\$node && docker rm ${params.CHAIN_NAME}-\\\$node
-                                        echo '旧容器 '\\\$node' 已停止'
-                                    fi
-                                done
-                            "
-                        """
-                    }
-
-                    // server-1 初始化 val-0, val-1
+                    // server-1: val-0, val-1
                     sh """
                         set -e
                         for node in val-0 val-1; do
                             DATADIR="/data/${params.CHAIN_NAME}/\${node}"
                             sudo mkdir -p \${DATADIR}
+                            if docker ps -a --format '{{.Names}}' | grep -q "^${params.CHAIN_NAME}-\${node}\$"; then
+                                docker stop ${params.CHAIN_NAME}-\${node} && docker rm ${params.CHAIN_NAME}-\${node}
+                                echo "旧容器 \${node} 已停止"
+                            fi
                             if [ -d "\${DATADIR}/geth/chaindata" ]; then
                                 echo "\${node}: 已有链数据，跳过 init"
                             else
                                 echo "\${node}: 执行 geth init..."
                                 cp /tmp/genesis.json \${DATADIR}/genesis.json
                                 echo -n "" > \${DATADIR}/password.txt
-                                docker run --rm \\
-                                    --entrypoint geth \\
-                                    -v \${DATADIR}:/data \\
-                                    ${params.V1_IMAGE} \\
+                                docker run --rm \
+                                    --entrypoint geth \
+                                    -v \${DATADIR}:/data \
+                                    ${params.V1_IMAGE} \
                                     init --datadir /data /data/genesis.json
                                 echo "✅ \${node} init 完成"
                             fi
                         done
                     """
 
-                    // server-2 初始化 val-2, val-3
-                    sshagent(['ab-testnet-server-ssh']) {
+                    sshagent([SSH_CRED]) {
+                        // server-2: val-2, val-3
                         sh """
                             for node in val-2 val-3; do
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                     DATADIR=/data/${params.CHAIN_NAME}/\${node}
                                     sudo mkdir -p \\\$DATADIR
+                                    if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-\${node}\$'; then
+                                        docker stop ${params.CHAIN_NAME}-\${node} && docker rm ${params.CHAIN_NAME}-\${node}
+                                    fi
                                     if [ -d \\\$DATADIR/geth/chaindata ]; then
                                         echo '\${node}: 已有链数据，跳过 init'
                                     else
@@ -334,6 +364,53 @@ PYEOF
                                 "
                             done
                         """
+
+                        // server-3: val-4
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                DATADIR=/data/${params.CHAIN_NAME}/val-4
+                                sudo mkdir -p \\\$DATADIR
+                                if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-val-4\$'; then
+                                    docker stop ${params.CHAIN_NAME}-val-4 && docker rm ${params.CHAIN_NAME}-val-4
+                                fi
+                                if [ -d \\\$DATADIR/geth/chaindata ]; then
+                                    echo 'val-4: 已有链数据，跳过 init'
+                                else
+                                    echo 'val-4: 执行 geth init...'
+                                    cp /tmp/genesis.json \\\$DATADIR/genesis.json
+                                    echo -n '' > \\\$DATADIR/password.txt
+                                    docker run --rm \\\\
+                                        --entrypoint geth \\\\
+                                        -v \\\$DATADIR:/data \\\\
+                                        ${params.V1_IMAGE} \\\\
+                                        init --datadir /data /data/genesis.json
+                                    echo '✅ val-4 init 完成'
+                                fi
+                            "
+                        """
+
+                        // server-4: rpc-0（无 keystore，只 init）
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
+                                DATADIR=/data/${params.CHAIN_NAME}/rpc-0
+                                sudo mkdir -p \\\$DATADIR
+                                if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-rpc-0\$'; then
+                                    docker stop ${params.CHAIN_NAME}-rpc-0 && docker rm ${params.CHAIN_NAME}-rpc-0
+                                fi
+                                if [ -d \\\$DATADIR/geth/chaindata ]; then
+                                    echo 'rpc-0: 已有链数据，跳过 init'
+                                else
+                                    echo 'rpc-0: 执行 geth init...'
+                                    cp /tmp/genesis.json \\\$DATADIR/genesis.json
+                                    docker run --rm \\\\
+                                        --entrypoint geth \\\\
+                                        -v \\\$DATADIR:/data \\\\
+                                        ${params.V1_IMAGE} \\\\
+                                        init --datadir /data /data/genesis.json
+                                    echo '✅ rpc-0 init 完成'
+                                fi
+                            "
+                        """
                     }
                 }
             }
@@ -343,7 +420,8 @@ PYEOF
         stage('启动节点') {
             steps {
                 script {
-                    // server-1：启动 val-0, val-1
+
+                    // server-1: val-0, val-1（validator，本地执行）
                     sh """
                         for node_cfg in "val-0:19545:19546:31300" "val-1:19547:19548:31301"; do
                             NODE=\$(echo \${node_cfg} | cut -d: -f1)
@@ -357,37 +435,37 @@ PYEOF
                                 docker stop ${params.CHAIN_NAME}-\${NODE} && docker rm ${params.CHAIN_NAME}-\${NODE}
                             fi
 
-                            docker run -d \\
-                                --name ${params.CHAIN_NAME}-\${NODE} \\
-                                --restart unless-stopped \\
-                                -v \${DATADIR}:/data \\
-                                -p 0.0.0.0:\${RPC}:8545 \\
-                                -p 0.0.0.0:\${WS}:8546 \\
-                                -p 0.0.0.0:\${P2P}:30303 \\
-                                -p 0.0.0.0:\${P2P}:30303/udp \\
-                                --entrypoint geth \\
-                                ${params.V1_IMAGE} \\
-                                --datadir /data \\
-                                --networkid ${params.CHAIN_ID} \\
-                                --port 30303 \\
-                                --http --http.addr 0.0.0.0 --http.port 8545 \\
-                                       --http.vhosts '*' \\
-                                       --http.api 'eth,net,web3,clique,admin,personal' \\
-                                --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
-                                       --ws.api 'eth,net,web3,clique,admin,personal' \\
-                                --syncmode full --gcmode archive --verbosity 3 \\
-                                --nat extip:${SERVER1_HOST} \\
-                                --mine --unlock \${ADDR} \\
-                                --password /data/password.txt \\
-                                --miner.etherbase \${ADDR} \\
+                            docker run -d \
+                                --name ${params.CHAIN_NAME}-\${NODE} \
+                                --restart unless-stopped \
+                                -v \${DATADIR}:/data \
+                                -p 0.0.0.0:\${RPC}:8545 \
+                                -p 0.0.0.0:\${WS}:8546 \
+                                -p 0.0.0.0:\${P2P}:30303 \
+                                -p 0.0.0.0:\${P2P}:30303/udp \
+                                --entrypoint geth \
+                                ${params.V1_IMAGE} \
+                                --datadir /data \
+                                --networkid ${params.CHAIN_ID} \
+                                --port 30303 \
+                                --http --http.addr 0.0.0.0 --http.port 8545 \
+                                       --http.vhosts '*' \
+                                       --http.api 'eth,net,web3,clique,admin,personal' \
+                                --ws   --ws.addr 0.0.0.0   --ws.port 8546 \
+                                       --ws.api 'eth,net,web3,clique,admin,personal' \
+                                --syncmode full --gcmode archive --verbosity 3 \
+                                --nat extip:${SERVER1_HOST} \
+                                --mine --unlock \${ADDR} \
+                                --password /data/password.txt \
+                                --miner.etherbase \${ADDR} \
                                 --allow-insecure-unlock
                             echo "✅ \${NODE} 启动完成"
                             sleep 1
                         done
                     """
 
-                    // server-2：启动 val-2, val-3
-                    sshagent(['ab-testnet-server-ssh']) {
+                    sshagent([SSH_CRED]) {
+                        // server-2: val-2, val-3（validator）
                         sh """
                             for node_cfg in "val-2:19545:19546:31300" "val-3:19547:19548:31301"; do
                                 NODE=\$(echo \${node_cfg} | cut -d: -f1)
@@ -395,7 +473,7 @@ PYEOF
                                 WS=\$(echo \${node_cfg} | cut -d: -f3)
                                 P2P=\$(echo \${node_cfg} | cut -d: -f4)
 
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
+                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                     DATADIR=/data/${params.CHAIN_NAME}/\${NODE}
                                     ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
 
@@ -432,6 +510,77 @@ PYEOF
                                 sleep 1
                             done
                         """
+
+                        // server-3: val-4（validator）
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                DATADIR=/data/${params.CHAIN_NAME}/val-4
+                                ADDR=\\\$(ls \\\$DATADIR/keystore/UTC--* | head -1 | sed 's/.*--//')
+
+                                if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-val-4\$'; then
+                                    docker stop ${params.CHAIN_NAME}-val-4 && docker rm ${params.CHAIN_NAME}-val-4
+                                fi
+
+                                docker run -d \\\\
+                                    --name ${params.CHAIN_NAME}-val-4 \\\\
+                                    --restart unless-stopped \\\\
+                                    -v \\\$DATADIR:/data \\\\
+                                    -p 0.0.0.0:19545:8545 \\\\
+                                    -p 0.0.0.0:19546:8546 \\\\
+                                    -p 0.0.0.0:31300:30303 \\\\
+                                    -p 0.0.0.0:31300:30303/udp \\\\
+                                    --entrypoint geth \\\\
+                                    ${params.V1_IMAGE} \\\\
+                                    --datadir /data \\\\
+                                    --networkid ${params.CHAIN_ID} \\\\
+                                    --port 30303 \\\\
+                                    --http --http.addr 0.0.0.0 --http.port 8545 \\\\
+                                           --http.vhosts '*' \\\\
+                                           --http.api 'eth,net,web3,clique,admin,personal' \\\\
+                                    --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\\\
+                                           --ws.api 'eth,net,web3,clique,admin,personal' \\\\
+                                    --syncmode full --gcmode archive --verbosity 3 \\\\
+                                    --nat extip:${SERVER3_HOST} \\\\
+                                    --mine --unlock \\\$ADDR \\\\
+                                    --password /data/password.txt \\\\
+                                    --miner.etherbase \\\$ADDR \\\\
+                                    --allow-insecure-unlock
+                                echo '✅ val-4 启动完成'
+                            "
+                        """
+
+                        // server-4: rpc-0（不出块，不挂 --mine）
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
+                                DATADIR=/data/${params.CHAIN_NAME}/rpc-0
+
+                                if docker ps -a --format '{{.Names}}' | grep -q '^${params.CHAIN_NAME}-rpc-0\$'; then
+                                    docker stop ${params.CHAIN_NAME}-rpc-0 && docker rm ${params.CHAIN_NAME}-rpc-0
+                                fi
+
+                                docker run -d \\\\
+                                    --name ${params.CHAIN_NAME}-rpc-0 \\\\
+                                    --restart unless-stopped \\\\
+                                    -v \\\$DATADIR:/data \\\\
+                                    -p 0.0.0.0:19545:8545 \\\\
+                                    -p 0.0.0.0:19546:8546 \\\\
+                                    -p 0.0.0.0:31300:30303 \\\\
+                                    -p 0.0.0.0:31300:30303/udp \\\\
+                                    --entrypoint geth \\\\
+                                    ${params.V1_IMAGE} \\\\
+                                    --datadir /data \\\\
+                                    --networkid ${params.CHAIN_ID} \\\\
+                                    --port 30303 \\\\
+                                    --http --http.addr 0.0.0.0 --http.port 8545 \\\\
+                                           --http.vhosts '*' \\\\
+                                           --http.api 'eth,net,web3,clique,admin,personal,debug,txpool' \\\\
+                                    --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\\\
+                                           --ws.api 'eth,net,web3,clique,admin,personal,debug,txpool' \\\\
+                                    --syncmode full --gcmode archive --verbosity 3 \\\\
+                                    --nat extip:${SERVER4_HOST}
+                                echo '✅ rpc-0 启动完成'
+                            "
+                        """
                     }
                 }
             }
@@ -444,7 +593,7 @@ PYEOF
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
                     echo "Docker 网关: ${dockerGw}"
 
-                    // 等待 server-1 节点 RPC（从 Jenkins 容器用 DOCKER_GW 访问）
+                    // server-1 本地检查（通过 Docker 网关访问宿主机端口）
                     sh """
                         DOCKER_GW=${dockerGw}
                         for node_port in "val-0:19545" "val-1:19547"; do
@@ -452,43 +601,43 @@ PYEOF
                             PORT=\$(echo \${node_port} | cut -d: -f2)
                             echo "等待 \${NODE} RPC 就绪..."
                             for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
-                                    -H 'Content-Type: application/json' \\
+                                if curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \
+                                    -H 'Content-Type: application/json' \
                                     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
                                     echo "✅ \${NODE} RPC 就绪"
                                     break
                                 fi
-                                if [ \${i} -eq 30 ]; then
-                                    echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
-                                fi
+                                [ \${i} -eq 30 ] && echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
                                 sleep 1
                             done
                         done
                     """
 
-                    // 等待 server-2 节点 RPC（SSH 到 server-2 上检查）
-                    sshagent(['ab-testnet-server-ssh']) {
-                        sh """
-                            for node_port in "val-2:19545" "val-3:19547"; do
-                                NODE=\$(echo \${node_port} | cut -d: -f1)
-                                PORT=\$(echo \${node_port} | cut -d: -f2)
-                                echo "等待 \${NODE} RPC 就绪..."
-                                for i in \$(seq 1 30); do
-                                    RESULT=\$(ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} \\
-                                        "curl -sf -X POST http://127.0.0.1:\${PORT} \\
-                                            -H 'Content-Type: application/json' \\
-                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1 && echo ok || echo fail")
-                                    if [ "\${RESULT}" = "ok" ]; then
-                                        echo "✅ \${NODE} RPC 就绪"
-                                        break
-                                    fi
-                                    if [ \${i} -eq 30 ]; then
-                                        echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
-                                    fi
-                                    sleep 1
-                                done
-                            done
-                        """
+                    // server-2, server-3, server-4 远程检查
+                    sshagent([SSH_CRED]) {
+                        for (def entry : [
+                            [host: SERVER2_HOST, nodes: [['val-2', '19545'], ['val-3', '19547']]],
+                            [host: SERVER3_HOST, nodes: [['val-4', '19545']]],
+                            [host: SERVER4_HOST, nodes: [['rpc-0', '19545']]]
+                        ]) {
+                            for (def node : entry.nodes) {
+                                sh """
+                                    echo "等待 ${node[0]} RPC 就绪..."
+                                    for i in \$(seq 1 30); do
+                                        RESULT=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
+                                            "curl -sf -X POST http://127.0.0.1:${node[1]} \
+                                                -H 'Content-Type: application/json' \
+                                                -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1 && echo ok || echo fail")
+                                        if [ "\${RESULT}" = "ok" ]; then
+                                            echo "✅ ${node[0]} RPC 就绪"
+                                            break
+                                        fi
+                                        [ \${i} -eq 30 ] && echo "⚠️  ${node[0]} RPC 30s 内未响应，继续..."
+                                        sleep 1
+                                    done
+                                """
+                            }
+                        }
                     }
                 }
             }
@@ -500,169 +649,183 @@ PYEOF
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // 收集 server-1 节点 enode，替换端口为宿主机映射端口
+                    // 收集所有节点 enode，替换 IP 为宿主机公网 IP，替换端口为宿主机映射端口
                     def val0Enode = sh(script: """
-                        curl -sf -X POST http://${dockerGw}:19545 \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                        curl -sf -X POST http://${dockerGw}:19545 \
+                            -H 'Content-Type: application/json' \
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
+                    """, returnStdout: true).trim()
+                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
 
                     def val1Enode = sh(script: """
-                        curl -sf -X POST http://${dockerGw}:19547 \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+                        curl -sf -X POST http://${dockerGw}:19547 \
+                            -H 'Content-Type: application/json' \
+                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
+                    """, returnStdout: true).trim()
+                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
+
+                    def val2Enode, val3Enode, val4Enode, rpc0Enode
+                    sshagent([SSH_CRED]) {
+                        val2Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \
+                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
+                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
+
+                        val3Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} \
+                            "curl -sf -X POST http://127.0.0.1:19547 -H 'Content-Type: application/json' \
+                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31301')
+
+                        val4Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} \
+                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
+                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER3_HOST}:").replaceAll(':[0-9]+$', ':31300')
+
+                        rpc0Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} \
+                            "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' \
+                             -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' \
+                             | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER4_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                    }
 
                     echo "val-0 enode: ${val0Enode}"
                     echo "val-1 enode: ${val1Enode}"
+                    echo "val-2 enode: ${val2Enode}"
+                    echo "val-3 enode: ${val3Enode}"
+                    echo "val-4 enode: ${val4Enode}"
+                    echo "rpc-0 enode: ${rpc0Enode}"
 
-                    // server-1 内部互联（用 Docker 网关 IP）
-                    if (val0Enode && val1Enode) {
-                        def val0Local = val0Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
-                        def val1Local = val1Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
+                    def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
+                    def enodesJson = groovy.json.JsonOutput.toJson(allEnodes)
 
+                    // server-1：val-0, val-1 添加其他所有节点
+                    sh """
+                        DOCKER_GW=${dockerGw}
+                        for port in 19545 19547; do
+                            for enode in ${allEnodes.join(' ')}; do
+                                curl -sf -X POST http://\${DOCKER_GW}:\${port} \
+                                    -H 'Content-Type: application/json' \
+                                    -d "{\"jsonrpc\":\"2.0\",\"method\":\"admin_addPeer\",\"params\":[\"\${enode}\"],\"id\":1}" > /dev/null
+                            done
+                        done
+                        echo "✅ server-1 互联完成"
+                    """
+
+                    sshagent([SSH_CRED]) {
+                        // server-2：val-2, val-3
                         sh """
-                            curl -sf -X POST http://${dockerGw}:19545 \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"admin_addPeer","params":["${val1Local}"],"id":1}' > /dev/null
-                            curl -sf -X POST http://${dockerGw}:19547 \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"admin_addPeer","params":["${val0Local}"],"id":1}' > /dev/null
-                            echo "✅ server-1 内部互联完成（val-0 ↔ val-1）"
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
+                                for port in 19545 19547; do
+                                    for enode in ${allEnodes.join(' ')}; do
+                                        curl -sf -X POST http://127.0.0.1:\\\$port \\\
+                                            -H 'Content-Type: application/json' \\\
+                                            -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                    done
+                                done
+                                echo '✅ server-2 互联完成'
+                            "
+                        """
+
+                        // server-3：val-4
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                for enode in ${allEnodes.join(' ')}; do
+                                    curl -sf -X POST http://127.0.0.1:19545 \\\
+                                        -H 'Content-Type: application/json' \\\
+                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                done
+                                echo '✅ server-3 互联完成'
+                            "
+                        """
+
+                        // server-4：rpc-0
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
+                                for enode in ${allEnodes.join(' ')}; do
+                                    curl -sf -X POST http://127.0.0.1:19545 \\\
+                                        -H 'Content-Type: application/json' \\\
+                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                done
+                                echo '✅ server-4 互联完成'
+                            "
                         """
                     }
-
-                    // server-2 内部互联
-                    sshagent(['ab-testnet-server-ssh']) {
-                        // 收集 val-2, val-3 enode 并替换端口
-                        def val2Enode = sh(script: """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                curl -sf -X POST http://127.0.0.1:19545 \\\\
-                                    -H 'Content-Type: application/json' \\\\
-                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
-                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
-                            "
-                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
-
-                        def val3Enode = sh(script: """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                curl -sf -X POST http://127.0.0.1:19547 \\\\
-                                    -H 'Content-Type: application/json' \\\\
-                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
-                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
-                            "
-                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
-
-                        echo "val-2 enode: ${val2Enode}"
-                        echo "val-3 enode: ${val3Enode}"
-
-                        if (val2Enode && val3Enode) {
-                            sh """
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                    DOCKER_GW=\\\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-                                    VAL2_LOCAL=\\\$(echo '${val2Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
-                                    VAL3_LOCAL=\\\$(echo '${val3Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
-                                    curl -sf -X POST http://127.0.0.1:19545 \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$VAL3_LOCAL\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
-                                    curl -sf -X POST http://127.0.0.1:19547 \\\\
-                                        -H 'Content-Type: application/json' \\\\
-                                        -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$VAL2_LOCAL\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
-                                    echo '✅ server-2 内部互联完成（val-2 ↔ val-3）'
-                                "
-                            """
-                        }
-                    }
-
-                    sh "echo '⚠️  跨服务器互联需要 AWS 安全组开放 31300/31301 端口 TCP+UDP'"
                 }
             }
         }
 
-        // ── Stage 11：写入 config.toml（节点重启后自动重连）────────
+        // ── Stage 11：写入 StaticNodes（重启后自动重连）─────────────
         stage('写入 StaticNodes') {
             steps {
                 script {
                     def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
 
-                    // 收集 enode（已替换端口）
-                    def val0Enode = sh(script: """
-                        curl -sf -X POST http://${dockerGw}:19545 \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
+                    // 重新收集全部公网 enode（复用 Stage 10 的逻辑）
+                    def val0Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                    def val1Enode = sh(script: """curl -sf -X POST http://${dockerGw}:19547 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+                    """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
 
-                    def val1Enode = sh(script: """
-                        curl -sf -X POST http://${dockerGw}:19547 \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
-
-                    // server-1：val-0 写入 val-1，val-1 写入 val-0
-                    if (val0Enode && val1Enode) {
-                        def val0Local = val0Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
-                        def val1Local = val1Enode.replaceAll('@[^:]+:', "@${dockerGw}:")
-
-                        sh """
-                            sudo tee /data/${params.CHAIN_NAME}/val-0/config.toml > /dev/null << TOMLEOF
-[Node.P2P]
-StaticNodes = ["${val1Local}"]
-TOMLEOF
-                            sudo tee /data/${params.CHAIN_NAME}/val-1/config.toml > /dev/null << TOMLEOF
-[Node.P2P]
-StaticNodes = ["${val0Local}"]
-TOMLEOF
-                            echo "✅ server-1 config.toml 写入完成"
-                        """
+                    def val2Enode, val3Enode, val4Enode, rpc0Enode
+                    sshagent([SSH_CRED]) {
+                        val2Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        val3Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "curl -sf -X POST http://127.0.0.1:19547 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31301')
+                        val4Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER3_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        rpc0Enode = sh(script: """ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "curl -sf -X POST http://127.0.0.1:19545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim().replaceAll('@[^:]+:', "@${SERVER4_HOST}:").replaceAll(':[0-9]+$', ':31300')
                     }
 
-                    // server-2：val-2 写入 val-3，val-3 写入 val-2
-                    sshagent(['ab-testnet-server-ssh']) {
-                        def val2Enode = sh(script: """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                curl -sf -X POST http://127.0.0.1:19545 \\\\
-                                    -H 'Content-Type: application/json' \\\\
-                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
-                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
-                            "
-                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31300')
+                    def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
+                    def staticNodesJson = groovy.json.JsonOutput.toJson(allEnodes)
 
-                        def val3Enode = sh(script: """
-                            ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                curl -sf -X POST http://127.0.0.1:19547 \\\\
-                                    -H 'Content-Type: application/json' \\\\
-                                    -d '{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"admin_nodeInfo\\\",\\\"params\\\":[],\\\"id\\\":1}' \\\\
-                                    | python3 -c \\\"import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])\\\" 2>/dev/null || echo ''
-                            "
-                        """, returnStdout: true).trim().replaceAll(':[0-9]+$', ':31301')
+                    // server-1: val-0, val-1 写入所有其他节点
+                    sh """
+                        for node in val-0 val-1; do
+                            sudo mkdir -p /data/${params.CHAIN_NAME}/\${node}/geth
+                            echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/\${node}/geth/static-nodes.json > /dev/null
+                            echo "✅ \${node} static-nodes.json 写入完成"
+                        done
+                    """
 
-                        if (val2Enode && val3Enode) {
-                            sh """
-                                ssh -o StrictHostKeyChecking=no -p ${SERVER2_SSH_PORT} ${SERVER2_USER}@${SERVER2_HOST} "
-                                    DOCKER_GW=\\\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-                                    VAL2_LOCAL=\\\$(echo '${val2Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
-                                    VAL3_LOCAL=\\\$(echo '${val3Enode}' | sed \\\"s/@[^:]*:/@\\\$DOCKER_GW:/\\\")
-                                    sudo tee /data/${params.CHAIN_NAME}/val-2/config.toml > /dev/null << TOMLEOF
-[Node.P2P]
-StaticNodes = [\\\"\\\$VAL3_LOCAL\\\"]
-TOMLEOF
-                                    sudo tee /data/${params.CHAIN_NAME}/val-3/config.toml > /dev/null << TOMLEOF
-[Node.P2P]
-StaticNodes = [\\\"\\\$VAL2_LOCAL\\\"]
-TOMLEOF
-                                    echo '✅ server-2 config.toml 写入完成'
+                    sshagent([SSH_CRED]) {
+                        sh """
+                            for node in val-2 val-3; do
+                                ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
+                                    sudo mkdir -p /data/${params.CHAIN_NAME}/\${node}/geth
+                                    echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/\${node}/geth/static-nodes.json > /dev/null
+                                    echo '✅ \${node} static-nodes.json 写入完成'
                                 "
-                            """
-                        }
+                            done
+
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/val-4/geth
+                                echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/val-4/geth/static-nodes.json > /dev/null
+                                echo '✅ val-4 static-nodes.json 写入完成'
+                            "
+
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
+                                sudo mkdir -p /data/${params.CHAIN_NAME}/rpc-0/geth
+                                echo '${staticNodesJson}' | sudo tee /data/${params.CHAIN_NAME}/rpc-0/geth/static-nodes.json > /dev/null
+                                echo '✅ rpc-0 static-nodes.json 写入完成'
+                            "
+                        """
                     }
                 }
             }
         }
-        
+
         // ── Stage 12：验证出块 ───────────────────────────────────────
         stage('验证出块') {
             steps {
@@ -673,9 +836,9 @@ TOMLEOF
                         DOCKER_GW=${dockerGw}
                         echo "等待链出块（最多 60 秒）..."
                         for i in \$(seq 1 30); do
-                            BLOCK=\$(curl -sf -X POST http://\${DOCKER_GW}:19545 \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                            BLOCK=\$(curl -sf -X POST http://\${DOCKER_GW}:19545 \
+                                -H 'Content-Type: application/json' \
+                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
                             if [ "\${BLOCK}" -gt "0" ]; then
                                 echo "✅ 链正在出块，当前块高: \${BLOCK}"
@@ -692,18 +855,41 @@ TOMLEOF
                         for node_port in "val-0:19545" "val-1:19547"; do
                             NODE=\$(echo \${node_port} | cut -d: -f1)
                             PORT=\$(echo \${node_port} | cut -d: -f2)
-                            BN=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
+                            BN=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \
+                                -H 'Content-Type: application/json' \
+                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                            PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
+                            PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \
+                                -H 'Content-Type: application/json' \
+                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
                             printf "  %-8s block=%-6s peers=%s\\n" "\${NODE}" "\${BN}" "\${PEERS}"
                         done
                         echo "========================================="
                     """
+
+                    // server-2, server-3, server-4 状态
+                    sshagent([SSH_CRED]) {
+                        for (def entry : [
+                            [host: SERVER2_HOST, nodes: [['val-2', '19545'], ['val-3', '19547']]],
+                            [host: SERVER3_HOST, nodes: [['val-4', '19545']]],
+                            [host: SERVER4_HOST, nodes: [['rpc-0', '19545']]]
+                        ]) {
+                            for (def node : entry.nodes) {
+                                sh """
+                                    BN=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
+                                        "curl -sf -X POST http://127.0.0.1:${node[1]} -H 'Content-Type: application/json' \
+                                         -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \
+                                         | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?'")
+                                    PEERS=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${entry.host} \
+                                        "curl -sf -X POST http://127.0.0.1:${node[1]} -H 'Content-Type: application/json' \
+                                         -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \
+                                         | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?'")
+                                    printf "  %-8s block=%-6s peers=%s\\n" "${node[0]}" "\${BN}" "\${PEERS}"
+                                """
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -718,10 +904,17 @@ TOMLEOF
                 echo " 链名称   : ${params.CHAIN_NAME}"
                 echo " 镜像     : ${params.V1_IMAGE}"
                 echo "========================================="
+                echo " 节点 RPC 地址："
+                echo "   val-0 → http://${SERVER1_HOST}:19545"
+                echo "   val-1 → http://${SERVER1_HOST}:19547"
+                echo "   val-2 → http://${SERVER2_HOST}:19545"
+                echo "   val-3 → http://${SERVER2_HOST}:19547"
+                echo "   val-4 → http://${SERVER3_HOST}:19545"
+                echo "   rpc-0 → http://${SERVER4_HOST}:19545"
+                echo "========================================="
                 echo " 后续操作："
-                echo " 1. 确认所有节点出块正常"
-                echo " 2. 开放 AWS 安全组 31300/31301 端口后跨服务器节点互联"
-                echo " 3. 升级使用 Jenkinsfile.rolling"
+                echo " 1. 确认所有节点 peers >= 5 且正常出块"
+                echo " 2. 升级使用 Jenkinsfile.rolling"
                 echo "========================================="
             """
         }
