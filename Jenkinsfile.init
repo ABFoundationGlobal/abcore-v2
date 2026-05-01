@@ -633,17 +633,18 @@ PYEOF
                     sshagent([SSH_CRED]) {
                         sh """
                             cat > /tmp/get_enode.sh << 'SCRIPT'
-                            #!/bin/bash
-                            PORT=\$1
-                            curl -sf -X POST http://127.0.0.1:\$PORT \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                            2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                            SCRIPT
+#!/bin/bash
+PORT=\$1
+curl -sf -X POST http://127.0.0.1:\$PORT \\
+  -H 'Content-Type: application/json' \\
+  -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
+  2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
+SCRIPT
                             chmod +x /tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER2_HOST}:/tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER3_HOST}:/tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER4_HOST}:/tmp/get_enode.sh
+                            echo "✅ get_enode.sh 分发完成"
                         """
                     }
 
