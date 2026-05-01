@@ -678,7 +678,7 @@ PYEOF
                                     PORT=\$(echo \${target} | cut -d: -f2)
                                     KEY="\${HOST}:\${PORT}"
                                     if [ -z "\${READY[\$KEY]+x}" ]; then
-                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@\${HOST} "curl -sf -X POST http://127.0.0.1:\${PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d[\"result\"][\"enode\"].split(\"?\")[0])' 2>/dev/null || echo ''")
+                                        ENODE=\$(ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@\${HOST} "curl -sf -X POST http://127.0.0.1:\${PORT} -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"admin_nodeInfo\",\"params\":[],\"id\":1}' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d[\"result\"][\"enode\"].split(\"?\")[0])' 2>/dev/null || echo \"\"")
                                         if [ -n "\${ENODE}" ]; then
                                             READY[\$KEY]=1
                                             echo "✅ \${HOST}:\${PORT} enode 就绪"
