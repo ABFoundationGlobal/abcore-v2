@@ -11,7 +11,7 @@
 >
 > - 本手册处理的是“**共识切换已经触发或已跨过分叉块**”后的回滚。
 > - 若只是 v1 → v2 二进制升级失败，但链仍处于纯 Clique 阶段，请使用 [validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md) 中的回滚章节。
-> - 本手册对应本地演练脚本 `script/transition-test/96-run-rollback-drill.sh`，即 T-1.6 场景。
+> - 本手册对应本地演练脚本 `script/test/transition/96-run-rollback-drill.sh`，即 T-1.6 场景。
 
 ---
 
@@ -347,7 +347,7 @@ debug.setHead('0x13')
 在生产执行前，建议至少完成一次本地或测试环境彩排：
 
 ```bash
-GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+GETH=./build/bin/geth bash script/test/transition/96-run-rollback-drill.sh
 ```
 
 该脚本验证：

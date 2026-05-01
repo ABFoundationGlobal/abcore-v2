@@ -2,7 +2,7 @@
 # U-2: London + 13 BSC block forks (block height activation).
 #
 # Corresponds to devnet Upgrade 2 (v0.3.0, fork block = 60001).
-# Local parameter default: LONDON_BLOCK = current head + 60.
+# Local parameter default: LONDON_BLOCK = current head + 120.
 #
 # Fork activations (all set to LONDON_BLOCK):
 #   londonBlock, ramanujanBlock, nielsBlock, mirrorSyncBlock, brunoBlock,
@@ -76,8 +76,8 @@ wait_for_ipc "$GETH" "$(val_ipc 1)" 30
 
 if [[ -z "${LONDON_BLOCK:-}" ]]; then
   _cur=$(head_number "$GETH" "$(val_ipc 1)")
-  LONDON_BLOCK=$(( _cur + 60 ))
-  log "LONDON_BLOCK not set — defaulting to current head + 60 = ${LONDON_BLOCK}"
+  LONDON_BLOCK=$(( _cur + 120 ))
+  log "LONDON_BLOCK not set — defaulting to current head + 120 = ${LONDON_BLOCK}"
 fi
 
 POST_FORK=$(( LONDON_BLOCK + 3 ))
@@ -183,7 +183,7 @@ _post_reinit=$(head_number "$GETH" "$(val_ipc 1)")
 log "Rolling reinit complete. Head=${_post_reinit}"
 if [[ "$_post_reinit" -ge "$LONDON_BLOCK" ]]; then
   die "Rolling reinit took too long — chain already at ${_post_reinit} >= LONDON_BLOCK ${LONDON_BLOCK}.
-Re-run with a higher LONDON_BLOCK, e.g. LONDON_BLOCK=$(( _post_reinit + 60 ))"
+Re-run with a higher LONDON_BLOCK, e.g. LONDON_BLOCK=$(( _post_reinit + 120 ))"
 fi
 log "All validators updated. Head=${_post_reinit} < LONDON_BLOCK=${LONDON_BLOCK} — fork not yet reached."
 
@@ -261,4 +261,4 @@ if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
 fi
 
 echo "PASS (U-2). Nodes remain running."
-echo "Next: bash script/upgrade-drill/07-snapshot.sh && bash script/upgrade-drill/82-run-u3-shanghai-feynman.sh"
+echo "Next: bash script/test/upgrade-drill/07-snapshot.sh && bash script/test/upgrade-drill/82-run-u3-shanghai-feynman.sh"

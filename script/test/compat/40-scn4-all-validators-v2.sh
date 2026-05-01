@@ -139,7 +139,7 @@ done
 # restart again; the new head height shifts the Clique round-robin so a
 # different validator is in-turn, breaking the deadlock.
 #
-# See also: script/transition-test/99-run-all.sh (same pattern).
+# See also: script/test/transition/99-run-all.sh (same pattern).
 _restart_attempt=0
 while true; do
   _restart_attempt=$(( _restart_attempt + 1 ))

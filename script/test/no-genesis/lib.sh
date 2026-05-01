@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# lib.sh — shared helpers for the no-genesis-v2 test suite.
-# Sources compat-clique-v1-v2/lib.sh for all low-level helpers, then adds
+# lib.sh — shared helpers for the no-genesis test suite.
+# Sources test/compat/lib.sh for all low-level helpers, then adds
 # ABCore testnet (chain ID 26888) specific constants and port layout.
 
 # Save our own script directory BEFORE sourcing compat lib.sh, which sets its
-# own SCRIPT_DIR. We restore ours afterwards so callers get the no-genesis-v2
+# own SCRIPT_DIR. We restore ours afterwards so callers get the no-genesis
 # directory, not the compat directory.
 _NG_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Source the shared helper library from the compat suite for all low-level
 # helpers (wait_for_ipc, wait_for_same_head, find_free_port_base, etc.).
-# shellcheck source=../compat-clique-v1-v2/lib.sh
-source "${_NG_SCRIPT_DIR}/../compat-clique-v1-v2/lib.sh"
+# shellcheck source=../compat/lib.sh
+source "${_NG_SCRIPT_DIR}/../compat/lib.sh"
 
 # Restore our own SCRIPT_DIR, REPO_ROOT and DATADIR_ROOT after compat lib.sh
 # overwrote them.  DATADIR_ROOT must be reset here so port/path functions
-# below resolve under the no-genesis-v2 data directory, not the compat one.
+# below resolve under the no-genesis data directory, not the compat one.
 SCRIPT_DIR="${_NG_SCRIPT_DIR}"
-REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
 # Only override if not explicitly set by caller (99-run-all.sh sets it after
 # PORT_BASE is selected).
 DATADIR_ROOT=${DATADIR_ROOT:-"${SCRIPT_DIR}/data-${PORT_BASE}"}

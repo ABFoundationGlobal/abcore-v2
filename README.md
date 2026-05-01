@@ -40,6 +40,11 @@ git push origin sync/bsc-vX.Y.Z
 # 4. Open PR: sync/bsc-vX.Y.Z → master
 #    Use "Create a merge commit" (not squash, not rebase)
 #    This records the new BSC release in master's ancestry for future syncs.
+#
+#    IMPORTANT: The master branch ruleset normally allows "Squash and merge" only.
+#    Before merging the sync PR you must temporarily allow "Create a merge commit":
+#      GitHub → Settings → Rules → master → Edit → allow "Merge commit" → Save
+#    Merge the PR, then immediately restore the setting (remove "Merge commit").
 ```
 
 The sync branch is created from `master` and `bsc` is merged in. This means the PR diff shows only the new BSC delta plus any conflict resolutions — not the full ABCore history. `master` is not touched until the PR is reviewed and merged.
@@ -50,7 +55,7 @@ The sync branch is created from `master` and `bsc` is merged in. This means the 
 git checkout -b feature/my-thing master
 # ... develop ...
 git push origin feature/my-thing
-# Open PR → master, merge via "Squash and merge"
+# Open PR → master, merge via "Squash and merge" (the only option allowed by default)
 ```
 
 ---

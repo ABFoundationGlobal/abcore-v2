@@ -22,7 +22,7 @@
 # balance check instead.
 #
 # T-6.b and T-6.c (Feynman-initialized parameters, updateParam bounds) are
-# tracked as planned work in script/transition-test/README.md.
+# tracked as planned work in script/test/transition/README.md.
 #
 # Environment (inherited from caller):
 #   GETH          geth binary path
