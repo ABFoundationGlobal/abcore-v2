@@ -1,7 +1,7 @@
 # parliagenesis/default — Local Testing Bytecodes
 
 This directory contains system contract bytecodes compiled with **3 fixed dev validator addresses**
-for use by the local transition test suite (`script/transition-test/`).
+for use by the local transition test suite (`script/test/transition/`).
 
 Chain ID 99988 (the throwaway chain used by transition tests) falls through to `defaultNet` in
 `applyParliaGenesisUpgrade`, so these bytecodes are injected at `ParliaGenesisBlock` when running

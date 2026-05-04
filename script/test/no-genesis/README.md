@@ -7,7 +7,7 @@ This suite validates two distinct properties introduced by the ABCore v2 chain c
 
 These properties are **not covered** by the existing test suites:
 - `compat-clique-v1-v2/` uses a custom genesis (chain ID 7141) and always runs `geth init`; it never exercises the binary-embedded genesis path or the `HasCliqueAndParlia()` code branch.
-- `local-v2/` is a Parlia devnet (chain ID 7140) unrelated to either property.
+- `local/` is a Parlia devnet (chain ID 7140) unrelated to either property.
 
 ## Prerequisites
 
@@ -20,14 +20,14 @@ These properties are **not covered** by the existing test suites:
 From repo root:
 
 ```bash
-script/no-genesis-v2/99-run-all.sh
+script/test/no-genesis/99-run-all.sh
 ```
 
 Or with an explicit v1 binary:
 
 ```bash
 export ABCORE_V1_GETH=/path/to/abcore-v1-geth
-script/no-genesis-v2/99-run-all.sh
+script/test/no-genesis/99-run-all.sh
 ```
 
 ## Scenarios
@@ -72,11 +72,11 @@ v1 runs sync-only; v2 mines. After v2 seals 3+ blocks, v1 must sync to v2's head
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ABCORE_V1_GETH` | `script/compat-clique-v1-v2/bin/geth-v1` (auto-downloaded) | Path to v1.13.x binary |
+| `ABCORE_V1_GETH` | `script/test/compat/bin/geth-v1` (auto-downloaded) | Path to v1.13.x binary |
 | `ABCORE_V2_GETH` | `./build/bin/geth` | Path to v2 binary |
 | `KEEP_RUNNING` | `0` | Set to `1` to leave nodes running after pass |
 | `PORT_BASE` | auto-selected | Offset added to all port numbers (auto-selected to avoid conflicts) |
-| `DATADIR_ROOT` | `script/no-genesis-v2/data-<PORT_BASE>` | Root directory for all node data |
+| `DATADIR_ROOT` | `script/test/no-genesis/data-<PORT_BASE>` | Root directory for all node data |
 
 ## Known constraints
 

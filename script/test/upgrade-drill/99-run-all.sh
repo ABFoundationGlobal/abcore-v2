@@ -7,9 +7,9 @@
 # head — no snapshot step is needed in the automated path.
 #
 # Usage:
-#   bash script/upgrade-drill/99-run-all.sh
-#   GETH=./build/bin/geth bash script/upgrade-drill/99-run-all.sh
-#   PARLIA_GENESIS_BLOCK=50 GETH=./build/bin/geth bash script/upgrade-drill/99-run-all.sh
+#   bash script/test/upgrade-drill/99-run-all.sh
+#   GETH=./build/bin/geth bash script/test/upgrade-drill/99-run-all.sh
+#   PARLIA_GENESIS_BLOCK=50 GETH=./build/bin/geth bash script/test/upgrade-drill/99-run-all.sh
 #
 # Environment:
 #   GETH                  geth binary path (auto-built if unset)
@@ -24,7 +24,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # ── Build geth if no explicit path provided ───────────────────────────────────
 
 if [[ -z "${GETH:-}" ]]; then
-  _REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+  _REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
   echo "[$(date +'%H:%M:%S')] Building geth (set GETH=... to skip)..."
   (cd "${_REPO_ROOT}" && \
     CGO_CFLAGS="-O -D__BLST_PORTABLE__" \

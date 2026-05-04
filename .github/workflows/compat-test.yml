@@ -30,9 +30,9 @@ jobs:
               - '**/*.go'
               - 'go.sum'
               - 'go.mod'
-              - 'script/compat-clique-v1-v2/**'
-              - 'script/no-genesis-v2/**'
-              - 'script/transition-test/**'
+              - 'script/test/compat/**'
+              - 'script/test/no-genesis/**'
+              - 'script/test/transition/**'
               - '.github/workflows/compat-test.yml'
 
   compat-test:
@@ -61,8 +61,8 @@ jobs:
     - name: Cache v1 binary
       uses: actions/cache@v4
       with:
-        path: script/compat-clique-v1-v2/bin/geth-v1
-        key: geth-v1-${{ hashFiles('script/compat-clique-v1-v2/00-get-v1-geth.sh') }}
+        path: script/test/compat/bin/geth-v1
+        key: geth-v1-${{ hashFiles('script/test/compat/00-get-v1-geth.sh') }}
 
     - name: Build v2
       env:
@@ -73,54 +73,54 @@ jobs:
     - name: Download v1 binary (if not cached)
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: bash script/compat-clique-v1-v2/00-get-v1-geth.sh
+      run: bash script/test/compat/00-get-v1-geth.sh
 
     - name: Install Python venv support
       run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-venv
 
-    - name: Run no-genesis-v2 tests
+    - name: Run no-genesis tests
       env:
         ABCORE_V2_GETH: ${{ github.workspace }}/build/bin/geth
-        ABCORE_V1_GETH: ${{ github.workspace }}/script/compat-clique-v1-v2/bin/geth-v1
-      run: bash script/no-genesis-v2/99-run-all.sh
+        ABCORE_V1_GETH: ${{ github.workspace }}/script/test/compat/bin/geth-v1
+      run: bash script/test/no-genesis/99-run-all.sh
 
-    - name: Run compat-clique-v1-v2 tests
+    - name: Run compat tests
       env:
         ABCORE_V2_GETH: ${{ github.workspace }}/build/bin/geth
-        ABCORE_V1_GETH: ${{ github.workspace }}/script/compat-clique-v1-v2/bin/geth-v1
-      run: bash script/compat-clique-v1-v2/99-run-all.sh
+        ABCORE_V1_GETH: ${{ github.workspace }}/script/test/compat/bin/geth-v1
+      run: bash script/test/compat/99-run-all.sh
 
     - name: Run transition test (default)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
-      run: bash script/transition-test/99-run-all.sh
+      run: bash script/test/transition/99-run-all.sh
 
     - name: Run transition test (non-genesis checkpoint)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
         CLIQUE_EPOCH: 10
         PARLIA_GENESIS_BLOCK: 25
-      run: bash script/transition-test/99-run-all.sh
+      run: bash script/test/transition/99-run-all.sh
 
     - name: Run transition test (late restart past fork block)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
-      run: bash script/transition-test/97-run-late-restart.sh
+      run: bash script/test/transition/97-run-late-restart.sh
 
     - name: Run transition test (pre-fork vote change)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
-      run: bash script/transition-test/98-run-vote-change.sh
+      run: bash script/test/transition/98-run-vote-change.sh
 
     - name: Run transition test (T-2 Parlia epoch boundary)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
-      run: bash script/transition-test/95-run-epoch-test.sh
+      run: bash script/test/transition/95-run-epoch-test.sh
 
     - name: Run transition test (Clique epoch boundary == fork block)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth
-      run: bash script/transition-test/93-run-clique-epoch-fork-test.sh
+      run: bash script/test/transition/93-run-clique-epoch-fork-test.sh
 
     - name: Upload logs on failure
       if: failure()
@@ -128,9 +128,9 @@ jobs:
       with:
         name: compat-test-logs
         path: |
-          script/compat-clique-v1-v2/data-*/
-          script/no-genesis-v2/data-*/
-          script/transition-test/data-*/
+          script/test/compat/data-*/
+          script/test/no-genesis/data-*/
+          script/test/transition/data-*/
         retention-days: 3
 
   compat-test-status:

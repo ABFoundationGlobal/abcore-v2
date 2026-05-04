@@ -9,7 +9,7 @@ the 3-node network. Each round continues from the chain state left by the
 previous round — chaindata is never reset between rounds.
 
 For isolated edge-case tests of the Clique→Parlia transition itself, see
-[`script/transition-test/README.md`](../transition-test/README.md).
+[`script/test/transition/README.md`](../transition/README.md).
 
 ## Scenario coverage
 
@@ -267,13 +267,13 @@ compresses each gap to 3 minutes.
 
 ```bash
 # Runs init → U-1 → U-2 in sequence; auto-builds geth if GETH is unset.
-bash script/upgrade-drill/99-run-all.sh
+bash script/test/upgrade-drill/99-run-all.sh
 
 # With explicit binary and custom fork heights
-GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=50 bash script/upgrade-drill/99-run-all.sh
+GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=50 bash script/test/upgrade-drill/99-run-all.sh
 
 # Leave nodes running after PASS for manual inspection
-GETH=./build/bin/geth KEEP_RUNNING=1 bash script/upgrade-drill/99-run-all.sh
+GETH=./build/bin/geth KEEP_RUNNING=1 bash script/test/upgrade-drill/99-run-all.sh
 ```
 
 ### Round by round
@@ -287,19 +287,19 @@ rounds in separate terminal sessions.
 make geth
 
 # Initialise 3-node network (one time)
-GETH=./build/bin/geth bash script/upgrade-drill/00-init.sh
+GETH=./build/bin/geth bash script/test/upgrade-drill/00-init.sh
 
 # Optional: snapshot before first round
-bash script/upgrade-drill/07-snapshot.sh
+bash script/test/upgrade-drill/07-snapshot.sh
 
 # U-1: Clique→Parlia (starts the Clique network, then crosses the fork)
-GETH=./build/bin/geth bash script/upgrade-drill/80-run-u1-parlia-switch.sh
+GETH=./build/bin/geth bash script/test/upgrade-drill/80-run-u1-parlia-switch.sh
 
 # Optional: snapshot before U-2
-bash script/upgrade-drill/07-snapshot.sh
+bash script/test/upgrade-drill/07-snapshot.sh
 
 # U-2: London + BSC forks (nodes still running from U-1)
-GETH=./build/bin/geth bash script/upgrade-drill/81-run-u2-london-forks.sh
+GETH=./build/bin/geth bash script/test/upgrade-drill/81-run-u2-london-forks.sh
 
 # Optional: snapshot before U-3
 bash script/upgrade-drill/07-snapshot.sh
@@ -314,10 +314,10 @@ GETH=./build/bin/geth bash script/upgrade-drill/82-run-u3-shanghai-feynman.sh
 
 ```bash
 # Wipe everything and start over
-bash script/upgrade-drill/clean.sh
+bash script/test/upgrade-drill/clean.sh
 
 # Restore from a snapshot taken between rounds
-SNAPSHOT=script/upgrade-drill/snapshots/snapshot-<timestamp>.tar.gz \
-  bash script/upgrade-drill/08-restore.sh
+SNAPSHOT=script/test/upgrade-drill/snapshots/snapshot-<timestamp>.tar.gz \
+  bash script/test/upgrade-drill/08-restore.sh
 # then re-run the round that follows the snapshot point
 ```

@@ -5,7 +5,7 @@ baseline fork path, late restart handling, coordinated rollback drill, and
 Parlia epoch boundary validator set transitions.
 
 For the full 6-round sequential upgrade drill (v0.1 → v0.7), see
-[`script/upgrade-drill/README.md`](../upgrade-drill/README.md).
+[`script/test/upgrade-drill/README.md`](../upgrade-drill/README.md).
 
 ## Scenario coverage
 
@@ -165,58 +165,58 @@ focus areas, all requiring the GovHub system-call path (sender `SystemAddress` �
 
 ```bash
 # T-1: default fork transition (PARLIA_GENESIS_BLOCK=20)
-GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
+GETH=./build/bin/geth bash script/test/transition/99-run-all.sh
 
 # T-1: non-genesis checkpoint (fork not on genesis epoch)
 GETH=./build/bin/geth CLIQUE_EPOCH=10 PARLIA_GENESIS_BLOCK=25 \
-  bash script/transition-test/99-run-all.sh
+  bash script/test/transition/99-run-all.sh
 
 # T-1 vote-change variant
-GETH=./build/bin/geth bash script/transition-test/98-run-vote-change.sh
+GETH=./build/bin/geth bash script/test/transition/98-run-vote-change.sh
 
 # T-1.5: late restart
-GETH=./build/bin/geth bash script/transition-test/97-run-late-restart.sh
+GETH=./build/bin/geth bash script/test/transition/97-run-late-restart.sh
 
 # T-1.6: rollback drill
-GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+GETH=./build/bin/geth bash script/test/transition/96-run-rollback-drill.sh
 
 # T-2: Parlia epoch boundary (~3 minutes)
-GETH=./build/bin/geth bash script/transition-test/95-run-epoch-test.sh
+GETH=./build/bin/geth bash script/test/transition/95-run-epoch-test.sh
 
 # T-2: custom epoch length
-GETH=./build/bin/geth EPOCH_LENGTH=100 bash script/transition-test/95-run-epoch-test.sh
+GETH=./build/bin/geth EPOCH_LENGTH=100 bash script/test/transition/95-run-epoch-test.sh
 
 # T-4 (Clique-epoch-fork): fork block == Clique epoch boundary (EPOCH_LENGTH=20, PGB=20)
-GETH=./build/bin/geth bash script/transition-test/93-run-clique-epoch-fork-test.sh
+GETH=./build/bin/geth bash script/test/transition/93-run-clique-epoch-fork-test.sh
 
 # T-4: custom epoch length
-GETH=./build/bin/geth EPOCH_LENGTH=30 bash script/transition-test/93-run-clique-epoch-fork-test.sh
+GETH=./build/bin/geth EPOCH_LENGTH=30 bash script/test/transition/93-run-clique-epoch-fork-test.sh
 
 # T-1 + T-3 (always included) + T-2 (opt-in, adds ~3 minutes)
-RUN_EPOCH_TEST=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
+RUN_EPOCH_TEST=1 GETH=./build/bin/geth bash script/test/transition/99-run-all.sh
 
 # T-1 + Clique-epoch-fork combined
-RUN_CLIQUE_EPOCH_FORK_TEST=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
+RUN_CLIQUE_EPOCH_FORK_TEST=1 GETH=./build/bin/geth bash script/test/transition/99-run-all.sh
 
 # Leave nodes running for manual inspection after PASS
-KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/95-run-epoch-test.sh
-KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/99-run-all.sh
+KEEP_RUNNING=1 GETH=./build/bin/geth bash script/test/transition/95-run-epoch-test.sh
+KEEP_RUNNING=1 GETH=./build/bin/geth bash script/test/transition/99-run-all.sh
 
 # Leave the rolled-back Clique network running after the drill
-KEEP_RUNNING=1 GETH=./build/bin/geth bash script/transition-test/96-run-rollback-drill.sh
+KEEP_RUNNING=1 GETH=./build/bin/geth bash script/test/transition/96-run-rollback-drill.sh
 
 # T-3: user transaction crossing the fork boundary
-GETH=./build/bin/geth bash script/transition-test/94-run-tx-test.sh
+GETH=./build/bin/geth bash script/test/transition/94-run-tx-test.sh
 
 # T-3: run Clique chain to block ~25 before stopping (PRE_STOP = PARLIA_GENESIS_BLOCK − 5 = 25).
 # The effective fork block is frozen_head+1 ≈ 26; PARLIA_GENESIS_BLOCK controls the
 # pre-stop target, not the exact fork height.
-GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/transition-test/94-run-tx-test.sh
+GETH=./build/bin/geth PARLIA_GENESIS_BLOCK=30 bash script/test/transition/94-run-tx-test.sh
 
 # T-5: single-node rolling restart in Parlia mode
-GETH=./build/bin/geth bash script/transition-test/92-run-rolling-restart-test.sh
+GETH=./build/bin/geth bash script/test/transition/92-run-rolling-restart-test.sh
 
 # 06-verify-contracts.sh: static contract data checks (called automatically by 05-verify.sh)
 # To run standalone on already-live nodes:
-GETH=./build/bin/geth bash script/transition-test/06-verify-contracts.sh
+GETH=./build/bin/geth bash script/test/transition/06-verify-contracts.sh
 ```

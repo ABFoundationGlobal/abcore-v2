@@ -296,4 +296,4 @@ if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
 fi
 
 echo "PASS (U-1). Nodes remain running in Parlia mode."
-echo "Next: bash script/upgrade-drill/07-snapshot.sh && bash script/upgrade-drill/81-run-u2-london-forks.sh"
+echo "Next: bash script/test/upgrade-drill/07-snapshot.sh && bash script/test/upgrade-drill/81-run-u2-london-forks.sh"

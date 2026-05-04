@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Downloads the pinned v1.13.x geth binary from the ABFoundationGlobal/abcore
-# GitHub release and places it at script/compat-clique-v1-v2/bin/geth-v1.
+# GitHub release and places it at script/test/compat/bin/geth-v1.
 # Called automatically by resolve_binaries() in lib.sh when the binary is absent.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
