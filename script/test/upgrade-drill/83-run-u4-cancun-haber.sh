@@ -236,7 +236,7 @@ else
   pass "block ${ACT_BLOCK} excessBlobGas=${excess_blob} (EIP-4844 header field present)"
 fi
 
-# 4. Pre-fork block must NOT have blobGasUsed.
+# 4. Pre-fork block must NOT have blobGasUsed or excessBlobGas.
 PRE_BLOCK=$(( ACT_BLOCK - 1 ))
 pre_blob=$(attach_exec "$GETH" "$IPC1" \
   "eth.getBlock(${PRE_BLOCK}).blobGasUsed" 2>/dev/null || true)
@@ -244,6 +244,13 @@ if [[ -z "$pre_blob" || "$pre_blob" == "null" || "$pre_blob" == "undefined" ]]; 
   pass "block ${PRE_BLOCK} has no blobGasUsed (pre-Cancun, expected)"
 else
   fail "block ${PRE_BLOCK} blobGasUsed=${pre_blob} (Cancun activated too early)"
+fi
+pre_excess=$(attach_exec "$GETH" "$IPC1" \
+  "eth.getBlock(${PRE_BLOCK}).excessBlobGas" 2>/dev/null || true)
+if [[ -z "$pre_excess" || "$pre_excess" == "null" || "$pre_excess" == "undefined" ]]; then
+  pass "block ${PRE_BLOCK} has no excessBlobGas (pre-Cancun, expected)"
+else
+  fail "block ${PRE_BLOCK} excessBlobGas=${pre_excess} (Cancun activated too early)"
 fi
 
 # 5. Chain still advancing.
