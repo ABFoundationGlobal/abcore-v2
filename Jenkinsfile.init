@@ -588,7 +588,7 @@ PYEOF
                             PORT=\$(echo \${node_port} | cut -d: -f2)
                             echo "等待 \${NODE} RPC 就绪..."
                             for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://127.0.0.1:\${PORT} \
+                                if curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
                                     -H 'Content-Type: application/json' \
                                     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
                                     echo "✅ \${NODE} RPC 就绪"
@@ -629,9 +629,9 @@ SCRIPT
                         """
                     }
 
-                    // 收集本地 val-0, val-1 enode（host模式直接用127.0.0.1）
+                    // 收集本地 val-0, val-1 enode（通过公网IP访问，因为Jenkins在容器里）
                     def val0Enode = sh(script: """
-                        curl -sf -X POST http://127.0.0.1:19545 \
+                        curl -sf -X POST http://${SERVER1_HOST}:19545 \
                             -H 'Content-Type: application/json' \
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -639,7 +639,7 @@ SCRIPT
                         .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
 
                     def val1Enode = sh(script: """
-                        curl -sf -X POST http://127.0.0.1:19547 \
+                        curl -sf -X POST http://${SERVER1_HOST}:19547 \
                             -H 'Content-Type: application/json' \
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -668,11 +668,11 @@ SCRIPT
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
 
-                    // server-1 互联（host模式直接用127.0.0.1）
+                    // server-1 互联（通过公网IP，因为Jenkins在容器里）
                     sh """
                         for port in 19545 19547; do
                             for enode in ${allEnodes.join(' ')}; do
-                                curl -sf -X POST http://127.0.0.1:\${port} \
+                                curl -sf -X POST http://${SERVER1_HOST}:\${port} \
                                     -H 'Content-Type: application/json' \
                                     -d "{\"jsonrpc\":\"2.0\",\"method\":\"admin_addPeer\",\"params\":[\"\${enode}\"],\"id\":1}" > /dev/null
                             done
@@ -724,9 +724,9 @@ SCRIPT
         stage('写入 StaticNodes') {
             steps {
                 script {
-                    // 收集本地 enode（host模式直接用127.0.0.1）
+                    // 收集本地 enode（通过公网IP访问，因为Jenkins在容器里）
                     def val0Enode = sh(script: """
-                        curl -sf -X POST http://127.0.0.1:19545 \
+                        curl -sf -X POST http://${SERVER1_HOST}:19545 \
                             -H 'Content-Type: application/json' \
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -734,7 +734,7 @@ SCRIPT
                         .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
 
                     def val1Enode = sh(script: """
-                        curl -sf -X POST http://127.0.0.1:19547 \
+                        curl -sf -X POST http://${SERVER1_HOST}:19547 \
                             -H 'Content-Type: application/json' \
                             -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
                             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
@@ -834,7 +834,7 @@ SCRIPT
                     sh """
                         echo "等待链出块（最多 60 秒）..."
                         for i in \$(seq 1 30); do
-                            BLOCK=\$(curl -sf -X POST http://127.0.0.1:19545 \
+                            BLOCK=\$(curl -sf -X POST http://${SERVER1_HOST}:19545 \
                                 -H 'Content-Type: application/json' \
                                 -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
@@ -853,11 +853,11 @@ SCRIPT
                         for node_port in "val-0:19545" "val-1:19547"; do
                             NODE=\$(echo \${node_port} | cut -d: -f1)
                             PORT=\$(echo \${node_port} | cut -d: -f2)
-                            BN=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \
+                            BN=\$(curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
                                 -H 'Content-Type: application/json' \
                                 -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                            PEERS=\$(curl -sf -X POST http://127.0.0.1:\${PORT} \
+                            PEERS=\$(curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
                                 -H 'Content-Type: application/json' \
                                 -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \
                                 | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
