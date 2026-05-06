@@ -195,13 +195,17 @@ const (
 	HistoryServeWindow = 8191 // Number of blocks to serve historical block hashes for, EIP-2935.
 
 	MaxBlockSize = 8_388_608 // maximum size of an RLP-encoded block
+
+	// Block intervals for Parlia consensus forks, in milliseconds.
+	LorentzBlockInterval uint64 = 3000
+	MaxwellBlockInterval uint64 = 3000
+	FermiBlockInterval   uint64 = 3000
 )
 
 var (
-	// fermiBlockInterval                        = 0.45
-	MinTimeDurationForBlobRequests     uint64 = uint64(float64(24*3600) * 18.2)                        // it keeps blob data available for 18.2 days in local
-	MinBlocksForBlobRequests           uint64 = uint64(float64(MinTimeDurationForBlobRequests) / 0.45) // ref: https://github.com/bnb-chain/BEPs/blob/master/BEPs/BEP-524.md#421-change-table.
-	DefaultExtraReserveForBlobRequests uint64 = uint64(24 * 3600 / 0.45)                               // it adds more time for expired blobs for some request cases, like expiry blob when remote peer is syncing, default 1 day.
+	MinTimeDurationForBlobRequests     uint64 = uint64(float64(24*3600) * 18.2)                                                          // it keeps blob data available for 18.2 days in local
+	MinBlocksForBlobRequests           uint64 = uint64(float64(MinTimeDurationForBlobRequests) / (float64(FermiBlockInterval) / 1000))   // ref: https://github.com/bnb-chain/BEPs/blob/master/BEPs/BEP-524.md#421-change-table.
+	DefaultExtraReserveForBlobRequests uint64 = uint64(24 * 3600 / (float64(FermiBlockInterval) / 1000))                                // it adds more time for expired blobs for some request cases, like expiry blob when remote peer is syncing, default 1 day.
 
 	BreatheBlockInterval uint64 = 24 * 3600 // Controls the interval for updateValidatorSetV2
 
