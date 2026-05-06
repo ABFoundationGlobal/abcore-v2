@@ -94,6 +94,11 @@ pipeline {
                         'val-2': '31300', 'val-3': '31301',
                         'val-4': '31300', 'rpc-0': '31300'
                     ]
+                    def authPortMap = [
+                        'val-0': '8551', 'val-1': '8552',
+                        'val-2': '8551', 'val-3': '8552',
+                        'val-4': '8551', 'rpc-0': '8551'
+                    ]
                     def extIpMap = [
                         'server-1': '13.192.136.101',
                         'server-2': '52.193.15.175',
@@ -101,6 +106,7 @@ pipeline {
                         'server-4': '52.198.163.178'
                     ]
 
+                    env.AUTH_PORT = authPortMap[params.NODE_ID]
                     env.RPC_PORT  = rpcPortMap[params.NODE_ID]
                     env.WS_PORT   = wsPortMap[params.NODE_ID]
                     env.P2P_PORT  = p2pPortMap[params.NODE_ID]
@@ -240,21 +246,19 @@ pipeline {
                         docker run -d \\
                             --name ${CONTAINER_NAME} \\
                             --restart unless-stopped \\
+                            --network host \\
                             -v ${DATADIR}:/data \\
-                            -p 0.0.0.0:${env.RPC_PORT}:8545 \\
-                            -p 0.0.0.0:${env.WS_PORT}:8546 \\
-                            -p 0.0.0.0:${env.P2P_PORT}:30303 \\
-                            -p 0.0.0.0:${env.P2P_PORT}:30303/udp \\
                             --entrypoint geth \\
                             ${IMAGE_NAME} \\
                             \${CONFIG_ARG} \\
                             --datadir /data \\
                             --networkid ${params.CHAIN_ID} \\
-                            --port 30303 \\
-                            --http --http.addr 0.0.0.0 --http.port 8545 \\
+                            --port ${env.P2P_PORT} \\
+                            --authrpc.port ${env.AUTH_PORT} \\
+                            --http --http.addr 0.0.0.0 --http.port ${env.RPC_PORT} \\
                                    --http.vhosts '*' \\
                                    --http.api '${apiModules}' \\
-                            --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
+                            --ws   --ws.addr 0.0.0.0   --ws.port ${env.WS_PORT} \\
                                    --ws.api '${apiModules}' \\
                             --syncmode full \\
                             --gcmode archive \\
@@ -275,9 +279,6 @@ pipeline {
                     echo "等待节点启动（15s）..."
                     sleep 15
 
-                    DOCKER_GW=\$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-                    echo "Docker 网关: \${DOCKER_GW}"
-
                     echo "--- 容器状态 ---"
                     docker ps | grep ${CONTAINER_NAME} || echo "⚠️  容器未运行"
 
@@ -285,20 +286,20 @@ pipeline {
                     docker logs --tail=30 ${CONTAINER_NAME} 2>&1 || true
 
                     echo "--- RPC 健康检查 ---"
-                    BLOCK=\$(curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
+                    BLOCK=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
                         | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
                     echo "当前块高: \${BLOCK}"
 
-                    PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
+                    PEERS=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
                         | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
                     echo "当前 peers: \${PEERS}"
 
                     echo "--- enode 信息 ---"
-                    curl -sf -X POST http://\${DOCKER_GW}:${env.RPC_PORT} \\
+                    curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
                         -H 'Content-Type: application/json' \\
                         -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
                         | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'])" 2>/dev/null || echo "enode 获取失败"
