@@ -586,23 +586,27 @@ PYEOF
         stage('等待 RPC 就绪') {
             steps {
                 script {
-                    sh """
-                        for node_port in "val-0:19545" "val-1:19547"; do
-                            NODE=\$(echo \${node_port} | cut -d: -f1)
-                            PORT=\$(echo \${node_port} | cut -d: -f2)
-                            echo "等待 \${NODE} RPC 就绪..."
-                            for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
-                                    -H 'Content-Type: application/json' \
-                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
-                                    echo "✅ \${NODE} RPC 就绪"
-                                    break
-                                fi
-                                [ \${i} -eq 30 ] && echo "⚠️  \${NODE} RPC 30s 内未响应，继续..."
-                                sleep 1
-                            done
-                        done
-                    """
+                    sshagent([SSH_CRED]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} "
+                                for node_port in 'val-0:19545' 'val-1:19547'; do
+                                    NODE=\\\$(echo \\\$node_port | cut -d: -f1)
+                                    PORT=\\\$(echo \\\$node_port | cut -d: -f2)
+                                    echo '等待 '\\\$NODE' RPC 就绪...'
+                                    for i in \\\$(seq 1 30); do
+                                        if curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
+                                            -H 'Content-Type: application/json' \\\\
+                                            -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' > /dev/null 2>&1; then
+                                            echo '✅ '\\\$NODE' RPC 就绪'
+                                            break
+                                        fi
+                                        [ \\\$i -eq 30 ] && echo '⚠️  '\\\$NODE' RPC 30s 内未响应，继续...'
+                                        sleep 1
+                                    done
+                                done
+                            "
+                        """
+                    }
 
                     echo "等待远端节点启动（10s）..."
                     sleep 10
@@ -614,8 +618,8 @@ PYEOF
         stage('互联节点') {
             steps {
                 script {
-                    // 生成查询 enode 的脚本并分发到远端
                     sshagent([SSH_CRED]) {
+                        // 生成查询 enode 的脚本并分发到所有服务器
                         sh """
                             cat > /tmp/get_enode.sh << 'SCRIPT'
 #!/bin/bash
@@ -626,6 +630,7 @@ curl -sf -X POST http://127.0.0.1:\$PORT \\
   2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
 SCRIPT
                             chmod +x /tmp/get_enode.sh
+                            scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER1_HOST}:/tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER2_HOST}:/tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER3_HOST}:/tmp/get_enode.sh
                             scp -o StrictHostKeyChecking=no -P ${SSH_PORT} /tmp/get_enode.sh ${SSH_USER}@${SERVER4_HOST}:/tmp/get_enode.sh
@@ -633,26 +638,13 @@ SCRIPT
                         """
                     }
 
-                    // 收集本地 val-0, val-1 enode（通过公网IP访问，因为Jenkins在容器里）
-                    def val0Enode = sh(script: """
-                        curl -sf -X POST http://${SERVER1_HOST}:19545 \
-                            -H 'Content-Type: application/json' \
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
-                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
-
-                    def val1Enode = sh(script: """
-                        curl -sf -X POST http://${SERVER1_HOST}:19547 \
-                            -H 'Content-Type: application/json' \
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
-                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
-
-                    // 收集远端 enode
-                    def val2Enode, val3Enode, val4Enode, rpc0Enode
+                    // 收集所有 enode（SSH 到各服务器上执行）
+                    def val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode
                     sshagent([SSH_CRED]) {
+                        val0Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        val1Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
                         val2Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
                         val3Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
@@ -672,25 +664,27 @@ SCRIPT
 
                     def allEnodes = [val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode].findAll { it }
 
-                    // server-1 互联（通过公网IP，因为Jenkins在容器里）
-                    sh """
-                        for port in 19545 19547; do
-                            for enode in ${allEnodes.join(' ')}; do
-                                curl -sf -X POST http://${SERVER1_HOST}:\${port} \
-                                    -H 'Content-Type: application/json' \
-                                    -d "{\"jsonrpc\":\"2.0\",\"method\":\"admin_addPeer\",\"params\":[\"\${enode}\"],\"id\":1}" > /dev/null
-                            done
-                        done
-                        echo "✅ server-1 互联完成"
-                    """
-
                     sshagent([SSH_CRED]) {
+                        // server-1 互联（SSH 到 server-1 上执行）
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} "
+                                for port in 19545 19547; do
+                                    for enode in ${allEnodes.join(' ')}; do
+                                        curl -sf -X POST http://127.0.0.1:\\\$port \\\\
+                                            -H 'Content-Type: application/json' \\\\
+                                            -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
+                                    done
+                                done
+                                echo '✅ server-1 互联完成'
+                            "
+                        """
+
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                 for port in 19545 19547; do
                                     for enode in ${allEnodes.join(' ')}; do
-                                        curl -sf -X POST http://127.0.0.1:\\\$port \\\
-                                            -H 'Content-Type: application/json' \\\
+                                        curl -sf -X POST http://127.0.0.1:\\\$port \\\\
+                                            -H 'Content-Type: application/json' \\\\
                                             -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
                                     done
                                 done
@@ -701,8 +695,8 @@ SCRIPT
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
                                 for enode in ${allEnodes.join(' ')}; do
-                                    curl -sf -X POST http://127.0.0.1:19545 \\\
-                                        -H 'Content-Type: application/json' \\\
+                                    curl -sf -X POST http://127.0.0.1:19545 \\\\
+                                        -H 'Content-Type: application/json' \\\\
                                         -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
                                 done
                                 echo '✅ server-3 互联完成'
@@ -712,8 +706,8 @@ SCRIPT
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER4_HOST} "
                                 for enode in ${allEnodes.join(' ')}; do
-                                    curl -sf -X POST http://127.0.0.1:19545 \\\
-                                        -H 'Content-Type: application/json' \\\
+                                    curl -sf -X POST http://127.0.0.1:19545 \\\\
+                                        -H 'Content-Type: application/json' \\\\
                                         -d \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"method\\\\\\\":\\\\\\\"admin_addPeer\\\\\\\",\\\\\\\"params\\\\\\\":[\\\\\\\"\\\$enode\\\\\\\"],\\\\\\\"id\\\\\\\":1}\\\" > /dev/null
                                 done
                                 echo '✅ server-4 互联完成'
@@ -728,26 +722,13 @@ SCRIPT
         stage('写入 StaticNodes') {
             steps {
                 script {
-                    // 收集本地 enode（通过公网IP访问，因为Jenkins在容器里）
-                    def val0Enode = sh(script: """
-                        curl -sf -X POST http://${SERVER1_HOST}:19545 \
-                            -H 'Content-Type: application/json' \
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
-                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
-
-                    def val1Enode = sh(script: """
-                        curl -sf -X POST http://${SERVER1_HOST}:19547 \
-                            -H 'Content-Type: application/json' \
-                            -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'].split('?')[0])" 2>/dev/null || echo ""
-                    """, returnStdout: true).trim()
-                        .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
-
-                    // 收集远端 enode（复用 Stage 10 分发的脚本）
-                    def val2Enode, val3Enode, val4Enode, rpc0Enode
+                    // 收集所有 enode（SSH 到各服务器上执行）
+                    def val0Enode, val1Enode, val2Enode, val3Enode, val4Enode, rpc0Enode
                     sshagent([SSH_CRED]) {
+                        val0Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31300')
+                        val1Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
+                            .replaceAll('@[^:]+:', "@${SERVER1_HOST}:").replaceAll(':[0-9]+$', ':31301')
                         val2Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19545'", returnStdout: true).trim()
                             .replaceAll('@[^:]+:', "@${SERVER2_HOST}:").replaceAll(':[0-9]+$', ':31300')
                         val3Enode = sh(script: "ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} 'bash /tmp/get_enode.sh 19547'", returnStdout: true).trim()
@@ -835,42 +816,44 @@ SCRIPT
         stage('验证出块') {
             steps {
                 script {
-                    sh """
-                        echo "等待链出块（最多 60 秒）..."
-                        for i in \$(seq 1 30); do
-                            BLOCK=\$(curl -sf -X POST http://${SERVER1_HOST}:19545 \
-                                -H 'Content-Type: application/json' \
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "0")
-                            if [ "\${BLOCK}" -gt "0" ]; then
-                                echo "✅ 链正在出块，当前块高: \${BLOCK}"
-                                break
-                            fi
-                            echo "  等待中... (\${i}/30) 块高=\${BLOCK}"
-                            sleep 2
-                        done
-
-                        echo ""
-                        echo "========================================="
-                        echo " 节点状态汇总"
-                        echo "========================================="
-                        for node_port in "val-0:19545" "val-1:19547"; do
-                            NODE=\$(echo \${node_port} | cut -d: -f1)
-                            PORT=\$(echo \${node_port} | cut -d: -f2)
-                            BN=\$(curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
-                                -H 'Content-Type: application/json' \
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                            PEERS=\$(curl -sf -X POST http://${SERVER1_HOST}:\${PORT} \
-                                -H 'Content-Type: application/json' \
-                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \
-                                | python3 -c "import sys,json; h=json.load(sys.stdin)['result']; print(int(h,16))" 2>/dev/null || echo "?")
-                            printf "  %-8s block=%-6s peers=%s\\n" "\${NODE}" "\${BN}" "\${PEERS}"
-                        done
-                        echo "========================================="
-                    """
-
                     sshagent([SSH_CRED]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER1_HOST} "
+                                echo '等待链出块（最多 60 秒）...'
+                                for i in \\\$(seq 1 30); do
+                                    BLOCK=\\\$(curl -sf -X POST http://127.0.0.1:19545 \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
+                                        | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '0')
+                                    if [ \\\"\\\$BLOCK\\\" -gt '0' ]; then
+                                        echo '✅ 链正在出块，当前块高: '\\\$BLOCK
+                                        break
+                                    fi
+                                    echo '  等待中... ('\\\$i'/30) 块高='\\\$BLOCK
+                                    sleep 2
+                                done
+
+                                echo ''
+                                echo '========================================='
+                                echo ' 节点状态汇总'
+                                echo '========================================='
+                                for node_port in 'val-0:19545' 'val-1:19547'; do
+                                    NODE=\\\$(echo \\\$node_port | cut -d: -f1)
+                                    PORT=\\\$(echo \\\$node_port | cut -d: -f2)
+                                    BN=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\\\
+                                        | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?')
+                                    PEERS=\\\$(curl -sf -X POST http://127.0.0.1:\\\$PORT \\\\
+                                        -H 'Content-Type: application/json' \\\\
+                                        -d '{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}' \\\\
+                                        | python3 -c 'import sys,json; h=json.load(sys.stdin)[\"result\"]; print(int(h,16))' 2>/dev/null || echo '?')
+                                    printf '  %-8s block=%-6s peers=%s\n' \\\$NODE \\\$BN \\\$PEERS
+                                done
+                                echo '========================================='
+                            "
+                        """
+
                         sh """
                             cat > /tmp/get_stats.sh << 'SCRIPT'
 #!/bin/bash
