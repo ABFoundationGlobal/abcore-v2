@@ -519,14 +519,14 @@ func (b *bidSimulator) newBidLoop() {
 // get block interval for current block by using parent header
 func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 	if parentHeader == nil {
-		return 450 // fermiBlockInterval
+		return params.FermiBlockInterval
 	}
 	nextBlockNumber := new(big.Int).Add(parentHeader.Number, common.Big1)
 	if !b.chainConfig.IsParliaActive(nextBlockNumber) {
 		if b.chainConfig.Clique != nil && b.chainConfig.Clique.Period > 0 {
 			return b.chainConfig.Clique.Period * 1000
 		}
-		return 450 // fermiBlockInterval fallback
+		return params.FermiBlockInterval
 	}
 
 	var innerParlia *parlia.Parlia
@@ -536,7 +536,7 @@ func (b *bidSimulator) getBlockInterval(parentHeader *types.Header) uint64 {
 	case *dual.DualConsensus:
 		innerParlia = e.Parlia()
 	default:
-		return 450 // fermiBlockInterval fallback; 0 would break bid scheduling
+		return params.FermiBlockInterval
 	}
 	// only `Number` and `ParentHash` are used when `BlockInterval`
 	tmpHeader := &types.Header{ParentHash: parentHeader.Hash(), Number: nextBlockNumber}
