@@ -55,14 +55,14 @@ const (
 
 	checkpointInterval = 1024 // Number of blocks after which to save the snapshot to the database
 
-	defaultEpochLength   uint64 = 200  // Default number of blocks of checkpoint to update validatorSet from contract
-	lorentzEpochLength   uint64 = 500  // Epoch length starting from the Lorentz hard fork
-	maxwellEpochLength   uint64 = 1000 // Epoch length starting from the Maxwell hard fork
+	defaultEpochLength   uint64 = 200                         // Default number of blocks of checkpoint to update validatorSet from contract
+	lorentzEpochLength   uint64 = 500                         // Epoch length starting from the Lorentz hard fork
+	maxwellEpochLength   uint64 = 1000                        // Epoch length starting from the Maxwell hard fork
 	defaultBlockInterval uint64 = 3000                        // Default block interval in milliseconds
 	lorentzBlockInterval uint64 = params.LorentzBlockInterval // Block interval starting from the Lorentz hard fork
 	maxwellBlockInterval uint64 = params.MaxwellBlockInterval // Block interval starting from the Maxwell hard fork
 	fermiBlockInterval   uint64 = params.FermiBlockInterval   // Block interval starting from the Fermi hard fork
-	defaultTurnLength    uint8  = 1    // Default consecutive number of blocks a validator receives priority for block production
+	defaultTurnLength    uint8  = 1                           // Default consecutive number of blocks a validator receives priority for block production
 
 	extraVanity      = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal        = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
