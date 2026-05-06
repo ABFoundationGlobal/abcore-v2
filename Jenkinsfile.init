@@ -423,11 +423,12 @@ PYEOF
 
                     // server-1: val-0, val-1（validator，本地执行）
                     sh """
-                        for node_cfg in "val-0:19545:19546:31300" "val-1:19547:19548:31301"; do
+                        for node_cfg in "val-0:19545:19546:31300:8551" "val-1:19547:19548:31301:8552"; do
                             NODE=\$(echo \${node_cfg} | cut -d: -f1)
                             RPC=\$(echo \${node_cfg} | cut -d: -f2)
                             WS=\$(echo \${node_cfg} | cut -d: -f3)
                             P2P=\$(echo \${node_cfg} | cut -d: -f4)
+                            AUTH=\$(echo \${node_cfg} | cut -d: -f5)
                             DATADIR="/data/${params.CHAIN_NAME}/\${NODE}"
                             ADDR=\$(ls \${DATADIR}/keystore/UTC--* | head -1 | sed 's/.*--//')
 
@@ -446,6 +447,7 @@ PYEOF
                                 --datadir /data \
                                 --networkid ${params.CHAIN_ID} \
                                 --port \${P2P} \
+                                --authrpc.port \${AUTH} \
                                 --http --http.addr 0.0.0.0 --http.port \${RPC} \
                                        --http.vhosts '*' \
                                        --http.api 'eth,net,web3,clique,admin,personal' \
@@ -465,11 +467,12 @@ PYEOF
                     sshagent([SSH_CRED]) {
                         // server-2: val-2, val-3（validator）
                         sh """
-                            for node_cfg in "val-2:19545:19546:31300" "val-3:19547:19548:31301"; do
+                            for node_cfg in "val-2:19545:19546:31300:8551" "val-3:19547:19548:31301:8552"; do
                                 NODE=\$(echo \${node_cfg} | cut -d: -f1)
                                 RPC=\$(echo \${node_cfg} | cut -d: -f2)
                                 WS=\$(echo \${node_cfg} | cut -d: -f3)
                                 P2P=\$(echo \${node_cfg} | cut -d: -f4)
+                                AUTH=\$(echo \${node_cfg} | cut -d: -f5)
 
                                 ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER2_HOST} "
                                     DATADIR=/data/${params.CHAIN_NAME}/\${NODE}
@@ -490,6 +493,7 @@ PYEOF
                                         --datadir /data \\\\
                                         --networkid ${params.CHAIN_ID} \\\\
                                         --port \${P2P} \\\\
+                                        --authrpc.port \${AUTH} \\\\
                                         --http --http.addr 0.0.0.0 --http.port \${RPC} \\\\
                                                --http.vhosts '*' \\\\
                                                --http.api 'eth,net,web3,clique,admin,personal' \\\\
@@ -507,7 +511,7 @@ PYEOF
                             done
                         """
 
-                        // server-3: val-4（validator）
+                        // server-3: val-4（validator，单节点不冲突）
                         sh """
                             ssh -o StrictHostKeyChecking=no -p ${SSH_PORT} ${SSH_USER}@${SERVER3_HOST} "
                                 DATADIR=/data/${params.CHAIN_NAME}/val-4
