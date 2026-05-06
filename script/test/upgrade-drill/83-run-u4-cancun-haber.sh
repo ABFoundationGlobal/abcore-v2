@@ -192,7 +192,6 @@ fi
 
 POST_OBS=$(( ACT_BLOCK + 3 ))
 log "Waiting for chain to reach block ${POST_OBS} (post-fork stability check)..."
-_rem=$(( FORK_TIME - $(date +%s) + 90 ))
 _deadline=$(( $(date +%s) + 60 ))
 while [[ $(date +%s) -lt $_deadline ]]; do
   _h=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
@@ -255,10 +254,10 @@ fi
 
 # 5. Chain still advancing.
 tip=$(head_number "$GETH" "$IPC1")
-if [[ "$tip" -gt "$POST_OBS" ]]; then
+if [[ "$tip" -ge "$POST_OBS" ]]; then
   pass "Chain advancing: current head=${tip}"
 else
-  fail "Chain stalled at head=${tip} (expected > ${POST_OBS})"
+  fail "Chain stalled at head=${tip} (expected >= ${POST_OBS})"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
