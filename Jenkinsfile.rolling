@@ -103,16 +103,11 @@ pipeline {
         stage('升级前检查') {
             steps {
                 script {
-                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
                     sh """
-                        DOCKER_GW=${dockerGw}
                         echo "检查链当前状态..."
-                        BN=\$(curl -sf -X POST http://\${DOCKER_GW}:19545 \\
-                            -H 'Content-Type: application/json' \\
-                            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                            | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "0")
-                        if [ "\${BN}" = "0" ]; then
-                            echo "❌ val-0 RPC 不可达，请确认链正在运行"
+                        BN=\$(docker exec ${params.CHAIN_NAME}-val-0 geth attach --exec 'eth.blockNumber' /data/geth.ipc 2>/dev/null || echo "0")
+                        if [ "\${BN}" = "0" ] || [ "\${BN}" = "" ]; then
+                            echo "❌ val-0 不可达，请确认链正在运行"
                             exit 1
                         fi
                         echo "✅ 链正在运行，当前块高: \${BN}"
@@ -148,16 +143,13 @@ pipeline {
         stage('滚动升级') {
             steps {
                 script {
-                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
-
-                    // 本地节点升级函数（server-1）
+                    // 本地节点升级函数（server-1，host网络模式）
                     def upgradeLocal = { String node, String rpcPort, String wsPort, String p2pPort, String apiModules ->
                         echo "===== 升级 ${node} (server-1) ====="
                         sh """
                             set -e
                             DATADIR="/data/${params.CHAIN_NAME}/${node}"
                             CONTAINER="${params.CHAIN_NAME}-${node}"
-                            DOCKER_GW=${dockerGw}
 
                             if docker ps -a --format '{{.Names}}' | grep -q "^\${CONTAINER}\$"; then
                                 docker stop \${CONTAINER} && docker rm \${CONTAINER}
@@ -177,21 +169,18 @@ pipeline {
 
                             docker run -d \\
                                 --name \${CONTAINER} --restart unless-stopped \\
+                                --network host \\
                                 -v \${DATADIR}:/data \\
-                                -p 0.0.0.0:${rpcPort}:8545 \\
-                                -p 0.0.0.0:${wsPort}:8546 \\
-                                -p 0.0.0.0:${p2pPort}:30303 \\
-                                -p 0.0.0.0:${p2pPort}:30303/udp \\
                                 --entrypoint geth \\
                                 ${IMAGE_NAME} \\
                                 \${CONFIG_ARG} \\
                                 --datadir /data \\
                                 --networkid ${params.CHAIN_ID} \\
-                                --port 30303 \\
-                                --http --http.addr 0.0.0.0 --http.port 8545 \\
+                                --port ${p2pPort} \\
+                                --http --http.addr 0.0.0.0 --http.port ${rpcPort} \\
                                        --http.vhosts '*' \\
                                        --http.api '${apiModules}' \\
-                                --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
+                                --ws   --ws.addr 0.0.0.0   --ws.port ${wsPort} \\
                                        --ws.api '${apiModules}' \\
                                 --syncmode full --gcmode archive --verbosity 3 \\
                                 --nat extip:${SERVER1_HOST} \\
@@ -200,26 +189,18 @@ pipeline {
 
                             echo "等待 RPC 就绪..."
                             for i in \$(seq 1 30); do
-                                if curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
-                                    -H 'Content-Type: application/json' \\
-                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
+                                if docker exec \${CONTAINER} geth attach --exec 'eth.blockNumber' /data/geth.ipc > /dev/null 2>&1; then
                                     echo "✅ ${node} RPC 就绪"; break
                                 fi
-                                [ \${i} -eq 30 ] && { echo "❌ ${node} RPC 30s 未响应"; docker logs --tail=20 \${CONTAINER}; exit 1; }
+                                [ \${i} -eq 30 ] && { echo "❌ ${node} 30s 未响应"; docker logs --tail=20 \${CONTAINER}; exit 1; }
                                 sleep 1
                             done
 
-                            BEFORE=\$(curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                                | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "0")
+                            BEFORE=\$(docker exec \${CONTAINER} geth attach --exec 'eth.blockNumber' /data/geth.ipc 2>/dev/null || echo "0")
                             TARGET=\$(( BEFORE + ${params.BLOCK_WAIT} ))
                             echo "等待出块 \${BEFORE} → \${TARGET}..."
                             for i in \$(seq 1 60); do
-                                BN=\$(curl -sf -X POST http://\${DOCKER_GW}:${rpcPort} \\
-                                    -H 'Content-Type: application/json' \\
-                                    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                                    | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "0")
+                                BN=\$(docker exec \${CONTAINER} geth attach --exec 'eth.blockNumber' /data/geth.ipc 2>/dev/null || echo "0")
                                 if [ "\${BN}" -ge "\${TARGET}" ]; then
                                     echo "✅ ${node} 升级完成，块高 \${BN}"; break
                                 fi
@@ -230,7 +211,7 @@ pipeline {
                         """
                     }
 
-                    // 远端节点升级函数
+                    // 远端节点升级函数（host网络模式）
                     def upgradeRemote = { String node, String rpcPort, String wsPort, String p2pPort, String extIp, String remoteHost, String apiModules ->
                         echo "===== 升级 ${node} (${remoteHost}) ====="
                         sshagent([SSH_CRED]) {
@@ -269,21 +250,18 @@ fi
 
 docker run -d \\
     --name \${CONTAINER} --restart unless-stopped \\
+    --network host \\
     -v \${DATADIR}:/data \\
-    -p 0.0.0.0:\${RPC_PORT}:8545 \\
-    -p 0.0.0.0:\${WS_PORT}:8546 \\
-    -p 0.0.0.0:\${P2P_PORT}:30303 \\
-    -p 0.0.0.0:\${P2P_PORT}:30303/udp \\
     --entrypoint geth \\
     \${IMAGE} \\
     \${CONFIG_ARG} \\
     --datadir /data \\
     --networkid \${CHAIN_ID} \\
-    --port 30303 \\
-    --http --http.addr 0.0.0.0 --http.port 8545 \\
+    --port \${P2P_PORT} \\
+    --http --http.addr 0.0.0.0 --http.port \${RPC_PORT} \\
            --http.vhosts '*' \\
            --http.api "\${API}" \\
-    --ws   --ws.addr 0.0.0.0   --ws.port 8546 \\
+    --ws   --ws.addr 0.0.0.0   --ws.port \${WS_PORT} \\
            --ws.api "\${API}" \\
     --syncmode full --gcmode archive --verbosity 3 \\
     --nat extip:\${EXT_IP} \\
@@ -345,34 +323,22 @@ SCRIPT
         stage('状态汇总') {
             steps {
                 script {
-                    def dockerGw = sh(script: "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'", returnStdout: true).trim()
-
                     sh """
-                        DOCKER_GW=${dockerGw}
                         echo ""
                         echo "========================================="
                         echo " 升级后节点状态"
                         echo "========================================="
                         printf "  %-8s %-8s %-8s %s\\n" "节点" "块高" "peers" "镜像"
                         printf "  %-8s %-8s %-8s %s\\n" "----" "----" "-----" "----"
-                        for node_port in "val-0:19545" "val-1:19547"; do
-                            NODE=\$(echo \${node_port} | cut -d: -f1)
-                            PORT=\$(echo \${node_port} | cut -d: -f2)
-                            BN=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                                | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "?")
-                            PEERS=\$(curl -sf -X POST http://\${DOCKER_GW}:\${PORT} \\
-                                -H 'Content-Type: application/json' \\
-                                -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
-                                | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "?")
-                            IMG=\$(docker inspect --format '{{.Config.Image}}' ${params.CHAIN_NAME}-\${NODE} 2>/dev/null || echo "unknown")
-                            printf "  %-8s %-8s %-8s %s\\n" "\${NODE}" "\${BN}" "\${PEERS}" "\${IMG}"
+                        for node in val-0 val-1; do
+                            BN=\$(docker exec ${params.CHAIN_NAME}-\${node} geth attach --exec 'eth.blockNumber' /data/geth.ipc 2>/dev/null || echo "?")
+                            PEERS=\$(docker exec ${params.CHAIN_NAME}-\${node} geth attach --exec 'net.peerCount' /data/geth.ipc 2>/dev/null || echo "?")
+                            IMG=\$(docker inspect --format '{{.Config.Image}}' ${params.CHAIN_NAME}-\${node} 2>/dev/null || echo "unknown")
+                            printf "  %-8s %-8s %-8s %s\\n" "\${node}" "\${BN}" "\${PEERS}" "\${IMG}"
                         done
                         echo "========================================="
                     """
 
-                    // 生成远端查询脚本
                     sh """
                         cat > /tmp/get_status.sh << 'SCRIPT'
 #!/bin/bash
