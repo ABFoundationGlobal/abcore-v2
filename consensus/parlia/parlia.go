@@ -58,7 +58,7 @@ const (
 	defaultEpochLength   uint64 = 200                         // Default number of blocks of checkpoint to update validatorSet from contract
 	lorentzEpochLength   uint64 = 500                         // Epoch length starting from the Lorentz hard fork
 	maxwellEpochLength   uint64 = 1000                        // Epoch length starting from the Maxwell hard fork
-	defaultBlockInterval uint64 = 3000                        // Default block interval in milliseconds
+	defaultBlockInterval uint64 = params.DefaultBlockInterval // Default block interval in milliseconds
 	lorentzBlockInterval uint64 = params.LorentzBlockInterval // Block interval starting from the Lorentz hard fork
 	maxwellBlockInterval uint64 = params.MaxwellBlockInterval // Block interval starting from the Maxwell hard fork
 	fermiBlockInterval   uint64 = params.FermiBlockInterval   // Block interval starting from the Fermi hard fork
