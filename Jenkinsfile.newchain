@@ -278,24 +278,15 @@ pipeline {
                     echo "--- 最新日志（30行）---"
                     docker logs --tail=30 ${CONTAINER_NAME} 2>&1 || true
 
-                    echo "--- RPC 健康检查 ---"
-                    BLOCK=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
+                    echo "--- RPC 健康检查（通过 IPC）---"
+                    BLOCK=\$(docker exec ${CONTAINER_NAME} geth attach --exec 'eth.blockNumber' /data/geth.ipc 2>/dev/null || echo "无响应")
                     echo "当前块高: \${BLOCK}"
 
-                    PEERS=\$(curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null || echo "无响应")
+                    PEERS=\$(docker exec ${CONTAINER_NAME} geth attach --exec 'net.peerCount' /data/geth.ipc 2>/dev/null || echo "无响应")
                     echo "当前 peers: \${PEERS}"
 
                     echo "--- enode 信息 ---"
-                    curl -sf -X POST http://127.0.0.1:${env.RPC_PORT} \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \\
-                        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['enode'])" 2>/dev/null || echo "enode 获取失败"
+                    docker exec ${CONTAINER_NAME} geth attach --exec 'admin.nodeInfo.enode' /data/geth.ipc 2>/dev/null || echo "enode 获取失败"
                 """
             }
         }
