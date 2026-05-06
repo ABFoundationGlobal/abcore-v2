@@ -94,11 +94,6 @@ pipeline {
                         'val-2': '31300', 'val-3': '31301',
                         'val-4': '31300', 'rpc-0': '31300'
                     ]
-                    def authPortMap = [
-                        'val-0': '8551', 'val-1': '8552',
-                        'val-2': '8551', 'val-3': '8552',
-                        'val-4': '8551', 'rpc-0': '8551'
-                    ]
                     def extIpMap = [
                         'server-1': '13.192.136.101',
                         'server-2': '52.193.15.175',
@@ -106,7 +101,6 @@ pipeline {
                         'server-4': '52.198.163.178'
                     ]
 
-                    env.AUTH_PORT = authPortMap[params.NODE_ID]
                     env.RPC_PORT  = rpcPortMap[params.NODE_ID]
                     env.WS_PORT   = wsPortMap[params.NODE_ID]
                     env.P2P_PORT  = p2pPortMap[params.NODE_ID]
@@ -254,7 +248,6 @@ pipeline {
                             --datadir /data \\
                             --networkid ${params.CHAIN_ID} \\
                             --port ${env.P2P_PORT} \\
-                            --authrpc.port ${env.AUTH_PORT} \\
                             --http --http.addr 0.0.0.0 --http.port ${env.RPC_PORT} \\
                                    --http.vhosts '*' \\
                                    --http.api '${apiModules}' \\
