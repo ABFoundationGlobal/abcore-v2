@@ -1,6 +1,6 @@
 # upgrade-drill — local 3-node phased upgrade drill (U-series)
 
-Sequential drill of the 6-round abcore-v1 → abcore-v2 upgrade path, mirroring
+Sequential drill of the 7-round abcore-v1 → abcore-v2 upgrade path, mirroring
 `docs/ops/devnet-upgrade-plan.md` (branch `devnet-upgrade-plan`).
 
 Uses a single abcore-v2 binary. Each round appends new fork activation block
@@ -26,8 +26,9 @@ any code-version change in this local drill.
 | U-2 | `81-run-u2-london-forks.sh` | v0.2→v0.3 | block height | London + 13 BSC block forks | 🔲 |
 | U-3 | `82-run-u3-shanghai-feynman.sh` | v0.3→v0.4 | timestamp | Shanghai + Kepler + Feynman (includes StakeHub registration) | 🔲 |
 | U-4 | `83-run-u4-cancun-haber.sh` | v0.4→v0.5 | timestamp | Cancun + Haber + HaberFix (includes BlobScheduleConfig) | 🔲 |
-| U-5 | `84-run-u5-bohr.sh` | v0.5→v0.6 | timestamp | Bohr: block interval 3s→450ms | 🔲 |
+| U-5 | `84-run-u5-bohr.sh` | v0.5→v0.6 | timestamp | Bohr: variable TurnLength (consecutive blocks per validator) | 🔲 |
 | U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | 🔲 |
+| U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | 🔲 |
 
 ### Helper scripts
 
@@ -48,8 +49,9 @@ any code-version change in this local drill.
 | Timestamp observation window | 24–168 hours | 2–10 minutes |
 | StakeHub registration (U-3) | All validators must register before the first breathe block | Same requirement; script sends registration txs automatically via IPC |
 | BlobScheduleConfig (U-4) | Production config file | Inline TOML minimal config |
-| NTP drift (U-5 Bohr) | Enforced < 50 ms | Local loopback — inherently satisfied |
+| TurnLength init (U-5 Bohr) | Governance sets initial TurnLength via StakeHub before first epoch boundary | Script uses default TurnLength = 1; governance call not required for local drill |
 | U-6 layered intervals | Prague→Lorentz +1 day, Lorentz→Maxwell +7 days | +3 minutes each |
+| U-7 layered intervals | Fermi alone, Osaka+Mendel +1 day after Fermi | +3 minutes each |
 
 ## Config update mechanism per round
 
@@ -74,7 +76,7 @@ InsecureUnlockAllowed = true
 NoUSB = true
 ```
 
-**U-2 through U-6 — rolling genesis reinit:**
+**U-2 through U-7 — rolling genesis reinit:**
 `00-init.sh` writes `genesis.json` with only Berlin-and-below forks active; all
 higher forks are **absent** (nil — never scheduled).  Before each round, the U-N
 script adds the relevant fork fields to `genesis.json` and does a rolling genesis
@@ -216,25 +218,36 @@ applicable for local testing.)
 - Block headers include `blobGasUsed` and `excessBlobGas` fields
 - Submit one EIP-4844 blob transaction; `receipt.status == 0x1`
 
-## U-5 — Bohr: block interval 3 s → 450 ms (timestamp activation)
+## U-5 — Bohr: variable TurnLength (timestamp activation)
 
-Corresponds to devnet Upgrade 5 (v0.6.0). The most disruptive round in terms of
-block cadence.
+Corresponds to devnet Upgrade 5 (v0.6.0). Introduces the `TurnLength` mechanism:
+each validator may now produce multiple consecutive blocks per turn rather than
+exactly one.  The current `TurnLength` is encoded as a single extra-data byte in
+every epoch block and read by all nodes on each epoch boundary.
+
+Key behavioural changes at Bohr:
+- `TurnLength` is written into epoch-block `extra` and drives the
+  `snap.TurnLength` field in Parlia snapshots.  The value is fetched from
+  `ValidatorContract.getTurnLength()` each epoch (governance-controlled); before
+  Bohr it falls back to `defaultTurnLength = 1`.
+- `ParentBeaconRoot` changes from nil to the zero hash (`0x000…0`).
+- Backoff random seed switches from `blockNumber` to `blockNumber / TurnLength`,
+  keeping backoff distribution correct across longer turns.
+- In-turn validator is excluded from the backoff candidate list.
 
 **Local parameters:** `BohrTime = now + 120 s`
 
-**Prerequisites:** Local loopback clock drift is inherently < 50 ms; no NTP
-configuration needed (production requires verified NTP drift < 50 ms before
-this round).
+**Prerequisites:** none
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Append `bohrTime` to TOML; rolling restart
-3. Wait for activation; observe 50 consecutive blocks
+2. Append `bohrTime` to genesis.json; rolling genesis reinit (stop → `geth init`
+   → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
+3. Wait for activation; observe through the first epoch boundary (block % epochLength == 0)
 
 **Verification:**
-- Average block interval over 20 post-activation blocks < 1 s (local target;
-  production target ≈ 450 ms)
+- Post-activation epoch block `extra` contains the `TurnLength` byte
+- `ParentBeaconRoot` in post-activation block headers is `0x000…0` (not nil)
 - No missed slots; all 3 nodes agree on the same block hash
 
 ## U-6 — Prague + Pascal + Lorentz + Maxwell (multi-phase timestamp activation)
@@ -260,6 +273,33 @@ compresses each gap to 3 minutes.
 - Prague: block headers include EIP-7685 requests field
 - Lorentz: block interval remains stable with no visible jitter
 - Maxwell: `parlia_getValidators` returns the correct validator set after activation
+
+## U-7 — Fermi + Osaka + Mendel (multi-phase timestamp activation)
+
+Corresponds to devnet Upgrade 7 (v0.8.0). Production uses layered activation:
+Fermi alone at T7, Osaka+Mendel at T7 + 1 day. Local drill compresses each gap
+to 3 minutes.
+
+**Local parameters (relative to script start time):**
+- `FermiTime = now + 60 s`
+- `OsakaTime = MendelTime = now + 240 s` (Fermi + 3 min)
+
+**Prerequisites:** none
+
+**Steps:**
+1. `07-snapshot.sh` — back up current chain state
+2. Append all 3 timestamps to genesis.json; rolling genesis reinit (stop →
+   `geth init` → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
+3. Fermi activates → observe 2 minutes → Osaka+Mendel activate → observe 3 minutes
+
+**Verification (per phase):**
+- Fermi: system contract upgrade fires at the activation block — confirm log line
+  `Apply upgrade fermi at height <N>` appears on all 3 nodes
+- Osaka: submit a `bigModExp` call with input length > 1024 bytes and confirm
+  it reverts (EIP-7823); confirm `p256Verify` at `0x100` costs 6900 gas (EIP-7951)
+- Mendel: submit a blob transaction and confirm it stays pending until a block
+  where `blockNumber % 5 == 0`; non-eligible blocks do not include it
+  (BEP-657 `BlobEligibleBlockInterval = 5`)
 
 ## Running
 
@@ -302,12 +342,12 @@ bash script/test/upgrade-drill/07-snapshot.sh
 GETH=./build/bin/geth bash script/test/upgrade-drill/81-run-u2-london-forks.sh
 
 # Optional: snapshot before U-3
-bash script/upgrade-drill/07-snapshot.sh
+bash script/test/upgrade-drill/07-snapshot.sh
 
 # U-3: Shanghai + Kepler + Feynman (nodes still running from U-2)
-GETH=./build/bin/geth bash script/upgrade-drill/82-run-u3-shanghai-feynman.sh
+GETH=./build/bin/geth bash script/test/upgrade-drill/82-run-u3-shanghai-feynman.sh
 
-# U-4 through U-6: planned — see individual sections above
+# U-4 through U-7: planned — see individual sections above
 ```
 
 ### Cleanup and rollback
