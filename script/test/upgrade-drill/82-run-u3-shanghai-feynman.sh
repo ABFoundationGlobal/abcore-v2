@@ -5,7 +5,7 @@
 # Local parameter default: FORK_TIME = now + 120 s
 #
 # Fork activations (all set to FORK_TIME):
-#   shanghaiTime, keplerTime, feynmanTime
+#   shanghaiTime, keplerTime, feynmanTime, feynmanFixTime
 #
 # Prerequisites:
 #   - U-2 has completed; nodes are running with London + BSC forks active
@@ -112,7 +112,9 @@ fi
 
 # ── Phase 2: patch genesis.json while nodes are still running ────────────────
 #
-# Add shanghaiTime, keplerTime, feynmanTime = FORK_TIME.
+# Add shanghaiTime, keplerTime, feynmanTime, feynmanFixTime = FORK_TIME.
+# feynmanFixTime must be set alongside feynmanTime: CheckConfigForkOrder
+# requires feynmanFixTime to be present whenever cancunTime is set (U-4).
 # These were absent (nil) after U-2.  Updating the file while nodes run is
 # safe — geth reads chainconfig from the database, not genesis.json at runtime.
 
@@ -127,7 +129,7 @@ with open(genesis_path) as f:
     genesis = json.load(f)
 
 cfg = genesis['config']
-for field in ('shanghaiTime', 'keplerTime', 'feynmanTime'):
+for field in ('shanghaiTime', 'keplerTime', 'feynmanTime', 'feynmanFixTime'):
     old = cfg.get(field, '<nil>')
     cfg[field] = fork_time
     print(f'  {field}: {old} → {fork_time}')
