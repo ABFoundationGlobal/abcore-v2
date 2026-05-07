@@ -210,25 +210,27 @@ for n in 2 3; do
   fi
 done
 
-# 2. Post-Bohr block: parentBeaconRoot must be the zero hash (0x000…0).
-#    Bohr changes parentBeaconRoot from nil to the zero hash in every block header.
-ZERO_HASH="0x0000000000000000000000000000000000000000000000000000000000000000"
-pbr=$(attach_exec "$GETH" "$IPC1" \
-  "eth.getBlock(${ACT_BLOCK}).parentBeaconRoot" 2>/dev/null || true)
-if [[ "$pbr" == "$ZERO_HASH" ]]; then
-  pass "block ${ACT_BLOCK} parentBeaconRoot=${ZERO_HASH:0:14}… (Bohr active)"
+# 2. Post-Bohr block: raw header RLP ends with parentBeaconRoot = zero hash.
+#    eth.getBlock() does not expose parentBeaconRoot in BSC's RPC response, so we
+#    use debug.getRawHeader which returns the full RLP-encoded header.  In Bohr,
+#    parentBeaconRoot is the last rlp:"optional" field (before Prague), encoded as
+#    0xa0 (32-byte string prefix) + 32 zero bytes = 66 trailing hex chars.
+BEACON_ROOT_TAIL="a00000000000000000000000000000000000000000000000000000000000000000"
+raw_act=$(attach_exec "$GETH" "$IPC1" "debug.getRawHeader(${ACT_BLOCK})" 2>/dev/null || echo "")
+if [[ -n "$raw_act" && "${raw_act}" == *"${BEACON_ROOT_TAIL}" ]]; then
+  pass "block ${ACT_BLOCK} header RLP ends with parentBeaconRoot=0x000…0 (Bohr active)"
 else
-  fail "block ${ACT_BLOCK} parentBeaconRoot=${pbr} (expected ${ZERO_HASH:0:14}…)"
+  fail "block ${ACT_BLOCK} header RLP does not end with parentBeaconRoot zero hash (Bohr not activated? tail='…${raw_act: -20}')"
 fi
 
-# 3. Pre-Bohr block: parentBeaconRoot must be nil/null (not the zero hash).
+# 3. Pre-Bohr block: header RLP must NOT end with parentBeaconRoot.
+#    parentBeaconRoot is rlp:"optional" and nil pre-Bohr, so it is absent from the RLP.
 PRE_BLOCK=$(( ACT_BLOCK - 1 ))
-pre_pbr=$(attach_exec "$GETH" "$IPC1" \
-  "eth.getBlock(${PRE_BLOCK}).parentBeaconRoot" 2>/dev/null || true)
-if [[ -z "$pre_pbr" || "$pre_pbr" == "null" || "$pre_pbr" == "undefined" ]]; then
-  pass "block ${PRE_BLOCK} parentBeaconRoot=nil (pre-Bohr, expected)"
+raw_pre=$(attach_exec "$GETH" "$IPC1" "debug.getRawHeader(${PRE_BLOCK})" 2>/dev/null || echo "")
+if [[ -n "$raw_pre" && "${raw_pre}" != *"${BEACON_ROOT_TAIL}" ]]; then
+  pass "block ${PRE_BLOCK} header RLP does not end with parentBeaconRoot (pre-Bohr, expected)"
 else
-  fail "block ${PRE_BLOCK} parentBeaconRoot=${pre_pbr} (Bohr activated too early)"
+  fail "block ${PRE_BLOCK} header RLP ends with parentBeaconRoot zero hash (Bohr activated too early)"
 fi
 
 # 4. Chain still advancing.
