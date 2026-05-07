@@ -187,6 +187,17 @@ _current=$(head_number "$GETH" "$(val_ipc 1)")
 log "All nodes converged at block ${_current}. Stopping all validators."
 
 # ── Phase 4: stop all validators (chain frozen at PRE_STOP) ──────────────────
+# Snapshot every validator's pre-stop head before SIGTERM lands, so we can
+# assert below that no node reached or passed the (yet-to-be-computed) effective
+# PARLIA_GENESIS_BLOCK during the convergence-check → stop window. If any did,
+# its on-disk block at that height was sealed in Clique form; restarting with
+# OverrideParliaGenesisBlock pointed at it would deadlock the network forever
+# (errInvalidSpanValidators). See .claude/research/fork-block-seal-deadlock.md.
+declare -A _PRESTOP_HEADS
+for n in 1 2 3; do
+  _PRESTOP_HEADS["$n"]=$(head_number "$GETH" "$(val_ipc "$n")" 2>/dev/null || echo "")
+done
+
 run "${SCRIPT_DIR}/03-stop.sh"
 mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 
@@ -200,18 +211,48 @@ start_sync_validator 1
 # no peers and is not mining; vals 2/3 are stopped).
 #
 # PARLIA_GENESIS_BLOCK is treated as a *pre-stop target* by the caller (how far
-# to run the Clique chain before this test begins).  The *effective* fork block
-# used for the Parlia restart is always frozen_head+1, regardless of the
-# caller's value.  This is necessary to guarantee zero Clique blocks exist
-# between the chain stop and the fork: any Clique block in that window could
-# mine the pending tx before Parlia is active, breaking the test invariant.
+# to run the Clique chain before this test begins). The *effective* fork block
+# used for the Parlia restart is `frozen_head + 1` — the very next block after
+# the chain is frozen.
 #
-# The original value is saved and restored after 05-verify.sh so that callers
-# inspecting PARLIA_GENESIS_BLOCK after this script exits see what they set.
+# Why frozen_head+1: this guarantees the test invariant "the pending tx is
+# mined by Parlia, not by a Clique block in the post-stop, pre-fork window".
+# With +1, there is no pre-fork Clique window after the stop — block PGB is
+# the first new block produced and it is sealed in Parlia mode.
+#
+# This requires that at stop time, NO validator's head reached frozen_head+1
+# already. The `_PRESTOP_HEADS` snapshot above (taken before SIGTERM) plus
+# the assertion below catches the race where Clique seals one extra block in
+# the convergence-check → SIGTERM window. If the assertion fires, the test
+# fails fast with a clear message instead of silently deadlocking.
+#
+# The original caller value is saved and restored after 05-verify.sh so that
+# callers inspecting PARLIA_GENESIS_BLOCK after this script exits see what
+# they set.
 _frozen_head=$(head_number "$GETH" "$(val_ipc 1)")
 _ORIG_PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK"
-PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
+export PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
 log "Frozen head: ${_frozen_head}. Effective ParliaGenesisBlock: ${PARLIA_GENESIS_BLOCK} (caller value: ${_ORIG_PARLIA_GENESIS_BLOCK})"
+
+# Assert no validator's pre-stop head reached PGB. If any did, the chain has
+# a Clique-form block at the fork height on disk; restarting with the new
+# config would reinterpret it under Parlia rules and deadlock forever
+# (errInvalidSpanValidators). See .claude/research/fork-block-seal-deadlock.md
+# for full analysis. Catching it here turns a silent corruption into an
+# immediate, descriptive test failure.
+_violators=()
+for n in 1 2 3; do
+  _h="${_PRESTOP_HEADS[$n]:-}"
+  if [[ -z "$_h" ]]; then
+    continue   # validator was offline; no head to check
+  fi
+  if [[ "$_h" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
+    _violators+=("validator-${n} head=${_h}")
+  fi
+done
+if [[ ${#_violators[@]} -gt 0 ]]; then
+  die "stop-window invariant violated: $(IFS=', '; echo "${_violators[*]}") reached or passed PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK} before stop. Chain raced past the convergence target during the stop window. This run cannot continue without producing an unrecoverable Clique-form block at the fork height; aborting."
+fi
 
 V1_ADDR=$(val_addr 1)
 V2_ADDR=$(val_addr 2)
