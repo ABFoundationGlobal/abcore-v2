@@ -210,7 +210,12 @@ start_sync_validator 1
 # inspecting PARLIA_GENESIS_BLOCK after this script exits see what they set.
 _frozen_head=$(head_number "$GETH" "$(val_ipc 1)")
 _ORIG_PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK"
-PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
+# export so the 05-verify.sh subprocess sees the effective value (not the
+# caller's pre-stop target). Without this, 05-verify reads the original value
+# and computes PRE_FORK against the wrong block — failing the
+# "ValidatorSet absent at PRE_FORK" assertion when the caller value lands
+# inside the post-fork range.
+export PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
 log "Frozen head: ${_frozen_head}. Effective ParliaGenesisBlock: ${PARLIA_GENESIS_BLOCK} (caller value: ${_ORIG_PARLIA_GENESIS_BLOCK})"
 
 V1_ADDR=$(val_addr 1)
