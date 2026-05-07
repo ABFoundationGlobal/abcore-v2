@@ -1,6 +1,6 @@
 # upgrade-drill — local 3-node phased upgrade drill (U-series)
 
-Sequential drill of the 6-round abcore-v1 → abcore-v2 upgrade path, mirroring
+Sequential drill of the 7-round abcore-v1 → abcore-v2 upgrade path, mirroring
 `docs/ops/devnet-upgrade-plan.md` (branch `devnet-upgrade-plan`).
 
 Uses a single abcore-v2 binary. Each round appends new fork activation block
@@ -76,7 +76,7 @@ InsecureUnlockAllowed = true
 NoUSB = true
 ```
 
-**U-2 through U-6 — rolling genesis reinit:**
+**U-2 through U-7 — rolling genesis reinit:**
 `00-init.sh` writes `genesis.json` with only Berlin-and-below forks active; all
 higher forks are **absent** (nil — never scheduled).  Before each round, the U-N
 script adds the relevant fork fields to `genesis.json` and does a rolling genesis
@@ -226,8 +226,10 @@ exactly one.  The current `TurnLength` is encoded as a single extra-data byte in
 every epoch block and read by all nodes on each epoch boundary.
 
 Key behavioural changes at Bohr:
-- `TurnLength` (default 1 before Bohr) is written into epoch-block `extra` and
-  drives the `snap.TurnLength` field in Parlia snapshots.
+- `TurnLength` is written into epoch-block `extra` and drives the
+  `snap.TurnLength` field in Parlia snapshots.  The value is fetched from
+  `ValidatorContract.getTurnLength()` each epoch (governance-controlled); before
+  Bohr it falls back to `defaultTurnLength = 1`.
 - `ParentBeaconRoot` changes from nil to the zero hash (`0x000…0`).
 - Backoff random seed switches from `blockNumber` to `blockNumber / TurnLength`,
   keeping backoff distribution correct across longer turns.
@@ -291,13 +293,13 @@ to 3 minutes.
 3. Fermi activates → observe 2 minutes → Osaka+Mendel activate → observe 3 minutes
 
 **Verification (per phase):**
-- Fermi: `kAncestorGenerationDepth` increases to 3 — confirm snapshot ancestor
-  depth in debug logs; system contract upgrade fires at the activation block
-  (`fermiUpgrade` applied in `applySystemContractUpgrade`)
+- Fermi: system contract upgrade fires at the activation block — confirm log line
+  `Apply upgrade fermi at height <N>` appears on all 3 nodes
 - Osaka: submit a `bigModExp` call with input length > 1024 bytes and confirm
   it reverts (EIP-7823); confirm `p256Verify` at `0x100` costs 6900 gas (EIP-7951)
-- Mendel: submit a blob transaction on a block where `blockNumber % 5 != 0`
-  and confirm it is rejected (BEP-657 `BlobEligibleBlockInterval = 5`)
+- Mendel: submit a blob transaction and confirm it stays pending until a block
+  where `blockNumber % 5 == 0`; non-eligible blocks do not include it
+  (BEP-657 `BlobEligibleBlockInterval = 5`)
 
 ## Running
 
@@ -340,10 +342,10 @@ bash script/test/upgrade-drill/07-snapshot.sh
 GETH=./build/bin/geth bash script/test/upgrade-drill/81-run-u2-london-forks.sh
 
 # Optional: snapshot before U-3
-bash script/upgrade-drill/07-snapshot.sh
+bash script/test/upgrade-drill/07-snapshot.sh
 
 # U-3: Shanghai + Kepler + Feynman (nodes still running from U-2)
-GETH=./build/bin/geth bash script/upgrade-drill/82-run-u3-shanghai-feynman.sh
+GETH=./build/bin/geth bash script/test/upgrade-drill/82-run-u3-shanghai-feynman.sh
 
 # U-4 through U-7: planned — see individual sections above
 ```
