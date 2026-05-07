@@ -211,12 +211,26 @@ for n in 2 3; do
 done
 
 # 2. Post-Bohr block: raw header RLP ends with parentBeaconRoot = zero hash.
-#    eth.getBlock() does not expose parentBeaconRoot in BSC's RPC response, so we
-#    use debug.getRawHeader which returns the full RLP-encoded header.  In Bohr,
-#    parentBeaconRoot is the last rlp:"optional" field (before Prague), encoded as
-#    0xa0 (32-byte string prefix) + 32 zero bytes = 66 trailing hex chars.
+#    eth.getBlock() does not expose parentBeaconRoot in BSC's RPC response.
+#    debug_getRawHeader (via HTTP to avoid JS integer type-conversion issues) returns
+#    the full RLP-encoded header.  In Bohr, parentBeaconRoot is the last rlp:"optional"
+#    field (absent before Prague), encoded as 0xa0 + 32 zero bytes = 66 trailing hex chars.
 BEACON_ROOT_TAIL="a00000000000000000000000000000000000000000000000000000000000000000"
-raw_act=$(attach_exec "$GETH" "$IPC1" "debug.getRawHeader(${ACT_BLOCK})" 2>/dev/null || echo "")
+HTTP1="http://127.0.0.1:$(http_port 1)"
+PRE_BLOCK=$(( ACT_BLOCK - 1 ))
+
+_fetch_raw_header() {
+  local block_hex
+  block_hex=$(printf '0x%x' "$1")
+  curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_getRawHeader\",\"params\":[\"${block_hex}\"],\"id\":1}" \
+    2>/dev/null \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('result',''))" 2>/dev/null \
+    || echo ""
+}
+
+raw_act=$(_fetch_raw_header "${ACT_BLOCK}")
 if [[ -n "$raw_act" && "${raw_act}" == *"${BEACON_ROOT_TAIL}" ]]; then
   pass "block ${ACT_BLOCK} header RLP ends with parentBeaconRoot=0x000…0 (Bohr active)"
 else
@@ -225,8 +239,7 @@ fi
 
 # 3. Pre-Bohr block: header RLP must NOT end with parentBeaconRoot.
 #    parentBeaconRoot is rlp:"optional" and nil pre-Bohr, so it is absent from the RLP.
-PRE_BLOCK=$(( ACT_BLOCK - 1 ))
-raw_pre=$(attach_exec "$GETH" "$IPC1" "debug.getRawHeader(${PRE_BLOCK})" 2>/dev/null || echo "")
+raw_pre=$(_fetch_raw_header "${PRE_BLOCK}")
 if [[ -n "$raw_pre" && "${raw_pre}" != *"${BEACON_ROOT_TAIL}" ]]; then
   pass "block ${PRE_BLOCK} header RLP does not end with parentBeaconRoot (pre-Bohr, expected)"
 else
