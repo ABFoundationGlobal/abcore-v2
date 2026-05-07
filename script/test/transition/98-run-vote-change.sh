@@ -415,17 +415,20 @@ while true; do
   # be past the fork in the on-disk data; the liveness check must be relative
   # to the actual current tip, not to a fixed fork-block target.
   _head_before=$(head_number "$GETH" "$(val_ipc 1)")
-  _target=$(( _head_before + 2 ))
+  # Require 5 blocks of sustained progress past the fork (not just 2) so the
+  # retry loop only exits once Parlia sealing has stabilised — not just
+  # squeaked past the seal-race deadlock by one or two blocks.
+  _target=$(( _head_before + 5 ))
   # Also require the fork transition to have completed.
-  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
-    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 5 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 5 ))
   fi
 
   # 4-node Parlia fork block seal-race takes longer to recover than 3-node
   # Clique: all 4 validators can simultaneously enter "signed recently" state
-  # at the fork block. Use 90s (vs 60s for 3-node) to give the round-robin
-  # enough time to self-heal after a restart.
-  _deadline=$(( $(date +%s) + 90 ))
+  # at the fork block. Use 150s (vs 60s for 3-node) to give the round-robin
+  # enough time to self-heal after a restart and produce 5 stable blocks.
+  _deadline=$(( $(date +%s) + 150 ))
   _alive=false
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
@@ -458,10 +461,10 @@ POST_FORK=$(( PARLIA_GENESIS_BLOCK + 5 ))
 log "Waiting for all validators to reach block ${POST_FORK}"
 _pids=()
 for n in 1 2 3; do
-  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$POST_FORK" 180 &
+  wait_for_head_at_least "$GETH" "$(val_ipc "$n")" "$POST_FORK" 60 &
   _pids+=($!)
 done
-wait_for_head_at_least "$GETH" "$V4_IPC" "$POST_FORK" 180 &
+wait_for_head_at_least "$GETH" "$V4_IPC" "$POST_FORK" 60 &
 _pids+=($!)
 for p in "${_pids[@]}"; do wait "$p"; done
 
