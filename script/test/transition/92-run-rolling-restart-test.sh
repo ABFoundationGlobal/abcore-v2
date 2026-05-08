@@ -123,7 +123,7 @@ log "All nodes converged at block ${current}. Stopping validators..."
 # stop_below_pgb_or_die asserts no validator's head reached PARLIA_GENESIS_BLOCK
 # before SIGTERM landed. If any did, the chain has a Clique-form block at the
 # fork height on disk, which would deadlock the post-restart Parlia network
-# (errInvalidSpanValidators). See .claude/research/fork-block-seal-deadlock.md.
+# (errInvalidSpanValidators). See docs/ops/fork-cutover-runbook.md (when #85 merges) or PR #84 description.
 stop_below_pgb_or_die "$PARLIA_GENESIS_BLOCK"
 # Re-acquire sentinel released by 03-stop.sh so parallel runs cannot steal
 # this port base while we write the TOML and restart.

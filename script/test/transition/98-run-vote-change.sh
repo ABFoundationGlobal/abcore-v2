@@ -286,7 +286,7 @@ log "Pre-restart head: ${pre_restart_head}"
 # stop_below_pgb_or_die also asserts no validator's head reached
 # PARLIA_GENESIS_BLOCK before stop. If any did, the chain has a Clique-form
 # block at the fork height on disk, which would deadlock the post-restart
-# Parlia network. See .claude/research/fork-block-seal-deadlock.md.
+# Parlia network. See docs/ops/fork-cutover-runbook.md (when #85 merges) or PR #84 description.
 # Note: 03-stop.sh enumerates DATADIR_ROOT/validator-*/geth.pid, which
 # includes V4_DIR (validator-4) — so V4 is stopped here too and the helper
 # checks all four pre-stop heads.

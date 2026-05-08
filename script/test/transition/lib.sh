@@ -344,64 +344,112 @@ find_free_port_base() {
   return 1
 }
 
+# persisted_head_number <datadir>
+#
+# Reads the on-disk head block number for a stopped geth datadir. Pure offline
+# read using `geth db metadata` (gives head block hash) plus `geth db get H<hash>`
+# (rawdb headerNumberPrefix maps hash → uint64 big-endian). Does not start a
+# geth process, so it is fast (~1s) and side-effect-free.
+#
+# Echoes the head block number as a decimal string on stdout, or empty on
+# failure. The caller must distinguish "no datadir / no chain yet" from "real
+# error" via context.
+persisted_head_number() {
+  local datadir="$1"
+  [[ -d "${datadir}/geth/chaindata" ]] || return 1
+
+  # 1. Pull head hash from the metadata table (LastHeader pebble key).
+  local hash
+  hash=$("$GETH" db metadata --datadir "$datadir" 2>/dev/null \
+    | awk -F'|' '/headBlockHash/ { gsub(/[ \t]/, "", $3); print $3; exit }')
+  [[ "$hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || return 1
+
+  # 2. Look up the block number for that hash.
+  #    rawdb key: headerNumberPrefix ("H" = 0x48) + 32-byte hash
+  #    Value:     8-byte big-endian uint64
+  local key value
+  key="0x48${hash#0x}"
+  value=$("$GETH" db get --datadir "$datadir" "$key" 2>/dev/null \
+    | awk '/^key /{ sub(/^.*: /,""); print; exit }')
+  [[ "$value" =~ ^0x[0-9a-fA-F]+$ ]] || return 1
+
+  # Convert hex (lowercase, no 0x) to decimal.
+  printf '%d\n' "$value"
+}
+
 # stop_below_pgb_or_die <ceiling>
 #
 # Stops every running validator under DATADIR_ROOT, then asserts that no
-# validator's persisted head reached <ceiling> before the SIGTERM landed.
+# validator's persisted on-disk head reached <ceiling>.
 #
 # Why this matters: scripts that restart the network with a new
-# OverrideParliaGenesisBlock = ceiling assume the on-disk head was stopped
-# at height < ceiling. With Clique period=1s and serial SIGTERM, the
-# convergence-check → SIGTERM window can easily cross the fork block and
-# leave a Clique-form block at height==ceiling on disk. After restart
-# with the new chain config, that block is reinterpreted under Parlia
-# rules — its extraData fails errInvalidSpanValidators, and the chain
-# deadlocks at the fork block forever.
+# OverrideParliaGenesisBlock = ceiling assume every validator's on-disk head
+# is < ceiling. With Clique period=1s and serial SIGTERM, the
+# convergence-check → SIGTERM window can easily cross the fork block: a
+# validator may seal one more Clique-form block at height==ceiling between
+# the convergence check and the SIGTERM landing, persist it to disk, and then
+# exit. After restart with the new chain config, that block is re-interpreted
+# under Parlia rules — extraData fails errInvalidSpanValidators — and the
+# chain deadlocks at the fork block forever.
 #
 # This helper turns that silent corruption into an immediate, descriptive
 # test failure. It must be called *instead of* 03-stop.sh, before writing
 # any TOML override.
 #
-# Implementation: snapshot each validator's head via the still-live IPC,
-# then call 03-stop.sh, then check the snapshots against the ceiling.
-# Reading from disk after stop would require an extra geth process; the
-# in-memory pre-stop head is a strict upper bound on the persisted head
-# (geth flushes head to disk at SIGTERM, never advances past in-mem head),
-# so it's a sound assertion.
+# Implementation: stop all validators FIRST (via 03-stop.sh, which sends
+# SIGTERM and waits for graceful exit), then read each validator's persisted
+# disk head via `geth db metadata` + `geth db get`. This gives the *real*
+# upper bound on what landed on disk — covering the race window where a
+# validator seals one extra block after any pre-stop snapshot but before
+# its SIGTERM lands. (The earlier in-memory pre-stop snapshot was vulnerable
+# to exactly this race; flagged by Copilot review on PR #84.)
 stop_below_pgb_or_die() {
   local ceiling="$1"
   [[ "$ceiling" =~ ^[0-9]+$ ]] || die "stop_below_pgb_or_die: ceiling must be a non-negative integer (got: ${ceiling})"
 
-  local -a names heads
+  # Collect names of validators that were running before stop, so we can
+  # cross-check we successfully read disk head for each of them.
+  local -a expected_names
   shopt -s nullglob
   for pidfile in "${DATADIR_ROOT}"/validator-*/geth.pid; do
-    local name pid h ipc
+    local name pid
     name=$(basename "$(dirname "$pidfile")")
     pid=$(cat "$pidfile" 2>/dev/null || true)
-    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-      continue
-    fi
-    ipc="$(dirname "$pidfile")/geth.ipc"
-    if [[ ! -S "$ipc" ]]; then
-      continue
-    fi
-    h=$(head_number "$GETH" "$ipc" 2>/dev/null || echo "")
-    if [[ "$h" =~ ^[0-9]+$ ]]; then
-      names+=("$name")
-      heads+=("$h")
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      expected_names+=("$name")
     fi
   done
   shopt -u nullglob
 
+  # Stop all validators first. SIGTERM gives geth a chance to flush in-memory
+  # head to disk gracefully; the disk read below is the actual invariant check.
   "${SCRIPT_DIR}/03-stop.sh"
 
-  local violators=()
-  for ((i=0; i<${#names[@]}; i++)); do
-    if [[ "${heads[$i]}" -ge "$ceiling" ]]; then
-      violators+=("${names[$i]} head=${heads[$i]}")
+  # Now read each validator's persisted head from disk and compare to ceiling.
+  # Because the geth process has fully exited, this is the authoritative
+  # answer about what landed on chain — not a probabilistic in-memory snapshot.
+  local -a violators=() unreadable=()
+  for name in "${expected_names[@]:-}"; do
+    [[ -n "$name" ]] || continue
+    local datadir="${DATADIR_ROOT}/${name}"
+    local h
+    h=$(persisted_head_number "$datadir" 2>/dev/null || echo "")
+    if [[ -z "$h" ]]; then
+      # Reading disk head should always succeed for a stopped node that was
+      # previously running and producing blocks. Treat read failure as a
+      # check failure rather than silently skipping (Copilot review on PR #84).
+      unreadable+=("${name}")
+      continue
+    fi
+    if [[ "$h" -ge "$ceiling" ]]; then
+      violators+=("${name} head=${h}")
     fi
   done
+
+  if [[ ${#unreadable[@]} -gt 0 ]]; then
+    die "stop_below_pgb_or_die: could not read persisted head for: $(IFS=', '; echo "${unreadable[*]}"). Refusing to proceed without verifying the stop-window invariant."
+  fi
   if [[ ${#violators[@]} -gt 0 ]]; then
-    die "stop_below_pgb_or_die: $(IFS=', '; echo "${violators[*]}") reached or passed PGB ceiling=${ceiling} before stop. Chain advanced past the fork block during the stop window. Increase PRE_STOP buffer or stop nodes earlier."
+    die "stop_below_pgb_or_die: $(IFS=', '; echo "${violators[*]}") reached or passed PGB ceiling=${ceiling} on disk after stop. The chain crossed the fork block during the stop window — restarting with the new chain config would deadlock. Increase PRE_STOP buffer, choose a higher PARLIA_GENESIS_BLOCK, or stop nodes earlier."
   fi
 }
