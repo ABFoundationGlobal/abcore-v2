@@ -337,4 +337,5 @@ if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
 fi
 
 echo "PASS (U-5). Nodes remain running in Bohr mode."
-echo "Next: bash script/test/upgrade-drill/07-snapshot.sh && bash script/test/upgrade-drill/85-run-u6-prague-maxwell.sh"
+echo "Next: bash script/test/upgrade-drill/07-snapshot.sh"
+echo "      (U-6 Prague+Maxwell script not yet implemented)"

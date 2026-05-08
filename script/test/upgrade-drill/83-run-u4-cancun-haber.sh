@@ -280,5 +280,5 @@ fi
 echo "PASS (U-4). Nodes remain running in Cancun mode."
 echo "After ALL nodes complete U-4:"
 echo "  1. Verify blobGasUsed=0 in blocks (Parlia does not produce blob txs by default)."
-echo "  2. Observe ≥48h on DevNet before proceeding to U-5 (Bohr, 3s→450ms)."
+echo "  2. Observe ≥48h on DevNet before proceeding to U-5 (Bohr: variable TurnLength)."
 echo "Next: bash script/test/upgrade-drill/07-snapshot.sh && bash script/test/upgrade-drill/84-run-u5-bohr.sh"
