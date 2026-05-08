@@ -2,7 +2,8 @@
 # One-shot upgrade drill: init → U-1 (Clique→Parlia) → U-2 (London + BSC forks)
 #                              → U-3 (Shanghai + Kepler + Feynman)
 #                              → U-4 (Cancun + Haber + HaberFix)
-#                              → U-5 (Bohr: variable TurnLength).
+#                              → U-5 (Bohr: variable TurnLength)
+#                              → U-6 (Prague + Pascal + Lorentz + Maxwell).
 #
 # Mirrors the structure of transition-test/99-run-all.sh.
 # Each round leaves nodes running so the next round can read the current chain
@@ -104,6 +105,13 @@ run bash "${SCRIPT_DIR}/83-run-u4-cancun-haber.sh"
 # bohrTime and does a rolling genesis reinit.
 
 run bash "${SCRIPT_DIR}/84-run-u5-bohr.sh"
+
+# ── U-6: Prague + Pascal + Lorentz + Maxwell ──────────────────────────────────
+# Nodes are still running from U-5; 85-run-u6 patches genesis.json with
+# pascalTime/pragueTime/lorentzTime/maxwellTime + blobSchedule.prague and does
+# a rolling genesis reinit.  Three activation phases separated by 3 minutes each.
+
+run bash "${SCRIPT_DIR}/85-run-u6-prague-maxwell.sh"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
