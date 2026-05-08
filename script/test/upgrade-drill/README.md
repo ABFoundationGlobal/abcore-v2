@@ -237,6 +237,12 @@ Key behavioural changes at Bohr:
 
 **Local parameters:** `BohrTime = now + 120 s`
 
+**Environment variables:**
+- `FORK_TIME_OFFSET` — seconds from now to activation (default: 120)
+- `FORK_TIME` — explicit activation timestamp (overrides `FORK_TIME_OFFSET`)
+- `EPOCH_WAIT_TIMEOUT` — max seconds to wait for the first post-activation epoch block before skipping the TurnLength byte check (default: 60). Set to a higher value or use `CLIQUE_EPOCH=30` in `00-init.sh` to enable this check reliably.
+- `KEEP_RUNNING=1` — leave nodes running after PASS
+
 **Prerequisites:** none
 
 **Steps:**
@@ -347,7 +353,16 @@ bash script/test/upgrade-drill/07-snapshot.sh
 # U-3: Shanghai + Kepler + Feynman (nodes still running from U-2)
 GETH=./build/bin/geth bash script/test/upgrade-drill/82-run-u3-shanghai-feynman.sh
 
-# U-4 through U-7: planned — see individual sections above
+# U-4: Cancun + Haber + HaberFix (nodes still running from U-3)
+GETH=./build/bin/geth bash script/test/upgrade-drill/83-run-u4-cancun-haber.sh
+
+# Optional: snapshot before U-5
+bash script/test/upgrade-drill/07-snapshot.sh
+
+# U-5: Bohr (nodes still running from U-4)
+GETH=./build/bin/geth bash script/test/upgrade-drill/84-run-u5-bohr.sh
+
+# U-6 through U-7: planned — see individual sections above
 ```
 
 ### Cleanup and rollback
