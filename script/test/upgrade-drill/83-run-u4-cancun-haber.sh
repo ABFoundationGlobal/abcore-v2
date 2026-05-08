@@ -186,6 +186,18 @@ if [[ "$ACT_BLOCK" -eq 0 ]]; then
   die "Activation block not produced within 60s of FORK_TIME=${FORK_TIME}"
 fi
 
+# Walk back to the true first fork block.
+# The 1-second poll interval can skip blocks: if the chain produces blocks 551
+# and 552 between two polls, we land on 552 even though 551 was the actual first
+# fork block.  Scanning back ensures PRE_BLOCK is always a genuine pre-fork block.
+while [[ "$ACT_BLOCK" -gt 1 ]]; do
+  _prev_ts=$(attach_exec "$GETH" "$(val_ipc 1)" \
+    "eth.getBlock($(( ACT_BLOCK - 1 ))).timestamp" 2>/dev/null || echo 0)
+  [[ "${_prev_ts:-0}" -lt "${FORK_TIME}" ]] && break
+  ACT_BLOCK=$(( ACT_BLOCK - 1 ))
+done
+log "First fork block: ${ACT_BLOCK}."
+
 # ── Phase 5: brief observation window ─────────────────────────────────────────
 #
 # Wait for a few more blocks to confirm Cancun sealing is stable after the fork.
