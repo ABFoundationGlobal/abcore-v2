@@ -27,7 +27,7 @@ any code-version change in this local drill.
 | U-3 | `82-run-u3-shanghai-feynman.sh` | v0.3→v0.4 | timestamp | Shanghai + Kepler + Feynman (includes StakeHub registration) | 🔲 |
 | U-4 | `83-run-u4-cancun-haber.sh` | v0.4→v0.5 | timestamp | Cancun + Haber + HaberFix (includes BlobScheduleConfig) | 🔲 |
 | U-5 | `84-run-u5-bohr.sh` | v0.5→v0.6 | timestamp | Bohr: variable TurnLength (consecutive blocks per validator) | 🔲 |
-| U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | 🔲 |
+| U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | ✅ |
 | U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | 🔲 |
 
 ### Helper scripts
@@ -271,7 +271,8 @@ compresses each gap to 3 minutes.
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Append all 4 timestamps to TOML; rolling restart
+2. Append all 4 timestamps + `blobSchedule.prague` to genesis.json; rolling genesis reinit (stop →
+   `geth init` → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
 3. Prague/Pascal activates → observe 2 minutes → Lorentz activates → observe
    2 minutes → Maxwell activates → observe 3 minutes
 
@@ -362,7 +363,10 @@ bash script/test/upgrade-drill/07-snapshot.sh
 # U-5: Bohr (nodes still running from U-4)
 GETH=./build/bin/geth bash script/test/upgrade-drill/84-run-u5-bohr.sh
 
-# U-6 through U-7: planned — see individual sections above
+# U-6: Prague + Pascal + Lorentz + Maxwell (nodes still running from U-5)
+GETH=./build/bin/geth bash script/test/upgrade-drill/85-run-u6-prague-maxwell.sh
+
+# U-7: planned — see individual section above
 ```
 
 ### Cleanup and rollback
