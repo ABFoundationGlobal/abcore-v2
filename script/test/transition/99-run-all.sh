@@ -136,7 +136,9 @@ TOML
 # restart again; the new head height shifts the Clique round-robin so a
 # different validator is in-turn, breaking the deadlock.
 #
-# The outer loop retries the full stop→start→converge cycle up to 8 times.
+# The outer loop retries the start→advance-check (and stop-on-failure) cycle
+# up to 8 times. Convergence across all nodes is verified once after the loop
+# exits successfully (Phase 6).
 # Liveness is declared only once the chain has produced 5 stable blocks past
 # the fork (not just 2) — squeaking past PGB+2 by one block is not evidence
 # that Parlia sealing has stabilised; the seal race can re-deadlock immediately
