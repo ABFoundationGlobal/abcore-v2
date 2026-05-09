@@ -23,7 +23,7 @@
 #
 # Steps:
 #   1. Determine fork timestamps
-#   2. Patch genesis.json with fermiTime, osakaTime, mendelTime
+#   2. Patch genesis.json with fermiTime, osakaTime, mendelTime + blobSchedule.osaka
 #      (nodes remain running; genesis.json is only read at geth init time)
 #   3. Rolling genesis reinit: for each validator in turn —
 #        stop → geth init → restart → re-peer → wait for sync
@@ -105,8 +105,10 @@ fi
 
 # ── Phase 2: patch genesis.json while nodes are still running ─────────────────
 #
-# Add fermiTime, osakaTime, mendelTime.
-# No blobSchedule changes required for Osaka (uses the same blob config as Prague/Cancun).
+# Add fermiTime, osakaTime, mendelTime, and blobSchedule.osaka.
+# Osaka requires blobSchedule.osaka (enforced by CheckConfigForkOrder), same as
+# Prague required blobSchedule.prague.  Default values: target=6, max=9,
+# baseFeeUpdateFraction=5007716 (EIP-7691 / Pectra, same as Prague).
 # Updating genesis.json while nodes run is safe — geth reads chainconfig from
 # the database, not genesis.json at runtime.
 
@@ -132,6 +134,16 @@ for field, val in [
     old = cfg.get(field, '<nil>')
     cfg[field] = val
     print(f'  {field}: {old} → {val}')
+
+# Osaka requires blobSchedule.osaka (enforced by CheckConfigForkOrder).
+# Default: target=6, max=9, baseFeeUpdateFraction=5007716 (same as Prague / EIP-7691).
+if 'blobSchedule' not in cfg:
+    cfg['blobSchedule'] = {}
+if 'osaka' not in cfg['blobSchedule']:
+    cfg['blobSchedule']['osaka'] = {
+        'target': 6, 'max': 9, 'baseFeeUpdateFraction': 5007716
+    }
+    print('  blobSchedule.osaka: <nil> → {target:6, max:9, baseFeeUpdateFraction:5007716}')
 
 with open(genesis_path, 'w') as f:
     json.dump(genesis, f, indent=2)
