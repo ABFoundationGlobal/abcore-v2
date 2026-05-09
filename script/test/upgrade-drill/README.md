@@ -28,7 +28,7 @@ any code-version change in this local drill.
 | U-4 | `83-run-u4-cancun-haber.sh` | v0.4→v0.5 | timestamp | Cancun + Haber + HaberFix (includes BlobScheduleConfig) | 🔲 |
 | U-5 | `84-run-u5-bohr.sh` | v0.5→v0.6 | timestamp | Bohr: variable TurnLength (consecutive blocks per validator) | 🔲 |
 | U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | ✅ |
-| U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | 🔲 |
+| U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | ✅ |
 
 ### Helper scripts
 
@@ -366,7 +366,8 @@ GETH=./build/bin/geth bash script/test/upgrade-drill/84-run-u5-bohr.sh
 # U-6: Prague + Pascal + Lorentz + Maxwell (nodes still running from U-5)
 GETH=./build/bin/geth bash script/test/upgrade-drill/85-run-u6-prague-maxwell.sh
 
-# U-7: planned — see individual section above
+# U-7: Fermi + Osaka + Mendel (nodes still running from U-6)
+GETH=./build/bin/geth bash script/test/upgrade-drill/86-run-u7-fermi-osaka-mendel.sh
 ```
 
 ### Cleanup and rollback
