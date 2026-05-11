@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
-GENESIS_CONTRACT_COMMIT := 91fb231207f646661071a61edd5ca24a5e4cfb27
+GENESIS_CONTRACT_COMMIT := 3b4476edab4444eff93b9b7cc8c65be615d65a86
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -64,19 +64,11 @@ testnet: GENERATE_CMD = abchain-test
 testnet: _build
 
 ## Generate contracts for ABCore devnet (chain ID 17140) → devnet/
-##
-## TODO(genesis-contract#8): once https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/8
-## merges, switch GENERATE_CMD to `abchain-dev` (first-class devnet command,
-## network = "testnet" template path, source_chain_id "AB-Chain-Devnet") and
-## bump GENESIS_CONTRACT_COMMIT to its merge commit, then re-run `make devnet`
-## to regenerate the bytecode under the correct template path.
-##
-## Current placeholder uses `abchain-local --ab-chain-id 17140` which compiles
-## against the network = "dev" template branch — works for first V2 image
-## (PGB = nil, pure Clique) but the bytecode that lands at PGB = N will need
-## to be regenerated under `abchain-dev` before scheduling the cutover.
+## Uses the first-class `abchain-dev` generator (network = "testnet" template
+## path, source_chain_id "AB-Chain-Devnet"); defaults already match devnet so
+## no additional args are needed.
 devnet: OUTDIR = devnet
-devnet: GENERATE_CMD = abchain-local --ab-chain-id 17140
+devnet: GENERATE_CMD = abchain-dev
 devnet: _build
 
 ## Generate contracts with local development parameters → default/
