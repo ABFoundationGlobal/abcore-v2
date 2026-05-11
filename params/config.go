@@ -422,11 +422,16 @@ var (
 
 	// ABCoreDevnetChainConfig is the chain parameters for ABCore devnet (chain ID 17140).
 	//
-	// Derived from devnet-ops/jenkins/Jenkinsfile.init. Same shape as
-	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0), only the
-	// chain ID and the (planned) ParliaGenesisBlock differ. Used to rehearse the
-	// Phase 2 (Clique → Parlia) cutover before scheduling the same change for
-	// testnet / mainnet.
+	// Derived from devnet-ops/jenkins/Jenkinsfile.init. Similar shape to
+	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0). Three
+	// intentional differences:
+	//   1. ChainID: 17140 (vs mainnet 36888, testnet 26888)
+	//   2. ParliaGenesisBlock: nil until Phase 2 cutover height is chosen
+	//   3. MuirGlacierBlock: nil (vs 0 on mainnet/testnet) — Jenkinsfile.init's
+	//      inline genesis.json omits this field; see the MuirGlacierBlock note
+	//      below for the compatibility rationale.
+	// Used to rehearse the Phase 2 (Clique → Parlia) cutover before scheduling
+	// the same change for testnet / mainnet.
 	//
 	// NOTE: ParliaGenesisBlock = nil here matches the first V2 image (pure Clique).
 	// When you cut a release that schedules the consensus switch, replace nil with
