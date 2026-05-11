@@ -740,6 +740,48 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 	}
 }
 
+// DefaultABCoreDevnetGenesisBlock returns the ABCore devnet genesis block (chain ID 17140).
+//
+// Mirrors the block #0 produced by devnet-ops/jenkins/Jenkinsfile.init when it
+// initializes the live 5-validator devnet (server-1/2/3 validators + server-4 RPC).
+// The five signer addresses below are the keystore addresses operationally
+// pre-placed on each validator host under /data/devnet/val-N/keystore/ — they
+// are persistent infrastructure keys, not fixtures.
+//
+// extraData layout matches Clique:
+//   32 bytes vanity (zero) + 5×20 bytes sorted signer addresses + 65 bytes seal (zero)
+// Sorting is ascending by hex byte representation, exactly what
+// Jenkinsfile.init's inline python emits.
+//
+// Verified against live: block #0 hash on ab-d4 RPC node =
+//   0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+// (equal to params.ABCoreDevnetGenesisHash; pinned by
+// TestDefaultABCoreDevnetGenesisBlockHash in core/genesis_test.go).
+func DefaultABCoreDevnetGenesisBlock() *Genesis {
+	balance, _ := new(big.Int).SetString("0x84595161401484a000000", 0)
+	return &Genesis{
+		Config:     params.ABCoreDevnetChainConfig,
+		Timestamp:  0,
+		Difficulty: big.NewInt(1),
+		GasLimit:   0x1c9c380,
+		ExtraData: hexutil.MustDecode("0x" +
+			"0000000000000000000000000000000000000000000000000000000000000000" +
+			"0c4bc1f8c69f4308e3d21c7982be944fa8afbfed" +
+			"243253a045f23dd8c4ccedbb6f75a18c201dda09" +
+			"2f342dada01c242d08fd4d2ac1afa2af5657e55e" +
+			"8907d13b612e1b014adb9df7175702501d55e0a4" +
+			"ae418d3a3e225a12d9014a201152dc54f8064823" +
+			"0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Alloc: GenesisAlloc{
+			common.HexToAddress("0x0c4bc1f8c69f4308e3d21c7982be944fa8afbfed"): {Balance: balance},
+			common.HexToAddress("0x243253a045f23dd8c4ccedbb6f75a18c201dda09"): {Balance: balance},
+			common.HexToAddress("0x2f342dada01c242d08fd4d2ac1afa2af5657e55e"): {Balance: balance},
+			common.HexToAddress("0x8907d13b612e1b014adb9df7175702501d55e0a4"): {Balance: balance},
+			common.HexToAddress("0xae418d3a3e225a12d9014a201152dc54f8064823"): {Balance: balance},
+		},
+	}
+}
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(gasLimit uint64, faucet *common.Address) *Genesis {
 	// Override the default period to the user requested one
