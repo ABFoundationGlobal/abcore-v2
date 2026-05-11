@@ -112,6 +112,11 @@ jobs:
         GETH: ${{ github.workspace }}/build/bin/geth
       run: bash script/test/transition/98-run-vote-change.sh
 
+    - name: Run transition test (T-3 tx across fork)
+      env:
+        GETH: ${{ github.workspace }}/build/bin/geth
+      run: bash script/test/transition/94-run-tx-test.sh
+
     - name: Run transition test (T-2 Parlia epoch boundary)
       env:
         GETH: ${{ github.workspace }}/build/bin/geth

@@ -187,6 +187,9 @@ _current=$(head_number "$GETH" "$(val_ipc 1)")
 log "All nodes converged at block ${_current}. Stopping all validators."
 
 # ── Phase 4: stop all validators (chain frozen at PRE_STOP) ──────────────────
+# The disk-head invariant check (no validator on-disk head ≥ effective PGB)
+# happens after Phase 5/6/7 below, once the effective PGB is known and val-1
+# has been stopped a second time. See the assertion further down.
 run "${SCRIPT_DIR}/03-stop.sh"
 mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
 
@@ -200,17 +203,27 @@ start_sync_validator 1
 # no peers and is not mining; vals 2/3 are stopped).
 #
 # PARLIA_GENESIS_BLOCK is treated as a *pre-stop target* by the caller (how far
-# to run the Clique chain before this test begins).  The *effective* fork block
-# used for the Parlia restart is always frozen_head+1, regardless of the
-# caller's value.  This is necessary to guarantee zero Clique blocks exist
-# between the chain stop and the fork: any Clique block in that window could
-# mine the pending tx before Parlia is active, breaking the test invariant.
+# to run the Clique chain before this test begins). The *effective* fork block
+# used for the Parlia restart is `frozen_head + 1` — the very next block after
+# the chain is frozen.
 #
-# The original value is saved and restored after 05-verify.sh so that callers
-# inspecting PARLIA_GENESIS_BLOCK after this script exits see what they set.
+# Why frozen_head+1: this guarantees the test invariant "the pending tx is
+# mined by Parlia, not by a Clique block in the post-stop, pre-fork window".
+# With +1, there is no pre-fork Clique window after the stop — block PGB is
+# the first new block produced and it is sealed in Parlia mode.
+#
+# This requires that at stop time, NO validator's head reached frozen_head+1
+# already. The `_PRESTOP_HEADS` snapshot above (taken before SIGTERM) plus
+# the assertion below catches the race where Clique seals one extra block in
+# the convergence-check → SIGTERM window. If the assertion fires, the test
+# fails fast with a clear message instead of silently deadlocking.
+#
+# The original caller value is saved and restored after 05-verify.sh so that
+# callers inspecting PARLIA_GENESIS_BLOCK after this script exits see what
+# they set.
 _frozen_head=$(head_number "$GETH" "$(val_ipc 1)")
 _ORIG_PARLIA_GENESIS_BLOCK="$PARLIA_GENESIS_BLOCK"
-PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
+export PARLIA_GENESIS_BLOCK=$(( _frozen_head + 1 ))
 log "Frozen head: ${_frozen_head}. Effective ParliaGenesisBlock: ${PARLIA_GENESIS_BLOCK} (caller value: ${_ORIG_PARLIA_GENESIS_BLOCK})"
 
 V1_ADDR=$(val_addr 1)
@@ -287,6 +300,34 @@ done
 [[ -f "$JOURNAL_PATH" ]] || \
   die "txpool journal not found at ${JOURNAL_PATH} after graceful shutdown — geth did not flush it"
 log "Txpool journal written: ${JOURNAL_PATH}"
+
+# ── Phase 7.5: assert no validator's persisted disk head ≥ effective PGB ─────
+# All three validators have now exited (val-2/val-3 in Phase 4, val-1 in
+# Phase 7). Read each validator's persisted head from disk and refuse to
+# proceed if any is at or past PARLIA_GENESIS_BLOCK. Reading from disk after
+# stop is the only reliable way to catch the stop-window race, where a
+# validator may seal one extra Clique-form block at PGB between the
+# convergence check and SIGTERM landing — the in-memory pre-stop head we
+# took earlier could miss that final block. See lib.sh:persisted_head_number
+# and the explanatory note in stop_below_pgb_or_die.
+_violators=()
+_unreadable=()
+for n in 1 2 3; do
+  _h=$(persisted_head_number "$(val_dir "$n")" 2>/dev/null || echo "")
+  if [[ -z "$_h" ]]; then
+    _unreadable+=("validator-${n}")
+    continue
+  fi
+  if [[ "$_h" -ge "$PARLIA_GENESIS_BLOCK" ]]; then
+    _violators+=("validator-${n} head=${_h}")
+  fi
+done
+if [[ ${#_unreadable[@]} -gt 0 ]]; then
+  die "94 stop-window invariant: could not read persisted disk head for: $(IFS=', '; echo "${_unreadable[*]}"). Refusing to proceed without verifying no validator has crossed PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK}."
+fi
+if [[ ${#_violators[@]} -gt 0 ]]; then
+  die "94 stop-window invariant violated: $(IFS=', '; echo "${_violators[*]}") reached or passed PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK} on disk. The chain crossed the fork block during the Phase 4 stop window — restarting with PGB=${PARLIA_GENESIS_BLOCK} would deadlock the network. Re-run; this is a stochastic race that should resolve with the next attempt."
+fi
 
 # ── Phase 8: write TOML override and restart all with ParliaGenesisBlock ──────
 # Val-1 reloads the txpool journal on startup; the pending transaction will be

@@ -120,7 +120,11 @@ current=$(head_number "$GETH" "$(val_ipc 1)")
 log "All nodes converged at block ${current}. Stopping validators..."
 
 # ── Phase 4: stop all validators ─────────────────────────────────────────────
-run "${SCRIPT_DIR}/03-stop.sh"
+# stop_below_pgb_or_die asserts no validator's head reached PARLIA_GENESIS_BLOCK
+# before SIGTERM landed. If any did, the chain has a Clique-form block at the
+# fork height on disk, which would deadlock the post-restart Parlia network
+# (errInvalidSpanValidators). See docs/ops/fork-cutover-runbook.md (when #85 merges) or PR #84 description.
+stop_below_pgb_or_die "$PARLIA_GENESIS_BLOCK"
 # Re-acquire sentinel released by 03-stop.sh so parallel runs cannot steal
 # this port base while we write the TOML and restart.
 mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
