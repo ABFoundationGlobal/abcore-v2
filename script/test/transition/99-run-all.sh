@@ -136,24 +136,31 @@ TOML
 # restart again; the new head height shifts the Clique round-robin so a
 # different validator is in-turn, breaking the deadlock.
 #
-# The outer loop retries the full stop→start→converge cycle up to 5 times.
-# In practice, a single retry always suffices; the retry cap is a safety net.
+# The outer loop retries the start→advance-check (and stop-on-failure) cycle
+# up to 8 times. Convergence across all nodes is verified once after the loop
+# exits successfully (Phase 6).
+# Liveness is declared only once the chain has produced 5 stable blocks past
+# the fork (not just 2) — squeaking past PGB+2 by one block is not evidence
+# that Parlia sealing has stabilised; the seal race can re-deadlock immediately
+# afterwards (see ed343977e for the original 98-run-vote-change fix).
 _restart_attempt=0
 while true; do
   _restart_attempt=$(( _restart_attempt + 1 ))
   log "Restart attempt ${_restart_attempt}: starting validators with ParliaGenesisBlock=${PARLIA_GENESIS_BLOCK}..."
   TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
 
-  # Require the chain to advance at least 2 blocks from the current tip AND
-  # past ParliaGenesisBlock+2 (so the fork transition has completed).
-  # Using current_head+2 rather than a fixed PGB+2 target ensures that even
-  # if on-disk data is already past the fork, a retry still detects liveness.
   _head_before=$(head_number "$GETH" "$(val_ipc 1)")
-  _target=$(( _head_before + 2 ))
-  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
-    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  # Require 5 blocks of sustained progress past the fork (not just 2) so the
+  # retry loop only exits once Parlia sealing has stabilised — not just
+  # squeaked past the seal-race deadlock by one or two blocks.
+  _target=$(( _head_before + 5 ))
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 5 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 5 ))
   fi
-  _deadline=$(( $(date +%s) + 60 ))
+  # 3-node round-robin recovers faster than the 4-node case in 98 (which uses
+  # 150s), but still needs ≈ 5 × block-time plus IPC settle margin to produce
+  # 5 stable post-fork blocks. 120s gives ~8× headroom on slow CI.
+  _deadline=$(( $(date +%s) + 120 ))
   _alive=false
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
@@ -169,7 +176,7 @@ while true; do
     break
   fi
 
-  if [[ "$_restart_attempt" -ge 5 ]]; then
+  if [[ "$_restart_attempt" -ge 8 ]]; then
     die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
   fi
 
