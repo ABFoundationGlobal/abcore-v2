@@ -157,8 +157,53 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.Equal(t, uint64(1), testCfg.Clique.Period, "testnet Clique period")
 	require.Equal(t, uint64(30000), testCfg.Clique.Epoch, "testnet Clique epoch")
 
+	// ABCore devnet: genesis hash must resolve to the devnet config.
+	devCfg := GetBuiltInChainConfig(ABCoreDevnetGenesisHash)
+	require.NotNil(t, devCfg, "ABCoreDevnetGenesisHash should resolve to a built-in config")
+	require.Equal(t, int64(17140), devCfg.ChainID.Int64(), "devnet chain ID")
+	require.NotNil(t, devCfg.Clique, "devnet Clique config must be set")
+	require.Equal(t, uint64(3), devCfg.Clique.Period, "devnet Clique period")
+	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
+	require.Nil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock is nil until Phase 2 cutover is scheduled")
+
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
+}
+
+// TestABCoreDevnetCompatWithLiveGenesis verifies that ABCoreDevnetChainConfig
+// is forward-compatible with the v1.13.15-era chain config stored on the live
+// devnet's chaindata. The stored config is derived from the inline genesis.json
+// produced by devnet-ops/jenkins/Jenkinsfile.init at the "生成 genesis.json"
+// stage (chain ID 17140, Clique period=3 epoch=30000, base forks at block 0,
+// no BSC fork fields).
+//
+// When a V2 binary boots on a node whose chaindata was written by V1, the
+// chainConfigOrDefault path (core/genesis.go) reads the stored config, then
+// computes the new config from ABCoreDevnetGenesisHash, and calls
+// storedCfg.CheckCompatible(newCfg, head, time). This test pins the contract:
+// any future change to ABCoreDevnetChainConfig that would break this rolling
+// upgrade path must fail this test.
+func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
+	storedCfg := &ChainConfig{
+		ChainID:             big.NewInt(17140),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		Clique:              &CliqueConfig{Period: 3, Epoch: 30000},
+	}
+	// Use a non-zero head and time so CheckCompatible cannot trivially
+	// shortcut on block-zero handling — this is the regime a real rolling
+	// upgrade hits, where the chain has been producing blocks for hours.
+	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 10_000, 1_700_000_000); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig is not backward-compatible with the "+
+			"v1.13.15-era stored config produced by devnet-ops/Jenkinsfile.init: %v", err)
+	}
 }
 
 func TestTimestampCompatError(t *testing.T) {

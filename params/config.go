@@ -445,8 +445,14 @@ var (
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
+		// MuirGlacierBlock is intentionally nil to match the v1.13.15-era stored
+		// config produced by devnet-ops/jenkins/Jenkinsfile.init, whose inline
+		// genesis.json omits this field. Mainnet/testnet genesis files include
+		// muirGlacierBlock=0, so their ChainConfig sets it; devnet does not.
+		// Functionally identical: Muir Glacier is a PoW difficulty-bomb delay
+		// fork with no effect on a Clique or Parlia chain.
+		MuirGlacierBlock: nil,
+		BerlinBlock:      big.NewInt(0),
 		// Forks below are not present in genesis.json and must be nil until explicitly scheduled.
 		LondonBlock:     nil,
 		ShanghaiTime:    nil,
