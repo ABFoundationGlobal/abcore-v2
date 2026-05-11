@@ -64,8 +64,17 @@ testnet: GENERATE_CMD = abchain-test
 testnet: _build
 
 ## Generate contracts for ABCore devnet (chain ID 17140) → devnet/
-## Reuses the abchain-local generator with --ab-chain-id 17140 so bytecode
-## chainID matches the devnet network; same Clique period (3s) as mainnet.
+##
+## TODO(genesis-contract#8): once https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/8
+## merges, switch GENERATE_CMD to `abchain-dev` (first-class devnet command,
+## network = "testnet" template path, source_chain_id "AB-Chain-Devnet") and
+## bump GENESIS_CONTRACT_COMMIT to its merge commit, then re-run `make devnet`
+## to regenerate the bytecode under the correct template path.
+##
+## Current placeholder uses `abchain-local --ab-chain-id 17140` which compiles
+## against the network = "dev" template branch — works for first V2 image
+## (PGB = nil, pure Clique) but the bytecode that lands at PGB = N will need
+## to be regenerated under `abchain-dev` before scheduling the cutover.
 devnet: OUTDIR = devnet
 devnet: GENERATE_CMD = abchain-local --ab-chain-id 17140
 devnet: _build
