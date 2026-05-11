@@ -51,7 +51,7 @@ T+t5     重启所有节点
 
 ### 2.2 真实事件（DevNet 测试中复现）
 
-时间线（来自 [`script/test/transition/94-run-tx-test.sh`](../../script/test/transition/94-run-tx-test.sh) 复现日志，evidence 保存于 `/home/kai/abcore-bug-evidence/seal-deadlock-2026-05-07/`）：
+时间线（来自 [`script/test/transition/94-run-tx-test.sh`](../../script/test/transition/94-run-tx-test.sh) 复现日志；完整 evidence 与三节点 disk 状态对照见 [`incidents/seal-deadlock-2026-05-07/`](incidents/seal-deadlock-2026-05-07/)）：
 
 ```
 13:26:54.000  validator-1 imported b15 (head=15)
@@ -268,4 +268,4 @@ DevNet 测试套件历史上用 stop-all 是因为 testing 简化（让所有节
 
 ## 6. Changelog
 
-- **1.0 (2026-05-07)** — 初版。基于 DevNet 测试中发现的 stop-window race（`/home/kai/abcore-bug-evidence/seal-deadlock-2026-05-07/`），系统化记录 Phase 2 cutover 的 race 模式和 rolling 升级 SOP。
+- **1.0 (2026-05-07)** — 初版。基于 DevNet 测试中发现的 stop-window race（详见 [`incidents/seal-deadlock-2026-05-07/`](incidents/seal-deadlock-2026-05-07/)），系统化记录 Phase 2 cutover 的 race 模式和 rolling 升级 SOP。
