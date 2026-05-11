@@ -1,0 +1,26 @@
+genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
+genesis_contract_commit: 91fb231207f646661071a61edd5ca24a5e4cfb27
+generated_at:            2026-05-11T12:40:42Z
+
+# Build parameters
+OUTDIR:       devnet
+GENERATE_CMD: abchain-local --ab-chain-id 17140
+
+# SHA-256 checksums
+ValidatorContract                      bc9808cfc61729e52f946577dcd96bd86b2c044823526b98c0bbf1a0a7222378
+SlashContract                          dac1b6b49d9170b068039870df322a931b0a00d0aabb10c135ca167789f0330e
+SystemRewardContract                   de52ad0dacdfc12e20e002900198ca3fdbabac2962508625e0c37005c994c518
+LightClientContract                    9a19cb720194f0c73dadad57b4971b1be70da7c653e89c2841da71dce8948e81
+TokenHubContract                       faa6cc798c04ce60bd027058c60c5d2e00ba90b85cc5a35c61e596bd5cabe5a3
+RelayerIncentivizeContract             0df50cdeb2e985eba10f64f051c5c8e6e477fb3d91d30bb93fa536e428a70608
+RelayerHubContract                     be1ce5fca23b3f58da90b50ec94adba78352c37027fe565faa1d28c540777f08
+GovHubContract                         72c326724624204ae2078e181021b33aa3d44bb931743b7fe55d885f4ff70ae5
+TokenManagerContract                   f5c8d9e7df0cb313d023645cff5d6dfe5b954229dba0fd304aff04af33248d84
+CrossChainContract                     9ee515aa1d15b46d80f1115824fed28a915d462db7127b8836638cb384131a37
+StakingContract                        d177455eeea44cef08776aa9ba4960c6dffe5059461e266fad34ea21447e9e42
+StakeHubContract                       e2cf11563514188319743e1f08821c9a65e4e184231fa3d569dea2cbf037388e
+StakeCreditContract                    529987cdd19ff32e40af3bad8882e94f7ed2f7d590ed1594b91f4ac8083988d7
+GovernorContract                       9b14bd52027801a1eff84a01101b34d663f72f89d3aad1ece15d67276ebc254b
+GovTokenContract                       8c1cf79032d4d00caf8017f9271fc77db2a15415b155f4f2726f4c4d68097819
+TimelockContract                       1a8600e4dc6649cb2088a0eafa66c8ec5fc140a19f628a8d2dae65df03097c80
+TokenRecoverPortalContract             bb25ac5f5c91390a7dc19002ca8ce8335601e2e3ca2a08cd055ad63bd6d4bc59

@@ -18,7 +18,7 @@ PYTHON                := $(or \
 OUTDIR       ?= default
 GENERATE_CMD ?= abchain-local
 
-.PHONY: pre build mainnet testnet recover _build
+.PHONY: pre build mainnet testnet devnet recover _build
 
 ## Clone abcore-v2-genesis-contract and install dependencies
 pre:
@@ -62,6 +62,13 @@ mainnet: _build
 testnet: OUTDIR = testnet
 testnet: GENERATE_CMD = abchain-test
 testnet: _build
+
+## Generate contracts for ABCore devnet (chain ID 17140) → devnet/
+## Reuses the abchain-local generator with --ab-chain-id 17140 so bytecode
+## chainID matches the devnet network; same Clique period (3s) as mainnet.
+devnet: OUTDIR = devnet
+devnet: GENERATE_CMD = abchain-local --ab-chain-id 17140
+devnet: _build
 
 ## Generate contracts with local development parameters → default/
 build: OUTDIR = default
@@ -140,7 +147,7 @@ _build:
 	echo "Written $(OUTDIR)/MANIFEST"
 	$(PYTHON) "$(PARLIA_DIR)extract-params.py" \
 		"$(GENESIS_CONTRACT_DIR)/scripts/generate.py" \
-		"$(GENERATE_CMD)" \
+		"$(firstword $(GENERATE_CMD))" \
 		> "$(PARLIA_DIR)$(OUTDIR)/params.env"
 	@echo "Written $(OUTDIR)/params.env"
 
