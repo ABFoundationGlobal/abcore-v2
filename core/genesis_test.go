@@ -388,7 +388,8 @@ func TestVerkleGenesisCommit(t *testing.T) {
 // params.ABCoreDevnetGenesisHash must be updated in lockstep.
 //
 // Live hash captured 2026-05-11 from ab-d4:19545:
-//   0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+//
+//	0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
 func TestDefaultABCoreDevnetGenesisBlockHash(t *testing.T) {
 	got := DefaultABCoreDevnetGenesisBlock().ToBlock().Hash()
 	want := params.ABCoreDevnetGenesisHash

@@ -749,12 +749,16 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 // are persistent infrastructure keys, not fixtures.
 //
 // extraData layout matches Clique:
-//   32 bytes vanity (zero) + 5×20 bytes sorted signer addresses + 65 bytes seal (zero)
+//
+//	32 bytes vanity (zero) + 5×20 bytes sorted signer addresses + 65 bytes seal (zero)
+//
 // Sorting is ascending by hex byte representation, exactly what
 // Jenkinsfile.init's inline python emits.
 //
 // Verified against live: block #0 hash on ab-d4 RPC node =
-//   0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+//
+//	0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+//
 // (equal to params.ABCoreDevnetGenesisHash; pinned by
 // TestDefaultABCoreDevnetGenesisBlockHash in core/genesis_test.go).
 func DefaultABCoreDevnetGenesisBlock() *Genesis {
