@@ -289,7 +289,7 @@ if [[ "$_now" -ge "$OSAKA_TIME" ]]; then
 fi
 
 _P256_ADDR='0x0000000000000000000000000000000000000100'
-_P256_DATA="0x$(python3 -c "import sys; sys.stdout.write('00'*160)")"
+_P256_DATA="0x$(python3 -c 'import sys; sys.stdout.write("00"*160)')"
 
 GAS_P256_PRE=$(attach_exec "$GETH" "$IPC1" \
   "eth.estimateGas({to:'${_P256_ADDR}', data:'${_P256_DATA}'})" 2>/dev/null || echo 0)
