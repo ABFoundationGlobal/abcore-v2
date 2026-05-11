@@ -9,6 +9,7 @@ package dual
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -91,17 +92,53 @@ func VerifyForkBlockOnDisk(
 			currentHead.Number.Uint64(), pgbU, pgbU)
 	}
 
-	// Parlia fork-block extraData layout (pre-Luban): vanity(32) +
-	// validators(N×20 bytes) + seal(65). With at least one validator,
-	// length > extraVanity + extraSeal = 97. A pure Clique block's
-	// extraData is exactly extraVanity + extraSeal = 97 (no validator
-	// list). Therefore len(Extra) == 97 at the fork height is sufficient
-	// proof that the block was sealed under Clique rules and persisted
-	// before the chain config switched to PGB=N.
-	if len(forkBlock.Extra) == extraVanity+extraSeal {
+	// Distinguish Clique-form from Parlia-form at the fork height.
+	//
+	// Parlia fork-block extraData (pre-Luban): vanity(32) + validators(N×20) + seal(65).
+	// Coinbase = the recovered signer address (a real validator, non-zero).
+	//
+	// Clique extraData has two valid shapes:
+	//   (a) Normal Clique block:                     vanity(32) + seal(65) = 97 bytes
+	//   (b) Clique epoch/checkpoint block (block#%Epoch==0):
+	//                                                vanity(32) + signers(N×20) + seal(65),
+	//                                                AND Coinbase MUST be zero
+	//                                                (consensus/clique/clique.go:261-263).
+	//
+	// Therefore "Clique-form" iff EITHER:
+	//   - len(Extra) == 97 (case a), OR
+	//   - len(Extra) > 97 AND Coinbase == zero address (case b).
+	// Otherwise (len > 97, Coinbase != zero) → Parlia-form, pass.
+	//
+	// Without the Coinbase check, a Clique epoch boundary that happens to
+	// coincide with the fork height (or that lands at the fork height by
+	// the same stop-window race) would be silently accepted because its
+	// Extra length matches Parlia's layout, and the engine would then
+	// boot into a broken Parlia snapshot. See T-4 (PR #70,
+	// 93-run-clique-epoch-fork-test.sh) for the exact scenario.
+	cliqueForm := false
+	cliqueReason := ""
+	switch {
+	case len(forkBlock.Extra) == extraVanity+extraSeal:
+		cliqueForm = true
+		cliqueReason = fmt.Sprintf("Clique-form extraData (length=%d bytes, no validator list)", len(forkBlock.Extra))
+	case forkBlock.Coinbase == (common.Address{}):
+		cliqueForm = true
+		cliqueReason = fmt.Sprintf("Clique-form epoch checkpoint (length=%d bytes, Coinbase=zero)", len(forkBlock.Extra))
+	}
+	if cliqueForm {
+		// Build the recovery hint. PGB=0 is not currently used by any chain
+		// config (mainnet/testnet/devnet all have PGB > 0 or PGB=nil), but a
+		// misconfigured override could set it; in that case there is no
+		// "previous Clique block" to roll back to, so omit the suggested
+		// height instead of printing pgbU-1 (which would underflow to a huge
+		// number and obscure the real problem).
+		recoveryLine := "  Recovery: roll back the chain to height N-1 (PGB=0 has no pre-fork block).\n"
+		if pgbU > 0 {
+			recoveryLine = fmt.Sprintf("  Recovery: roll back the chain to height %d and restart\n", pgbU-1)
+		}
 		return fmt.Errorf(
 			"dual-consensus startup check: refusing to start.\n"+
-				"  block #%d (hash=%s) has Clique-form extraData (length=%d bytes),\n"+
+				"  block #%d (hash=%s) is %s,\n"+
 				"  but the chain config requires Parlia-form at this height\n"+
 				"  (ParliaGenesisBlock=%d).\n"+
 				"\n"+
@@ -112,7 +149,7 @@ func VerifyForkBlockOnDisk(
 				"  was valid under the old config (PGB=nil) but is invalid\n"+
 				"  under the new one (PGB=%d).\n"+
 				"\n"+
-				"  Recovery: roll back the chain to height %d and restart\n"+
+				"%s"+
 				"  with the new config. See:\n"+
 				"    - docs/ops/consensus-switch-rollback-runbook.md\n"+
 				"    - script/test/transition/96-run-rollback-drill.sh (T-1.6)\n"+
@@ -120,7 +157,7 @@ func VerifyForkBlockOnDisk(
 				"  Prevention (next time): use the rolling-cutover SOP in\n"+
 				"  docs/ops/fork-cutover-runbook.md. Do NOT stop-all-then-\n"+
 				"  restart-all near the fork height.",
-			pgbU, forkBlock.Hash().Hex(), len(forkBlock.Extra), pgbU, pgbU, pgbU-1)
+			pgbU, forkBlock.Hash().Hex(), cliqueReason, pgbU, pgbU, recoveryLine)
 	}
 
 	return nil

@@ -24,11 +24,25 @@ func dualConfig() *params.ChainConfig {
 }
 
 // header builds a header at the given height with extraData of the given length.
+// Coinbase defaults to zero. For Parlia-form fork-block headers, callers must
+// set a non-zero Coinbase via headerWithCoinbase or by writing the field
+// directly, because the startup check distinguishes Clique epoch checkpoints
+// (Coinbase=zero) from Parlia blocks (Coinbase=signer) when len(Extra) > 97.
 func header(number uint64, extraLen int) *types.Header {
 	return &types.Header{
 		Number: new(big.Int).SetUint64(number),
 		Extra:  make([]byte, extraLen),
 	}
+}
+
+// parliaForkHeader builds a Parlia-form fork-block header: extraData layout is
+// vanity(32) + N×20-byte validators + seal(65), and Coinbase is a non-zero
+// address (the recovered signer). This matches what a healthy Parlia fork
+// block looks like on disk.
+func parliaForkHeader(number uint64, validatorCount int) *types.Header {
+	h := header(number, extraVanity+validatorCount*common.AddressLength+extraSeal)
+	h.Coinbase = common.HexToAddress("0x1111111111111111111111111111111111111111")
+	return h
 }
 
 func TestVerifyForkBlockOnDisk_NonDualChainNoOp(t *testing.T) {
@@ -92,7 +106,7 @@ func TestVerifyForkBlockOnDisk_NilHeadNoOp(t *testing.T) {
 func TestVerifyForkBlockOnDisk_HeadAtForkParliaForm(t *testing.T) {
 	cfg := dualConfig()
 	cfg.ParliaGenesisBlock = big.NewInt(16)
-	head := header(16, extraVanity+3*common.AddressLength+extraSeal) // 3 validators × 20 bytes
+	head := parliaForkHeader(16, 3) // 3 validators × 20 bytes, Coinbase non-zero
 	called := false
 	getHeader := func(n uint64) *types.Header {
 		called = true
@@ -118,7 +132,7 @@ func TestVerifyForkBlockOnDisk_HeadPastForkCliqueForm(t *testing.T) {
 	cfg := dualConfig()
 	cfg.ParliaGenesisBlock = big.NewInt(16)
 
-	head := header(20, extraVanity+3*common.AddressLength+extraSeal) // post-fork is Parlia-form
+	head := parliaForkHeader(20, 3) // post-fork is Parlia-form
 
 	// The block at PGB itself is Clique-form — this is the corruption.
 	bad := header(16, extraVanity+extraSeal)
@@ -147,6 +161,77 @@ func TestVerifyForkBlockOnDisk_HeadPastForkCliqueForm(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q\nfull message:\n%s", want, msg)
 		}
+	}
+}
+
+func TestVerifyForkBlockOnDisk_HeadPastForkCliqueEpochCheckpoint(t *testing.T) {
+	// Stronger failure mode: the on-disk block at PGB has Extra > 97 (looks
+	// Parlia-shaped) but Coinbase == zero, the unique invariant of a Clique
+	// epoch checkpoint. This is what Copilot review #3222179622 flagged —
+	// without the Coinbase check, this scenario would silently pass and the
+	// engine would boot into a broken Parlia snapshot.
+	cfg := dualConfig()
+	cfg.ParliaGenesisBlock = big.NewInt(16)
+
+	head := parliaForkHeader(20, 3)
+	// Looks Parlia-shaped (Extra > 97) but Coinbase=zero → Clique checkpoint.
+	bad := header(16, extraVanity+3*common.AddressLength+extraSeal)
+	// Coinbase already zero by default.
+
+	err := VerifyForkBlockOnDisk(cfg, head, func(n uint64) *types.Header {
+		if n == 16 {
+			return bad
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("expected refuse-to-start error for Clique epoch checkpoint at fork height")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"refusing to start",
+		"epoch checkpoint",
+		"Coinbase=zero",
+		"ParliaGenesisBlock=16",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q\nfull message:\n%s", want, msg)
+		}
+	}
+}
+
+func TestVerifyForkBlockOnDisk_PgbZeroNoUnderflow(t *testing.T) {
+	// Copilot review #3222179654: if PGB=0 (only via misconfigured override),
+	// the recovery hint must not say "roll back to height 18446744073709551615"
+	// because of uint underflow. The error must still mention "refusing to
+	// start" and must NOT contain the giant underflow number.
+	cfg := dualConfig()
+	cfg.ParliaGenesisBlock = big.NewInt(0)
+
+	head := parliaForkHeader(5, 3)
+	bad := header(0, extraVanity+extraSeal) // Clique-form at "fork" height 0
+
+	err := VerifyForkBlockOnDisk(cfg, head, func(n uint64) *types.Header {
+		if n == 0 {
+			return bad
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("expected refuse-to-start error when fork-block at PGB=0 is Clique-form")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "refusing to start") {
+		t.Errorf("error message missing refusal phrase; got: %s", msg)
+	}
+	// pgbU-1 with pgbU=0 underflows to 18446744073709551615; that must not appear.
+	if strings.Contains(msg, "18446744073709551615") {
+		t.Errorf("error message contains uint underflow value (pgbU-1 with PGB=0); got:\n%s", msg)
+	}
+	// The PGB=0 branch prints a textual "N-1" instead of a number; check we
+	// took that branch.
+	if !strings.Contains(msg, "PGB=0 has no pre-fork block") {
+		t.Errorf("expected PGB=0 branch's explanatory text; got:\n%s", msg)
 	}
 }
 
