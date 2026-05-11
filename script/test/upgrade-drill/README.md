@@ -27,8 +27,8 @@ any code-version change in this local drill.
 | U-3 | `82-run-u3-shanghai-feynman.sh` | v0.3→v0.4 | timestamp | Shanghai + Kepler + Feynman (includes StakeHub registration) | 🔲 |
 | U-4 | `83-run-u4-cancun-haber.sh` | v0.4→v0.5 | timestamp | Cancun + Haber + HaberFix (includes BlobScheduleConfig) | 🔲 |
 | U-5 | `84-run-u5-bohr.sh` | v0.5→v0.6 | timestamp | Bohr: variable TurnLength (consecutive blocks per validator) | 🔲 |
-| U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | 🔲 |
-| U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | 🔲 |
+| U-6 | `85-run-u6-prague-maxwell.sh` | v0.6→v0.7 | multi-phase timestamp | Prague + Pascal + Lorentz + Maxwell | ✅ |
+| U-7 | `86-run-u7-fermi-osaka-mendel.sh` | v0.7→v0.8 | multi-phase timestamp | Fermi + Osaka + Mendel | ✅ |
 
 ### Helper scripts
 
@@ -237,6 +237,12 @@ Key behavioural changes at Bohr:
 
 **Local parameters:** `BohrTime = now + 120 s`
 
+**Environment variables:**
+- `FORK_TIME_OFFSET` — seconds from now to activation (default: 120)
+- `FORK_TIME` — explicit activation timestamp (overrides `FORK_TIME_OFFSET`)
+- `EPOCH_WAIT_TIMEOUT` — max seconds to wait for the first post-activation epoch block before skipping the TurnLength byte check (default: 60). Set to a higher value or use `CLIQUE_EPOCH=30` in `00-init.sh` to enable this check reliably.
+- `KEEP_RUNNING=1` — leave nodes running after PASS
+
 **Prerequisites:** none
 
 **Steps:**
@@ -265,7 +271,8 @@ compresses each gap to 3 minutes.
 
 **Steps:**
 1. `07-snapshot.sh` — back up current chain state
-2. Append all 4 timestamps to TOML; rolling restart
+2. Append all 4 timestamps + `blobSchedule.prague` to genesis.json; rolling genesis reinit (stop →
+   `geth init` → restart → sync, one node at a time); 2-of-3 quorum maintained throughout
 3. Prague/Pascal activates → observe 2 minutes → Lorentz activates → observe
    2 minutes → Maxwell activates → observe 3 minutes
 
@@ -347,7 +354,20 @@ bash script/test/upgrade-drill/07-snapshot.sh
 # U-3: Shanghai + Kepler + Feynman (nodes still running from U-2)
 GETH=./build/bin/geth bash script/test/upgrade-drill/82-run-u3-shanghai-feynman.sh
 
-# U-4 through U-7: planned — see individual sections above
+# U-4: Cancun + Haber + HaberFix (nodes still running from U-3)
+GETH=./build/bin/geth bash script/test/upgrade-drill/83-run-u4-cancun-haber.sh
+
+# Optional: snapshot before U-5
+bash script/test/upgrade-drill/07-snapshot.sh
+
+# U-5: Bohr (nodes still running from U-4)
+GETH=./build/bin/geth bash script/test/upgrade-drill/84-run-u5-bohr.sh
+
+# U-6: Prague + Pascal + Lorentz + Maxwell (nodes still running from U-5)
+GETH=./build/bin/geth bash script/test/upgrade-drill/85-run-u6-prague-maxwell.sh
+
+# U-7: Fermi + Osaka + Mendel (nodes still running from U-6)
+GETH=./build/bin/geth bash script/test/upgrade-drill/86-run-u7-fermi-osaka-mendel.sh
 ```
 
 ### Cleanup and rollback
