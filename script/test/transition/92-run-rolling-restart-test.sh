@@ -120,7 +120,11 @@ current=$(head_number "$GETH" "$(val_ipc 1)")
 log "All nodes converged at block ${current}. Stopping validators..."
 
 # ── Phase 4: stop all validators ─────────────────────────────────────────────
-run "${SCRIPT_DIR}/03-stop.sh"
+# stop_below_pgb_or_die asserts no validator's head reached PARLIA_GENESIS_BLOCK
+# before SIGTERM landed. If any did, the chain has a Clique-form block at the
+# fork height on disk, which would deadlock the post-restart Parlia network
+# (errInvalidSpanValidators). See docs/ops/fork-cutover-runbook.md (when #85 merges) or PR #84 description.
+stop_below_pgb_or_die "$PARLIA_GENESIS_BLOCK"
 # Re-acquire sentinel released by 03-stop.sh so parallel runs cannot steal
 # this port base while we write the TOML and restart.
 mkdir "/tmp/transition-test-reserved-${PORT_BASE}" 2>/dev/null || true
@@ -150,11 +154,17 @@ while true; do
   TOML_CONFIG="${TOML_CONFIG}" "${SCRIPT_DIR}/02-start.sh"
 
   _head_before=$(head_number "$GETH" "$(val_ipc 1)")
-  _target=$(( _head_before + 2 ))
-  if [[ "$(( PARLIA_GENESIS_BLOCK + 2 ))" -gt "$_target" ]]; then
-    _target=$(( PARLIA_GENESIS_BLOCK + 2 ))
+  # Require 5 blocks of sustained progress past the fork (not just 2) so the
+  # retry loop only exits once Parlia sealing has stabilised — not just
+  # squeaked past the seal-race deadlock by one or two blocks.
+  _target=$(( _head_before + 5 ))
+  if [[ "$(( PARLIA_GENESIS_BLOCK + 5 ))" -gt "$_target" ]]; then
+    _target=$(( PARLIA_GENESIS_BLOCK + 5 ))
   fi
-  _deadline=$(( $(date +%s) + 60 ))
+  # 3-node round-robin recovers faster than the 4-node case in 98 (which uses
+  # 150s), but still needs ≈ 5 × block-time plus IPC settle margin to produce
+  # 5 stable post-fork blocks. 120s gives ~8× headroom on slow CI.
+  _deadline=$(( $(date +%s) + 120 ))
   _alive=false
   while [[ $(date +%s) -lt $_deadline ]]; do
     _head_now=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "$_head_before")
@@ -170,7 +180,7 @@ while true; do
     break
   fi
 
-  if [[ "$_restart_attempt" -ge 5 ]]; then
+  if [[ "$_restart_attempt" -ge 8 ]]; then
     die "chain did not advance after ${_restart_attempt} restart attempts — giving up"
   fi
 
