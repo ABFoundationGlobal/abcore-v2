@@ -217,6 +217,8 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($((N-1))).extraDa
 
 参考 [devnet-upgrade-plan.md "Parlia 切换完整验证清单"](devnet-upgrade-plan.md) 的完整后置检查项。
 
+**Devnet 自动化**：上述 5 项检查 + §3.5 post 的 BAD BLOCK 扫描已在 [devnet-ops/jenkins/Jenkinsfile.rolling](https://github.com/ABFoundationGlobal/devnet-ops/blob/master/jenkins/Jenkinsfile.rolling) 的 "升级后 - Fork 验证 (§3.4)" stage 自动执行（仅在 `pgb != nil && pgb <= head <= pgb + 1000` 窗口内跑一次；其他情况 SKIP）。Mainnet/testnet 的 Phase 2 cutover 仍是手工执行本节命令。
+
 ### 3.5 Abort 标准
 
 任意一项触发即 abort，进入 [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md)：
@@ -229,6 +231,8 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($((N-1))).extraDa
   - 任何节点 head 卡住 ≥ 2 分钟不推进
   - 任何节点反复报 BAD BLOCK
   - 节点之间 b N hash 不一致
+
+**Devnet 自动化**："tip ≥ N - 60 且仍有节点未升级" 在 [Jenkinsfile.rolling](https://github.com/ABFoundationGlobal/devnet-ops/blob/master/jenkins/Jenkinsfile.rolling) 的 "升级前 - Phase 2 安全余量检查 (§3.5 pre)" stage 自动 abort；"head 卡住" 由前后两个 "跨节点一致性检查" stage 间接检测（如果 head 不动，commonHeight 不变，PR #2 的 hash 校验仍跑但不会进 Phase 2 验证窗口）；"反复 BAD BLOCK" 和 "b N hash 不一致" 在 "升级后 - Fork 验证 (§3.4)" stage 自动 abort。
 
 ---
 
