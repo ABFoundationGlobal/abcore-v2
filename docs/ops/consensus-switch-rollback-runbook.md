@@ -35,9 +35,18 @@
 满足以下任一条件即可进入回滚判断：
 
 - 已到达或已经跨过 `ParliaGenesisBlock`，但链长时间不再增长。
-- 多数验证节点持续报 `unauthorized validator`、`errExtraSigners`、签名不匹配、无法继续 sealing。
+- 多数验证节点持续报 `unauthorized validator`、`errExtraSigners`、`invalid validator list on sprint end block`、签名不匹配、无法继续 sealing。
 - 重启后仍无法形成稳定 canonical head。
+- 节点之间在块 N 上的 hash 不一致（典型 stop-window race 后果，详见 [fork-cutover-runbook.md §2](fork-cutover-runbook.md)）。
 - 已确认不继续推进 Parlia，需撤回切换并恢复 Clique 出块。
+
+### 1.4 预防 vs 恢复
+
+本手册是**反应式**：链已经死锁，需要协调式 rollback 把网络拉回 Clique。
+
+**预防式**：[fork-cutover-runbook.md](fork-cutover-runbook.md) 详述了 Phase 2 共识激活的 rolling 升级 SOP、安全余量计算、abort 标准。**正确执行该 runbook 后基本不会触发本手册**。如果你正在做 cutover 但还没出问题，先看 fork-cutover-runbook，不要进本手册。
+
+如果已经满足 §1.3 任一条件，进入下面的协调式回滚流程。
 
 ---
 
