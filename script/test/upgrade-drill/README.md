@@ -222,15 +222,15 @@ This covers the first focus area of the T-6 plan in
 GETH=./build/bin/geth bash script/test/upgrade-drill/87-run-u3-whitelist-test.sh
 ```
 
-Exercises the `StakeHub.validatorWhitelist` / `whitelistEnabled` mechanism via
-`debug.setStorageAt` (IPC debug namespace, available on test nodes):
+Exercises the `StakeHub.validatorWhitelist` / `whitelistEnabled` mechanism using
+`eth_call` state overrides (`stateDiff` in the third parameter), which simulate
+modified storage without mutating the live chain:
 
 - All 3 genesis validators start whitelisted; `getValidatorElectionInfo(0,10)` returns
   `WHITELIST_VOTING_POWER = uint256(type(uint64).max) × 1e10` for each
-- Remove a validator from the whitelist → its slot in `getValidatorElectionInfo` drops to
-  stake-based power; re-add → `WHITELIST_VOTING_POWER` restores
-- Set `whitelistEnabled = false` → all validators fall back to stake-based power; re-enable →
-  `WHITELIST_VOTING_POWER` restores for all 3
+- Simulate removing a validator from the whitelist → `getValidatorElectionInfo` returns
+  stake-based power for that slot
+- Simulate `whitelistEnabled = false` → all validators fall back to stake-based power
 
 Note: the full governance path (BSCGovernor → BSCTimelock → GovHub →
 `StakeHub.updateParam("addToValidatorWhitelist", addr)`) requires a 7-day voting

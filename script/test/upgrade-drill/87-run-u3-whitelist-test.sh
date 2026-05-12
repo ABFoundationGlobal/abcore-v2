@@ -7,10 +7,8 @@
 #   1. All 3 genesis validators are whitelisted and receive WHITELIST_VOTING_POWER
 #      in getValidatorElectionInfo (initial state).
 #   2. Removing a validator from the whitelist reduces its election voting power.
-#   3. Restoring a validator to the whitelist restores WHITELIST_VOTING_POWER.
-#   4. Disabling the global whitelistEnabled toggle removes WHITELIST_VOTING_POWER
+#   3. Disabling the global whitelistEnabled toggle removes WHITELIST_VOTING_POWER
 #      for all validators simultaneously.
-#   5. Re-enabling whitelistEnabled restores WHITELIST_VOTING_POWER for all.
 #
 # Prerequisites:
 #   - U-3 (82-run-u3-shanghai-feynman.sh) has completed successfully.
@@ -19,10 +17,10 @@
 #
 # NOTE: The full governance path (BSCGovernor → BSCTimelock → GovHub →
 # StakeHub.updateParam) requires a 7-day voting period and a 24-hour timelock —
-# not feasible for a local drill. This script exercises the whitelist contract
-# LOGIC directly via geth's debug.setStorageAt (available on IPC endpoints of
-# test nodes running with InsecureUnlockAllowed). The governance path is tested
-# in cloud testnet scope (E-2/S-1).
+# not feasible for a local drill. Phases 2-3 use eth_call state overrides
+# (stateDiff in the third parameter) to simulate modified storage without
+# mutating the live chain, exercising the same contract logic paths. The
+# governance path is tested in cloud testnet scope (E-2/S-1).
 #
 # Usage:
 #   GETH=./build/bin/geth bash script/test/upgrade-drill/87-run-u3-whitelist-test.sh
@@ -56,6 +54,8 @@ fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+ZERO_32="0x0000000000000000000000000000000000000000000000000000000000000000"
+
 # eth_call via HTTP JSON-RPC; echoes 0x-prefixed hex result.
 eth_call_raw() {
   local to="$1" data="$2"
@@ -68,6 +68,32 @@ import json, sys
 resp = json.load(sys.stdin)
 if "error" in resp:
     print("eth_call error: " + str(resp["error"]), file=sys.stderr); sys.exit(1)
+print(resp.get("result",""))' || return 1
+}
+
+# eth_call with a single state override (stateDiff) on STAKE_HUB.
+# Simulates contract state without mutating the chain.
+# Arguments: data override_key override_value
+eth_call_override() {
+  local data="$1" key="$2" val="$3"
+  curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "$(python3 -c "
+import json
+print(json.dumps({
+  'jsonrpc': '2.0', 'method': 'eth_call', 'id': 1,
+  'params': [
+    {'to': '${STAKE_HUB}', 'data': '${data}'},
+    'latest',
+    {'${STAKE_HUB}': {'stateDiff': {'${key}': '${val}'}}}
+  ]
+}))")" \
+    2>/dev/null \
+  | python3 -c '
+import json, sys
+resp = json.load(sys.stdin)
+if "error" in resp:
+    print("eth_call_override error: " + str(resp["error"]), file=sys.stderr); sys.exit(1)
 print(resp.get("result",""))' || return 1
 }
 
@@ -88,24 +114,11 @@ mapping_key() {
     "web3.sha3('0x${addr}${slot}', {encoding:'hex'})" 2>/dev/null
 }
 
-# Read a storage slot (hex key or decimal) from StakeHub.
+# Read a storage slot from StakeHub.
 read_slot() {
   attach_exec "$GETH" "$IPC1" \
     "eth.getStorageAt('${STAKE_HUB}', '${1}', 'latest')" 2>/dev/null
 }
-
-# Write a storage slot via the debug namespace.
-# debug.setStorageAt returns null on success; geth attach exits non-zero for null
-# output, so we force return 0. Correctness of the write is verified by the
-# subsequent eth_call assertions rather than by the return value here.
-write_slot() {
-  attach_exec "$GETH" "$IPC1" \
-    "debug.setStorageAt('${STAKE_HUB}', '${1}', '${2}')" 2>/dev/null
-  return 0
-}
-
-ZERO_32="0x0000000000000000000000000000000000000000000000000000000000000000"
-ONE_32="0x0000000000000000000000000000000000000000000000000000000000000001"
 
 # Extract votingPowers[] from the ABI-encoded return of getValidatorElectionInfo.
 # Prints one decimal integer per line, or exits non-zero on empty/malformed input.
@@ -114,8 +127,7 @@ parse_voting_powers() {
 import sys
 raw = '''${1}'''.strip()
 if not raw or raw == '0x':
-    print('parse_voting_powers: empty result', file=sys.stderr)
-    sys.exit(1)
+    print('parse_voting_powers: empty result', file=sys.stderr); sys.exit(1)
 if raw.startswith('0x'): raw = raw[2:]
 if len(raw) < 128:
     print('parse_voting_powers: result too short (' + str(len(raw)) + ' hex chars)', file=sys.stderr)
@@ -130,8 +142,7 @@ for i in range(vp_len):
 "
 }
 
-# Count how many validators in the current getValidatorElectionInfo result have
-# voting power equal to WHITELIST_VP.  Dies if the RPC result is empty/malformed.
+# Count how many entries in a getValidatorElectionInfo result equal WHITELIST_VP.
 count_wl_validators() {
   local raw="$1" wl_count=0 vp
   while IFS= read -r vp; do
@@ -149,7 +160,7 @@ if [[ "$bytes" -lt 100 ]]; then
 fi
 
 # ── WHITELIST_VOTING_POWER = uint256(type(uint64).max) * 1e10 ─────────────────
-# Computed via geth's BigNumber to avoid any float/precision issues.
+# Computed via geth's BigNumber to avoid float/precision issues.
 WHITELIST_VP=$(attach_exec "$GETH" "$IPC1" \
   "web3.toBigNumber('0x' + 'ff'.repeat(8)).times(web3.toBigNumber('10000000000')).toString(10)" \
   2>/dev/null)
@@ -199,7 +210,7 @@ for entry in "val1:${VAL1_CONSENSUS}" "val2:${VAL2_CONSENSUS}" "val3:${VAL3_CONS
   fi
 done
 
-# 1c. getValidatorElectionInfo(0,10): all 3 active validators should have WHITELIST_VP
+# 1c. getValidatorElectionInfo(0,10): all 3 validators should have WHITELIST_VP
 raw=$(eth_call_raw "$STAKE_HUB" "$ELECTION_DATA")
 wl_count=$(count_wl_validators "$raw")
 if [[ "$wl_count" -eq 3 ]]; then
@@ -218,8 +229,8 @@ fi
 #   Slots 3-52 : Protectable.__reservedSlot[50]
 #   Slot 53 : StakeHub._receiveFundStatus (uint8)
 #   ...
-#   Slot 81 : StakeHub.validatorWhitelist (mapping base)  ← expected
-#   Slot 82 : StakeHub.whitelistEnabled (bool)
+#   Slot 80 : StakeHub.validatorWhitelist (mapping base)  ← expected
+#   Slot 81 : StakeHub.whitelistEnabled (bool)
 #
 # Scan slots 70–90 to confirm by checking that
 # keccak256(val1_addr || slot) maps to storage value 0x...01.
@@ -244,7 +255,7 @@ if [[ "$WL_SLOT" -lt 0 ]]; then
 fi
 ok "validatorWhitelist mapping base slot confirmed: ${WL_SLOT}"
 
-# Also confirm whitelistEnabled at slot WL_SLOT+1 is currently 0x01
+# whitelistEnabled sits at WL_SLOT+1; store as a 32-byte hex slot key for overrides.
 WL_ENABLED_SLOT=$(printf '0x%064x' $(( WL_SLOT + 1 )))
 enabled_val=$(read_slot "$WL_ENABLED_SLOT")
 if [[ "${enabled_val: -2}" == "01" ]]; then
@@ -253,95 +264,57 @@ else
   fail "whitelistEnabled slot $((WL_SLOT + 1)): expected 0x...01, got ${enabled_val}"
 fi
 
-# ── Restore state on any exit after this point ────────────────────────────────
-# Ensures Phase 3/4 storage writes are always reversed even if a later assertion
-# fails and the script exits early, so U-4 inherits a clean StakeHub state.
 VAL1_KEY=$(mapping_key "$VAL1_CONSENSUS" "$WL_SLOT")
-_restore_state() {
-  write_slot "$VAL1_KEY"        "$ONE_32" 2>/dev/null || true
-  write_slot "$WL_ENABLED_SLOT" "$ONE_32" 2>/dev/null || true
-}
-trap _restore_state EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 3 — remove val1 from whitelist, verify reduced power, restore
+# Phase 3 — simulate val1 removed from whitelist via eth_call state override
+#
+# state override: stateDiff {VAL1_KEY: 0x0} applied only to this call;
+# live chain state is never mutated.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "Phase 3: remove / restore val1 from whitelist"
+log "Phase 3: simulate val1 removed from whitelist (state override)"
 
-# 3a. Remove val1
-write_slot "$VAL1_KEY" "$ZERO_32"
-padded=$(printf '%064s' "${VAL1_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
-raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_MEMBER}${padded}")
+VAL1_PADDED=$(printf '%064s' "${VAL1_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
+
+# 3a. validatorWhitelist(val1) with override → false
+raw=$(eth_call_override "0x${SEL_WL_MEMBER}${VAL1_PADDED}" "$VAL1_KEY" "$ZERO_32")
 if ! is_true "$raw"; then
-  ok "validatorWhitelist(val1) == false after removal"
+  ok "validatorWhitelist(val1) == false (state override: whitelist slot cleared)"
 else
-  fail "validatorWhitelist(val1): still true after removal via debug.setStorageAt"
+  fail "validatorWhitelist(val1): expected false with override, got ${raw}"
 fi
 
-raw=$(eth_call_raw "$STAKE_HUB" "$ELECTION_DATA")
+# 3b. getValidatorElectionInfo with override → val1 drops to stake-based power
+raw=$(eth_call_override "$ELECTION_DATA" "$VAL1_KEY" "$ZERO_32")
 wl_count=$(count_wl_validators "$raw")
 if [[ "$wl_count" -eq 2 ]]; then
-  ok "getValidatorElectionInfo: 2 validators have WHITELIST_VOTING_POWER (val1 removed)"
+  ok "getValidatorElectionInfo: 2 validators have WHITELIST_VOTING_POWER (val1 overridden out)"
 else
   fail "getValidatorElectionInfo: expected 2 with WHITELIST_VOTING_POWER, got ${wl_count}"
 fi
 
-# 3b. Restore val1
-write_slot "$VAL1_KEY" "$ONE_32"
-raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_MEMBER}${padded}")
-if is_true "$raw"; then
-  ok "validatorWhitelist(val1) == true after restore"
-else
-  fail "validatorWhitelist(val1): still false after restore"
-fi
-
-raw=$(eth_call_raw "$STAKE_HUB" "$ELECTION_DATA")
-wl_count=$(count_wl_validators "$raw")
-if [[ "$wl_count" -eq 3 ]]; then
-  ok "getValidatorElectionInfo: all 3 have WHITELIST_VOTING_POWER after restore"
-else
-  fail "getValidatorElectionInfo: expected 3 after restore, got ${wl_count}"
-fi
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4 — disable whitelistEnabled, verify no WHITELIST_VP, re-enable
+# Phase 4 — simulate whitelistEnabled = false via eth_call state override
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "Phase 4: toggle whitelistEnabled"
+log "Phase 4: simulate whitelistEnabled = false (state override)"
 
-# 4a. Disable
-write_slot "$WL_ENABLED_SLOT" "$ZERO_32"
-raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_ENABLED}")
+# 4a. whitelistEnabled() with override → false
+raw=$(eth_call_override "0x${SEL_WL_ENABLED}" "$WL_ENABLED_SLOT" "$ZERO_32")
 if ! is_true "$raw"; then
-  ok "whitelistEnabled() == false after toggle"
+  ok "whitelistEnabled() == false (state override)"
 else
-  fail "whitelistEnabled(): still true after toggling to false"
+  fail "whitelistEnabled(): expected false with override, got ${raw}"
 fi
 
-raw=$(eth_call_raw "$STAKE_HUB" "$ELECTION_DATA")
+# 4b. getValidatorElectionInfo with override → all validators fall back to stake-based power
+raw=$(eth_call_override "$ELECTION_DATA" "$WL_ENABLED_SLOT" "$ZERO_32")
 wl_count=$(count_wl_validators "$raw")
 if [[ "$wl_count" -eq 0 ]]; then
-  ok "getValidatorElectionInfo: 0 validators have WHITELIST_VOTING_POWER (whitelistEnabled=false)"
+  ok "getValidatorElectionInfo: 0 validators have WHITELIST_VOTING_POWER (whitelistEnabled overridden off)"
 else
   fail "getValidatorElectionInfo: expected 0 with WHITELIST_VOTING_POWER when disabled, got ${wl_count}"
-fi
-
-# 4b. Re-enable
-write_slot "$WL_ENABLED_SLOT" "$ONE_32"
-raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_ENABLED}")
-if is_true "$raw"; then
-  ok "whitelistEnabled() == true after re-enable"
-else
-  fail "whitelistEnabled(): still false after re-enable"
-fi
-
-raw=$(eth_call_raw "$STAKE_HUB" "$ELECTION_DATA")
-wl_count=$(count_wl_validators "$raw")
-if [[ "$wl_count" -eq 3 ]]; then
-  ok "getValidatorElectionInfo: all 3 have WHITELIST_VOTING_POWER after re-enable"
-else
-  fail "getValidatorElectionInfo: expected 3 after re-enable, got ${wl_count}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
