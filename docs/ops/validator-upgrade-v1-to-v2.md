@@ -36,9 +36,9 @@ source ~/.bashrc
 
 v2 二进制与 v1 **数据目录完全兼容**——同一个 datadir 可以直接被 v2 读取，无需数据迁移或重新同步。这是滚动升级的基础。
 
-> **补充说明**：本手册处理的是“链仍处于 Clique 阶段”的 v1 → v2 二进制/部署升级。
-> 若已经启用 `ParliaGenesisBlock = N` 且链在共识切换时或切换后失败，需要使用
-> [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) 中的协调式回滚流程。
+> **补充说明**：本手册处理的是"链仍处于 Clique 阶段"的 v1 → v2 二进制/部署升级（Phase 1）。
+> - **Phase 2 共识激活**（在 chain config 写入 `ParliaGenesisBlock = N` 并切换到 Parlia）：见 [fork-cutover-runbook.md](fork-cutover-runbook.md)。Phase 2 必须 **rolling 升级**，stop-all 模式有已知的 stop-window race 会导致永久死锁。
+> - **Phase 2 失败后回滚**：[consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) 中的协调式回滚流程。
 
 ### 1.3 Clique 滚动升级约束
 
