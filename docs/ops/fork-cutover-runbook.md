@@ -203,7 +203,10 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($N).miner'"
 
 # 3. b N extraData 含 validator 列表（长度 > 196 hex）
 ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($N).extraData.length'"
-# 期望 ≥ 314 hex chars (vanity 64 + N×40 validator addresses + seal 130 + 余项)
+# 期望 ≥ 396 hex chars 给 5 个 validator
+# 公式："0x" 前缀 2 + vanity 64 + N×40 validators + seal 130
+#   → 5 validators = 396; 7 validators = 476; 21 validators = 1036
+# post-Luban 每个 validator 多 96 hex（48 字节 BLS pubkey），此阈值仅作下界保持安全。
 
 # 4. ValidatorSet 系统合约已部署
 ssh val-1 "docker exec abcore geth attach --exec '\
