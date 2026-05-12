@@ -422,14 +422,11 @@ var (
 
 	// ABCoreDevnetChainConfig is the chain parameters for ABCore devnet (chain ID 17140).
 	//
-	// Derived from devnet-ops/jenkins/Jenkinsfile.init. Similar shape to
-	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0). Three
+	// Derived from devnet-ops/jenkins/Jenkinsfile.init. Same shape as
+	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0). Two
 	// intentional differences:
 	//   1. ChainID: 17140 (vs mainnet 36888, testnet 26888)
 	//   2. ParliaGenesisBlock: nil until Phase 2 cutover height is chosen
-	//   3. MuirGlacierBlock: nil (vs 0 on mainnet/testnet) — Jenkinsfile.init's
-	//      inline genesis.json omits this field; see the MuirGlacierBlock note
-	//      below for the compatibility rationale.
 	// Used to rehearse the Phase 2 (Clique → Parlia) cutover before scheduling
 	// the same change for testnet / mainnet.
 	//
@@ -450,14 +447,8 @@ var (
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(0),
-		// MuirGlacierBlock is intentionally nil to match the v1.13.15-era stored
-		// config produced by devnet-ops/jenkins/Jenkinsfile.init, whose inline
-		// genesis.json omits this field. Mainnet/testnet genesis files include
-		// muirGlacierBlock=0, so their ChainConfig sets it; devnet does not.
-		// Functionally identical: Muir Glacier is a PoW difficulty-bomb delay
-		// fork with no effect on a Clique or Parlia chain.
-		MuirGlacierBlock: nil,
-		BerlinBlock:      big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
 		// Forks below are not present in genesis.json and must be nil until explicitly scheduled.
 		LondonBlock:     nil,
 		ShanghaiTime:    nil,
