@@ -249,6 +249,8 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 > **⚠️ 块高为演练示例值，不是预设的真实值。** N、M 及所有后续块高/时间戳均须在执行前根据实际环境重新设定：DevNet 可选较小值（如 N=500）缩短等待；Testnet/Mainnet 的具体值在 DevNet 演练通过后才确定。
 
+> **⚠️ Cutover 操作步骤参考 [fork-cutover-runbook.md](fork-cutover-runbook.md)。** 该 runbook 详述了"为什么 Phase 2 必须 rolling 升级（不能 stop-all）"、安全余量计算、abort 标准、后置验证。本节只列 N 的设定与块 N 自动行为，不重复 cutover 流程。
+
 **params/config.go 修改：**
 ```go
 // N = 30001（示例值：第一个 Clique epoch 结束后的首块，避免 epoch boundary 冲突）
@@ -291,14 +293,8 @@ cast call 0x0000000000000000000000000000000000001000 \
 ```
 
 **回滚预案：**
-- 块 N 之前：全网换回 PGB=nil binary，Clique 继续，无影响
-- 块 N 之后：
-  1. 停止所有节点（P2P 隔离，避免老状态 + 相同 validator key 在网络中造成双签）
-  2. 确认所有节点已停止
-  3. 所有节点恢复 pre-N datadir 快照（同一基准块高）
-  4. 换回旧 binary
-  5. 启动节点
-  （`debug.setHead(N-1)` 仅在无快照时作 fallback，但可能导致 state/ancients 不一致）
+- 块 N 之前：全网换回 PGB=nil 配置，Clique 继续，无影响
+- 块 N 之后或 cutover 失败（链卡住、报 `errInvalidSpanValidators`、节点之间 b N hash 不一致）：执行 [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) 完整流程（停链 + maintenance 模式 setHead(N-1) + 移除 PGB 配置 + 全网 Clique 恢复）。**不要简单重启**——磁盘上的 Clique-form b N 仍在，重启会重新进入死锁。
 
 **观察窗口：≥ 30000 块（≈25h）再推进 Upgrade 2。**
 
