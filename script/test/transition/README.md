@@ -19,7 +19,7 @@ For the full 6-round sequential upgrade drill (v0.1 → v0.7), see
 | T-3 | `94-run-tx-test.sh`                | User transaction submitted pre-fork, mined in first post-fork Parlia blocks | ✅ |
 | T-4 | `93-run-clique-epoch-fork-test.sh` | Fork block coincides with Clique epoch boundary (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) | ✅ |
 | T-5 | `92-run-rolling-restart-test.sh`   | Single-node rolling restart while chain is in Parlia; 2-of-3 quorum maintained during offline window (also runs as part of `99-run-all.sh`) | ✅ |
-| T-6 | planned                            | Transaction-based logic verification of AB-chain system contract modifications: `FOUNDATION_ADDR` fee routing ratio, validator whitelist election priority (`StakeHub`), and governance `updateParam` boundary enforcement — requires sending transactions via the GovHub system-call path | 🔲 |
+| T-6 | planned (partial)                  | Transaction-based logic verification of AB-chain system contract modifications: `FOUNDATION_ADDR` fee routing (covered by `06-verify-contracts.sh`), validator whitelist election priority — T-6.b implemented in upgrade-drill as [`87-run-u3-whitelist-test.sh`](../upgrade-drill/README.md), governance `updateParam` boundary enforcement — requires sending transactions via the GovHub system-call path (BSCGovernor → BSCTimelock → GovHub → target) | 🔲 |
 
 ### Helper scripts
 
