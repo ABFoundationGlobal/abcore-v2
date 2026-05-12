@@ -3,7 +3,8 @@
 #                              → U-3 (Shanghai + Kepler + Feynman)
 #                              → U-4 (Cancun + Haber + HaberFix)
 #                              → U-5 (Bohr: variable TurnLength)
-#                              → U-6 (Prague + Pascal + Lorentz + Maxwell).
+#                              → U-6 (Prague + Pascal + Lorentz + Maxwell)
+#                              → U-7 (Fermi + Osaka + Mendel).
 #
 # Mirrors the structure of transition-test/99-run-all.sh.
 # Each round leaves nodes running so the next round can read the current chain
@@ -112,6 +113,13 @@ run bash "${SCRIPT_DIR}/84-run-u5-bohr.sh"
 # a rolling genesis reinit.  Three activation phases separated by 3 minutes each.
 
 run bash "${SCRIPT_DIR}/85-run-u6-prague-maxwell.sh"
+
+# ── U-7: Fermi + Osaka + Mendel ───────────────────────────────────────────────
+# Nodes are still running from U-6; 86-run-u7 patches genesis.json with
+# fermiTime/osakaTime/mendelTime and does a rolling genesis reinit.
+# Two activation phases: Fermi alone, then Osaka+Mendel together 3 minutes later.
+
+run bash "${SCRIPT_DIR}/86-run-u7-fermi-osaka-mendel.sh"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
