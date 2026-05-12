@@ -39,11 +39,11 @@ GETH=${GETH:-geth}
 # ── System contract addresses ─────────────────────────────────────────────────
 STAKE_HUB="0x0000000000000000000000000000000000002002"
 
-# Consensus addresses from parliagenesis/default/validators.conf.
+# Consensus addresses derived from the validator keystores used by the drill.
 # In the default local drill, consensus == operator == fee address for each node.
-VAL1_CONSENSUS="0xc3edefb989fa00ca0e36ce30a810c4be7c4a201f"
-VAL2_CONSENSUS="0x6c5e5fc2e9710803d661de6b1a4a8fbedb9674e7"
-VAL3_CONSENSUS="0x6bde80699ea85293811e91a4fea2434df3461d66"
+VAL1_CONSENSUS=$(val_addr 1 | tr '[:upper:]' '[:lower:]')
+VAL2_CONSENSUS=$(val_addr 2 | tr '[:upper:]' '[:lower:]')
+VAL3_CONSENSUS=$(val_addr 3 | tr '[:upper:]' '[:lower:]')
 
 IPC1=$(val_ipc 1)
 HTTP1="http://127.0.0.1:$(http_port 1)"
@@ -177,6 +177,12 @@ log "  Computing selectors..."
 SEL_WL_ENABLED=$(selector "whitelistEnabled()")
 SEL_WL_MEMBER=$(selector "validatorWhitelist(address)")
 SEL_ELECTION=$(selector "getValidatorElectionInfo(uint256,uint256)")
+
+for _sel_name in SEL_WL_ENABLED SEL_WL_MEMBER SEL_ELECTION; do
+  _sel_val="${!_sel_name}"
+  [[ "$_sel_val" =~ ^[0-9a-fA-F]{8}$ ]] \
+    || die "${_sel_name}: invalid selector '${_sel_val}' (expected 8 hex chars; geth attach may have failed)"
+done
 
 # getValidatorElectionInfo(0, 10) — fixed call data reused throughout
 ELECTION_DATA="0x${SEL_ELECTION}$(printf '%064x' 0)$(printf '%064x' 10)"
