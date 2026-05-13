@@ -430,7 +430,7 @@ var (
 	// Used to rehearse the Phase 2 (Clique → Parlia) cutover before scheduling
 	// the same change for testnet / mainnet.
 	//
-	// Phase 2 schedule (v0.1.3, this commit):
+	// Phase 2 schedule (v0.2.0 / docs/ops/devnet-upgrade-plan.md Upgrade 1):
 	//   ParliaGenesisBlock = 50000
 	//   Target activation time: 2026-05-14 ~08:00 UTC
 	//   Calculation basis (measured 2026-05-13 21:02 UTC):
