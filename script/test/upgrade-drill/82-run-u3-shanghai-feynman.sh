@@ -461,6 +461,11 @@ if [[ "$FAIL" -gt 0 ]]; then
   exit 1
 fi
 
+# ── T-6.b: whitelist election-priority test ───────────────────────────────────
+log ""
+log "Running T-6.b whitelist election-priority test..."
+GETH="${GETH}" bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
+
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo "PASS (U-3). Nodes remain running. Run 07-snapshot.sh before U-4."
   exit 0
