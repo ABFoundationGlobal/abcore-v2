@@ -197,6 +197,53 @@ the activation block is confirmed.
 - After the breathe block, `parlia_getValidators` still returns the correct 3 validators
 - No `"no active validator"` errors in node logs
 
+**Post-activation system contract verification:**
+
+Run `script/test/transition/06-verify-contracts.sh` against the upgrade-drill nodes immediately after
+U-3 completes (nodes remain running).  Both suites share the same `validator-N` datadir layout, so
+pointing `DATADIR_ROOT` at the upgrade-drill data directory is sufficient:
+
+```bash
+DATADIR_ROOT=script/test/upgrade-drill/data \
+  GETH=./build/bin/geth \
+  bash script/test/transition/06-verify-contracts.sh
+```
+
+This covers the first focus area of the T-6 plan in
+[`script/test/transition/README.md`](../transition/README.md):
+
+- `FOUNDATION_RATIO == 1500` in `BSCValidatorSet` (15% fee share routed to `FOUNDATION_ADDR`)
+- `GovToken` / `StakeHub` / `BSCGovernor` bytecode deployed at system addresses `0x2005` / `0x2002` / `0x2004`
+- Submit a test transaction; confirm `FOUNDATION_ADDR` balance increases by the expected 15% fraction
+
+**T-6.b — Whitelist election priority** (`87-run-u3-whitelist-test.sh`):
+
+```bash
+GETH=./build/bin/geth bash script/test/upgrade-drill/87-run-u3-whitelist-test.sh
+```
+
+Exercises the `StakeHub.validatorWhitelist` / `whitelistEnabled` mechanism using
+`eth_call` state overrides (`stateDiff` in the third parameter), which simulate
+modified storage without mutating the live chain:
+
+- All 3 genesis validators start whitelisted; `getValidatorElectionInfo(0,10)` returns
+  `WHITELIST_VOTING_POWER = uint256(type(uint64).max) × 1e10` for each
+- Simulate removing a validator from the whitelist → `getValidatorElectionInfo` returns
+  stake-based power for that slot
+- Simulate `whitelistEnabled = false` → all validators fall back to stake-based power
+
+Note: the full governance path (BSCGovernor → BSCTimelock → GovHub →
+`StakeHub.updateParam("addToValidatorWhitelist", addr)`) requires a 7-day voting
+period and 24-hour timelock; it is tested in cloud testnet scope (E-2/S-1).
+The jailed-validator path (getValidatorElectionInfo returns 0 regardless of
+whitelist status) requires a real slash event and is also in cloud testnet scope.
+
+**Planned — requires GovHub system-call path (not yet implemented):**
+
+- *`updateParam` boundary*: submit `updateParam` at the boundary value (expect accept) and one unit
+  beyond (expect revert) for `minSelfDelegationBNB` (max `10_000_000_000 AB`) and `proposalThreshold`
+  (max `10_000_000_000 govAB`)
+
 ## U-4 — Cancun + Haber + HaberFix (timestamp activation)
 
 Corresponds to devnet Upgrade 4 (v0.5.0). Requires `BlobScheduleConfig` in TOML.

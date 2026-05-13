@@ -56,6 +56,7 @@ const (
 	defaultNet    = "Default"
 	abcoreMainNet = "ABCoreMainnet"
 	abcoreTestNet = "ABCoreTestnet"
+	abcoreDevNet  = "ABCoreDevnet"
 )
 
 var (
@@ -1213,6 +1214,80 @@ func init() {
 		},
 	}
 
+	parliaGenesisUpgrade[abcoreDevNet] = &Upgrade{
+		UpgradeName: "parliaGenesis",
+		Configs: []*UpgradeConfig{
+			{
+				ContractAddr: common.HexToAddress(ValidatorContract),
+				Code:         parliagenesis.DevnetValidatorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SlashContract),
+				Code:         parliagenesis.DevnetSlashContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(SystemRewardContract),
+				Code:         parliagenesis.DevnetSystemRewardContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(LightClientContract),
+				Code:         parliagenesis.DevnetLightClientContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenHubContract),
+				Code:         parliagenesis.DevnetTokenHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerIncentivizeContract),
+				Code:         parliagenesis.DevnetRelayerIncentivizeContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(RelayerHubContract),
+				Code:         parliagenesis.DevnetRelayerHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovHubContract),
+				Code:         parliagenesis.DevnetGovHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenManagerContract),
+				Code:         parliagenesis.DevnetTokenManagerContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(CrossChainContract),
+				Code:         parliagenesis.DevnetCrossChainContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakingContract),
+				Code:         parliagenesis.DevnetStakingContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeHubContract),
+				Code:         parliagenesis.DevnetStakeHubContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(StakeCreditContract),
+				Code:         parliagenesis.DevnetStakeCreditContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovernorContract),
+				Code:         parliagenesis.DevnetGovernorContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(GovTokenContract),
+				Code:         parliagenesis.DevnetGovTokenContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TimelockContract),
+				Code:         parliagenesis.DevnetTimelockContract,
+			},
+			{
+				ContractAddr: common.HexToAddress(TokenRecoverPortalContract),
+				Code:         parliagenesis.DevnetTokenRecoverPortalContract,
+			},
+		},
+	}
+
 	parliaGenesisUpgrade[defaultNet] = &Upgrade{
 		UpgradeName: "parliaGenesis",
 		Configs: []*UpgradeConfig{
@@ -1324,6 +1399,8 @@ func applyParliaGenesisUpgrade(config *params.ChainConfig, blockNumber *big.Int,
 		network = abcoreMainNet
 	case params.ABCoreTestGenesisHash:
 		network = abcoreTestNet
+	case params.ABCoreDevnetGenesisHash:
+		network = abcoreDevNet
 	default:
 		network = defaultNet
 	}

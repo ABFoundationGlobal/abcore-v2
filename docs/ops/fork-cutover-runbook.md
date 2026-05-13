@@ -203,7 +203,10 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($N).miner'"
 
 # 3. b N extraData 含 validator 列表（长度 > 196 hex）
 ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($N).extraData.length'"
-# 期望 ≥ 314 hex chars (vanity 64 + N×40 validator addresses + seal 130 + 余项)
+# 期望 ≥ 396 hex chars 给 5 个 validator
+# 公式："0x" 前缀 2 + vanity 64 + N×40 validators + seal 130
+#   → 5 validators = 396; 7 validators = 476; 21 validators = 1036
+# post-Luban 每个 validator 多 96 hex（48 字节 BLS pubkey），此阈值仅作下界保持安全。
 
 # 4. ValidatorSet 系统合约已部署
 ssh val-1 "docker exec abcore geth attach --exec '\
@@ -217,6 +220,8 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($((N-1))).extraDa
 
 参考 [devnet-upgrade-plan.md "Parlia 切换完整验证清单"](devnet-upgrade-plan.md) 的完整后置检查项。
 
+**Devnet 自动化**：上述 5 项检查 + §3.5 post 的 BAD BLOCK 扫描已在 [devnet-ops/jenkins/Jenkinsfile.rolling](https://github.com/ABFoundationGlobal/devnet-ops/blob/master/jenkins/Jenkinsfile.rolling) 的 "升级后 - Fork 验证 (§3.4)" stage 自动执行（仅在 `pgb != nil && pgb <= head <= pgb + 1000` 窗口内跑一次；其他情况 SKIP）。Mainnet/testnet 的 Phase 2 cutover 仍是手工执行本节命令。
+
 ### 3.5 Abort 标准
 
 任意一项触发即 abort，进入 [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md)：
@@ -229,6 +234,8 @@ ssh val-1 "docker exec abcore geth attach --exec 'eth.getBlock($((N-1))).extraDa
   - 任何节点 head 卡住 ≥ 2 分钟不推进
   - 任何节点反复报 BAD BLOCK
   - 节点之间 b N hash 不一致
+
+**Devnet 自动化**："tip ≥ N - 60 且仍有节点未升级" 在 [Jenkinsfile.rolling](https://github.com/ABFoundationGlobal/devnet-ops/blob/master/jenkins/Jenkinsfile.rolling) 的 "升级前 - Phase 2 安全余量检查 (§3.5 pre)" stage 自动 abort；"head 卡住" 由前后两个 "跨节点一致性检查" stage 间接检测（如果 head 不动，commonHeight 不变，PR #2 的 hash 校验仍跑但不会进 Phase 2 验证窗口）；"反复 BAD BLOCK" 和 "b N hash 不一致" 在 "升级后 - Fork 验证 (§3.4)" stage 自动 abort。
 
 ---
 

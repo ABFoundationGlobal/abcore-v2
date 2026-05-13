@@ -192,6 +192,11 @@ var (
 		Usage:    "ABCore test network: pre-configured Clique PoA test network (chain ID 26888)",
 		Category: flags.EthCategory,
 	}
+	ABCoreDevnetFlag = &cli.BoolFlag{
+		Name:     "abcore.devnet",
+		Usage:    "ABCore dev network: 5-validator Clique PoA dev network (chain ID 17140)",
+		Category: flags.EthCategory,
+	}
 	EnableBALFlag = &cli.BoolFlag{
 		Name:     "enablebal",
 		Usage:    "Enable block access list feature, validator will generate BAL for each block",
@@ -1405,6 +1410,7 @@ var (
 	TestnetFlags = []cli.Flag{
 		ChapelFlag,
 		ABCoreTestnetFlag,
+		ABCoreDevnetFlag,
 	}
 	// NetworkFlags is the flag group of all built-in supported networks.
 	NetworkFlags = append([]cli.Flag{BSCMainnetFlag, ABCoreFlag}, TestnetFlags...)
@@ -1490,6 +1496,9 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params.ABCoreMainnetBootnodes
 	case ctx.Bool(ABCoreTestnetFlag.Name):
 		urls = params.ABCoreTestnetBootnodes
+	case ctx.Bool(ABCoreDevnetFlag.Name):
+		// Devnet uses static-nodes.toml for peer discovery — no bootnodes.
+		urls = nil
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)
 }
@@ -2097,7 +2106,7 @@ func setRequiredBlocks(ctx *cli.Context, cfg *ethconfig.Config) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags, don't allow network id override on preset networks
-	flags.CheckExclusive(ctx, BSCMainnetFlag, ABCoreFlag, ABCoreTestnetFlag, DeveloperFlag, NetworkIdFlag, OverrideGenesisFlag)
+	flags.CheckExclusive(ctx, BSCMainnetFlag, ABCoreFlag, ABCoreTestnetFlag, ABCoreDevnetFlag, DeveloperFlag, NetworkIdFlag, OverrideGenesisFlag)
 	flags.CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 
 	// Set configurations from CLI flags
@@ -2459,6 +2468,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = 26888
 		}
 		cfg.Genesis = core.DefaultABCoreTestGenesisBlock()
+	case ctx.Bool(ABCoreDevnetFlag.Name) || cfg.NetworkId == 17140:
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 17140
+		}
+		cfg.Genesis = core.DefaultABCoreDevnetGenesisBlock()
 	case ctx.String(OverrideGenesisFlag.Name) != "":
 		f, err := os.Open(ctx.String(OverrideGenesisFlag.Name))
 		if err != nil {
@@ -2896,6 +2910,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultABCoreGenesisBlock()
 	case ctx.Bool(ABCoreTestnetFlag.Name):
 		genesis = core.DefaultABCoreTestGenesisBlock()
+	case ctx.Bool(ABCoreDevnetFlag.Name):
+		genesis = core.DefaultABCoreDevnetGenesisBlock()
 	case ctx.Bool(DeveloperFlag.Name):
 		Fatalf("Developer chains are ephemeral")
 	}
