@@ -426,17 +426,21 @@ var (
 	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0). Two
 	// intentional differences:
 	//   1. ChainID: 17140 (vs mainnet 36888, testnet 26888)
-	//   2. ParliaGenesisBlock: nil until Phase 2 cutover height is chosen
+	//   2. ParliaGenesisBlock: scheduled at block 50000 for Phase 2 rehearsal
 	// Used to rehearse the Phase 2 (Clique → Parlia) cutover before scheduling
 	// the same change for testnet / mainnet.
 	//
-	// NOTE: ParliaGenesisBlock = nil here matches the first V2 image (pure Clique).
-	// When you cut a release that schedules the consensus switch, replace nil with
-	// big.NewInt(N) where N satisfies the safety-margin formula in
-	// docs/ops/fork-cutover-runbook.md §3.2:
-	//   N >= current_head + (per_node_restart_time × num_validators × 3) / clique_period
-	// Recommended: pick N >= current head + 1 hour worth of blocks (= +1200 blocks
-	// at period=3s) so the rolling cutover has comfortable margin.
+	// Phase 2 schedule (v0.2.0 / docs/ops/devnet-upgrade-plan.md Upgrade 1):
+	//   ParliaGenesisBlock = 50000
+	//   Target activation time: 2026-05-14 ~08:00 UTC
+	//   Calculation basis (measured 2026-05-13 21:02 UTC):
+	//     - head=#36871 at ts=1778706139
+	//     - measured period: 3.03 s/block (over last 100 blocks)
+	//     - blocks to target: ~13,023
+	//     - estimated arrival of #50000: 2026-05-14 ~08:05 UTC
+	//     - safety margin (50000 − 36871 = 13,129 blocks ≈ 11 h)
+	//       far exceeds runbook §3.2 recommended +1200 blocks (1 h).
+	// See docs/ops/fork-cutover-runbook.md §3.2 for the N selection formula.
 	ABCoreDevnetChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(17140),
 		HomesteadBlock:      big.NewInt(0),
@@ -467,10 +471,10 @@ var (
 		PlatoBlock:      nil,
 		HertzBlock:      nil,
 		HertzfixBlock:   nil,
-		// TODO(phase-2): replace nil with big.NewInt(N) when the devnet cutover
-		// block height is chosen. See docs/ops/fork-cutover-runbook.md §3.2 for
-		// the N selection formula.
-		ParliaGenesisBlock: nil,
+		// Phase 2 cutover scheduled at block 50000 (target activation
+		// 2026-05-14 ~08:00 UTC). See the chain-config doc above for the
+		// rationale and the runbook reference.
+		ParliaGenesisBlock: big.NewInt(50000),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		Parlia:             &ParliaConfig{},
 	}

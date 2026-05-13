@@ -164,7 +164,8 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Clique, "devnet Clique config must be set")
 	require.Equal(t, uint64(3), devCfg.Clique.Period, "devnet Clique period")
 	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
-	require.Nil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock is nil until Phase 2 cutover is scheduled")
+	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock is scheduled for Phase 2 cutover")
+	require.Equal(t, int64(50000), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 50000 (target activation 2026-05-14 ~08:00 UTC)")
 
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
@@ -206,9 +207,26 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	// Use a non-zero head and time so CheckCompatible cannot trivially
 	// shortcut on block-zero handling — this is the regime a real rolling
 	// upgrade hits, where the chain has been producing blocks for hours.
+	//
+	// Head=10000 simulates "rolling upgrade happens well before the
+	// scheduled ParliaGenesisBlock=50000". storedCfg has no ParliaGenesisBlock
+	// field (omitempty in v1.13.15 genesis.json) — that's the forward-
+	// scheduling case where the new config adds a fork ahead of head.
+	// CheckCompatible must report no error: stored=nil → new=50000 with
+	// head=10000 < 50000 means the fork hasn't been crossed yet, so changing
+	// the value is always safe.
 	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 10_000, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig is not backward-compatible with the "+
 			"stored config produced by devnet-ops/Jenkinsfile.init (post PR #4): %v", err)
+	}
+
+	// Sanity: also verify head=49000 (close to but still before PGB=50000)
+	// produces no error. This is the realistic state during rolling-upgrade
+	// just before crossing — Layer A test scripts + Layer B runbook + Layer C
+	// engine check all gate on this exact moment. CheckCompatible must not
+	// be the one that breaks here.
+	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 49_000, 1_700_000_000); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=49000 (just before PGB): %v", err)
 	}
 }
 
