@@ -362,6 +362,8 @@ func prepare(ctx *cli.Context) {
 		log.Info("Starting ABCore on mainnet...")
 	case ctx.IsSet(utils.ABCoreTestnetFlag.Name):
 		log.Info("Starting ABCore on testnet...")
+	case ctx.IsSet(utils.ABCoreDevnetFlag.Name):
+		log.Info("Starting ABCore on devnet...")
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if !ctx.IsSet(utils.CacheFlag.Name) && !ctx.IsSet(utils.NetworkIdFlag.Name) {
@@ -369,6 +371,7 @@ func prepare(ctx *cli.Context) {
 		if !ctx.IsSet(utils.ChapelFlag.Name) &&
 			!ctx.IsSet(utils.ABCoreFlag.Name) &&
 			!ctx.IsSet(utils.ABCoreTestnetFlag.Name) &&
+			!ctx.IsSet(utils.ABCoreDevnetFlag.Name) &&
 			!ctx.IsSet(utils.DeveloperFlag.Name) {
 			// Nope, we're really on mainnet. Bump that cache up!
 			log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096)
