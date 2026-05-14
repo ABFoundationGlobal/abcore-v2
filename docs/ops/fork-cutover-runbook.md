@@ -148,6 +148,20 @@ geth attach --exec 'admin.nodeInfo.protocols.eth.config.parliaGenesisBlock' \
 # 3. 当前 head
 HEAD=$(geth attach --exec 'eth.blockNumber' ipc:/var/lib/abcore/geth.ipc)
 echo "current head: $HEAD"
+
+# 4. Blockscout (or any non-node downstream indexer) is consensus-ready.
+# Specifically Blockscout's BLOCK_TRANSFORMER must be 'base', NOT 'clique'.
+# A 'clique' transformer will silently fabricate one fake miner address
+# per Parlia block after cutover (see §6 changelog entry below for the
+# DevNet 2026-05-14 incident). Verify on the Blockscout host:
+#
+#   docker inspect <blockscout-backend-container> \
+#     --format '{{range .Config.Env}}{{println .}}{{end}}' \
+#     | grep BLOCK_TRANSFORMER
+#   # expected: BLOCK_TRANSFORMER=base
+#
+# If it shows 'clique', stop the cutover prep and switch first — see
+# docs/ops/devnet-upgrade-plan.md "Blockscout pre-cutover checklist".
 ```
 
 **挑选 N**：
@@ -275,4 +289,5 @@ DevNet 测试套件历史上用 stop-all 是因为 testing 简化（让所有节
 
 ## 6. Changelog
 
+- **1.1 (2026-05-14)** — 在 §3.3 前置条件加 Blockscout BLOCK_TRANSFORMER 检查。DevNet Phase 2 cutover 后发现 Blockscout 在 Parlia 块上 ecrecover 出垃圾地址（每块一个），原因是 `BLOCK_TRANSFORMER=clique` 配错。详见 [devnet-upgrade-plan.md "Blockscout pre-cutover checklist"](devnet-upgrade-plan.md#blockscout-pre-cutover-checklist)。
 - **1.0 (2026-05-07)** — 初版。基于 DevNet 测试中发现的 stop-window race（详见 [`incidents/seal-deadlock-2026-05-07/`](incidents/seal-deadlock-2026-05-07/)），系统化记录 Phase 2 cutover 的 race 模式和 rolling 升级 SOP。

@@ -251,6 +251,68 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 > **⚠️ Cutover 操作步骤参考 [fork-cutover-runbook.md](fork-cutover-runbook.md)。** 该 runbook 详述了"为什么 Phase 2 必须 rolling 升级（不能 stop-all）"、安全余量计算、abort 标准、后置验证。本节只列 N 的设定与块 N 自动行为，不重复 cutover 流程。
 
+<a id="blockscout-pre-cutover-checklist"></a>
+**Blockscout pre-cutover checklist：**
+
+任何下游 indexer 都要在 cutover 之前就把共识切换适配做完。Blockscout 的具体动作是确认 `BLOCK_TRANSFORMER=base`（默认值）而**不是** `clique`。
+
+| 阶段 | RPC `eth_getBlockByNumber` 返回的 `miner` | 正确的 Blockscout 配置 |
+|---|---|---|
+| Clique (Phase 1) | `0x0000...0000`（go-ethereum 的 Clique `Author()` **不做** ECDSA recovery，直接返回 raw `header.Coinbase`） | `BLOCK_TRANSFORMER=clique` 也能用，但 `base` 也能用（前者 Blockscout 自己 ecrecover，后者拿到的 miner 就是零地址 — 准确反映 header 内容） |
+| Parlia (Phase 2+) | 真实 validator 地址（Parlia 引擎的 `Author()` 内部做了正确的 signer recovery） | **必须** `BLOCK_TRANSFORMER=base`。`clique` 会把 Parlia extraData 后 65 字节当 Clique seal 去 ecrecover，每个块算出一个**确定性但毫无意义**的伪地址，污染 `addresses` 表。 |
+
+Blockscout 在启动时一次性读取 `BLOCK_TRANSFORMER`，**不支持按块号切换**。所以唯一可行的策略是从一开始就用 `base`。`clique` 这个值是早期为兼容老旧不填 miner 字段的 RPC 节点留的兜底，现代 geth/abcore 不需要。
+
+**Cutover 前的操作步骤（在 Blockscout 部署服务器上）：**
+
+```bash
+# 1. 查看当前值
+docker inspect <blockscout-backend-container> \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep BLOCK_TRANSFORMER
+
+# 2. 如果是 clique，改成 base：
+#    在 blockscout 的 docker-compose override 文件（例如 geth-clique-consensus.yml）里：
+#       BLOCK_TRANSFORMER: 'base'
+#    然后重启 backend：
+#       docker compose up -d --force-recreate backend
+
+# 3. 验证生效
+docker inspect <blockscout-backend-container> \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep BLOCK_TRANSFORMER
+# 期望: BLOCK_TRANSFORMER=base
+```
+
+**如果错过了 pre-cutover，cutover 后才发现问题**（症状：dashboard 的 `total_addresses` 每秒涨，但链上 tx 极少）：
+
+```bash
+# 1. 改 BLOCK_TRANSFORMER=base 并重启 backend（如上）
+#
+# 2. 触发 Parlia 区块 refetch（让 base transformer 重写 miner）：
+psql -U blockscout -c "
+  INSERT INTO missing_block_ranges (from_number, to_number, priority)
+  VALUES (<current_head>, <PGB>, 5);"
+# (range 写法：from_number > to_number，indexer 从高到低拉)
+#
+# 3. 等 indexer 跑完（~1 分钟/几千块），然后清理孤儿地址：
+psql -U blockscout -c "
+  DELETE FROM addresses
+  WHERE contract_code IS NULL
+    AND (nonce IS NULL OR nonce = 0)
+    AND (fetched_coin_balance IS NULL OR fetched_coin_balance = 0)
+    AND hash NOT IN (SELECT DISTINCT miner_hash FROM blocks WHERE miner_hash IS NOT NULL)
+    AND hash NOT IN (SELECT DISTINCT from_address_hash FROM transactions
+                     UNION SELECT DISTINCT to_address_hash FROM transactions
+                     WHERE to_address_hash IS NOT NULL);"
+#
+# 4. last_fetched_counters.addresses_count 是 cached 值，会在下一个
+#    Blockscout 内部 recount 周期自动更新（≤ 1 小时）。不急可以等；
+#    急了可 DELETE 那一行让下次请求即时 recount。
+```
+
+DevNet 2026-05-14 cutover 验证过这套补救流程，约 1 分钟完成 2400 块 refetch。
+
 **params/config.go 修改：**
 ```go
 // N = 30001（示例值：第一个 Clique epoch 结束后的首块，避免 epoch boundary 冲突）
