@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-_REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+_REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
 
 if [[ -z "${GETH:-}" ]]; then
   echo "[$(date +'%H:%M:%S')] Building v2 binary (set GETH=... to skip)..."
