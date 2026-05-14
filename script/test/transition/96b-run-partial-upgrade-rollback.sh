@@ -377,6 +377,13 @@ if [[ "$val3_fork_hash" != "null" && "$val3_fork_hash" == "$val1_fork_hash" ]]; 
 fi
 log "val-3 diverged at block ${PARLIA_GENESIS_BLOCK} (hash=${val3_fork_hash:-<N/A, stuck before fork>}) — network split confirmed"
 
+# Give val-3 extra time to emit post-fork log output (seal attempts, import
+# errors, peer rejections) so the operator can observe the diverged behaviour.
+log "Letting val-3 run for 15 s to collect post-fork log output..."
+sleep 15
+val3_head_after=$(head_number "$GETH" "$IPC3" 2>/dev/null || echo "?")
+log "val-3 head after observation window: ${val3_head_after}"
+
 # Record the pre-rollback anchor data.
 pre_rollback_hash=$(block_hash_at "$GETH" "$IPC1" "$ROLLBACK_TO")
 [[ -n "$pre_rollback_hash" && "$pre_rollback_hash" != "null" ]] || die "block ${ROLLBACK_TO} not found on val-1"
