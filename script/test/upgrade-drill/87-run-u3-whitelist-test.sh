@@ -653,13 +653,15 @@ else
   fail "ValidatorWhitelistUpdated: some events have whitelisted=false (unexpected)"
 fi
 
-# 6d. Count WhitelistEnabledUpdated events
+# 6d. WhitelistEnabledUpdated events — initialize() sets whitelistEnabled=true directly
+# in storage (no emit); the event is only fired via updateParam("whitelistEnabled",...).
+# Expect 0 events from initialization.
 we_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_WL_ENABLED" "0x1" "latest")
-we_event_count=$(python3 -c "import json; print(len(json.loads('''${we_logs}''')))" 2>/dev/null || echo "0")
-if [[ "$we_event_count" -eq 1 ]]; then
-  ok "WhitelistEnabledUpdated: exactly 1 event emitted (whitelistEnabled = true at init)"
+we_event_count=$(python3 -c "import json; print(len(json.loads('''${we_logs}''')))" 2>/dev/null || echo "-1")
+if [[ "$we_event_count" -eq 0 ]]; then
+  ok "WhitelistEnabledUpdated: 0 events at init (whitelistEnabled set directly in storage, not via emit)"
 else
-  fail "WhitelistEnabledUpdated: expected 1 event, got ${we_event_count}"
+  fail "WhitelistEnabledUpdated: expected 0 events at init, got ${we_event_count}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -756,11 +758,15 @@ expect_success "7e whitelistEnabled(flag=1) from GovHub" "$DATA_7E"
 # Phase 8 — T-6.g: TokenRecoverPortal.SOURCE_CHAIN_ID constant
 #
 # Calls SOURCE_CHAIN_ID() on TokenRecoverPortal (0x3000) and ABI-decodes the
-# returned string. Expects "Binance-Chain-Tigris" (updated by genesis-contract
-# PR #4 from testnet "Binance-Chain-Ganges" to mainnet "Binance-Chain-Tigris").
+# returned string. In the abchain-local genesis, generate.py overrides
+# source_chain_id to "AB-Chain-Local" (the local drill identifier). This
+# confirms the bytecode was produced by the abchain-local command, not a
+# stale or wrong build.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "Phase 8: T-6.g — TokenRecoverPortal.SOURCE_CHAIN_ID constant"
+
+EXPECTED_SOURCE_CHAIN_ID="AB-Chain-Local"
 
 raw=$(eth_call_raw "$TOKEN_RECOVER_PORTAL" "0x${SEL_SOURCE_CHAIN_ID}")
 if [[ -z "$raw" || "$raw" == "0x" ]]; then
@@ -779,12 +785,10 @@ s = data[offset+32:offset+32+length].decode('utf-8', errors='replace')
 print(s)
 " 2>/dev/null || echo "ERROR:decode_failed")
 
-  if [[ "$chain_id" == "Binance-Chain-Tigris" ]]; then
-    ok "SOURCE_CHAIN_ID() == \"Binance-Chain-Tigris\" (post-PR #4 genesis bytecode confirmed)"
-  elif [[ "$chain_id" == "Binance-Chain-Ganges" ]]; then
-    fail "SOURCE_CHAIN_ID() == \"Binance-Chain-Ganges\" (pre-PR #4 bytecode; genesis must be regenerated)"
+  if [[ "$chain_id" == "$EXPECTED_SOURCE_CHAIN_ID" ]]; then
+    ok "SOURCE_CHAIN_ID() == \"${EXPECTED_SOURCE_CHAIN_ID}\" (abchain-local bytecode confirmed)"
   else
-    fail "SOURCE_CHAIN_ID(): unexpected value \"${chain_id}\""
+    fail "SOURCE_CHAIN_ID(): expected \"${EXPECTED_SOURCE_CHAIN_ID}\", got \"${chain_id}\" (wrong genesis bytecode?)"
   fi
 fi
 
