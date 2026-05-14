@@ -238,11 +238,83 @@ period and 24-hour timelock; it is tested in cloud testnet scope (E-2/S-1).
 The jailed-validator path (getValidatorElectionInfo returns 0 regardless of
 whitelist status) requires a real slash event and is also in cloud testnet scope.
 
-**Planned — requires GovHub system-call path (not yet implemented):**
+**T-6.c — `WHITELIST_VOTING_POWER` arithmetic correctness** (`87-run-u3-whitelist-test.sh`, Phase 0, runs automatically with T-6.b):
 
-- *`updateParam` boundary*: submit `updateParam` at the boundary value (expect accept) and one unit
-  beyond (expect revert) for `minSelfDelegationBNB` (max `10_000_000_000 AB`) and `proposalThreshold`
-  (max `10_000_000_000 govAB`)
+Verifies the `WHITELIST_VOTING_POWER` constant baked into the deployed StakeHub bytecode and
+confirms the Parlia normalization path (`÷1e10` then cast to `uint64`) produces exactly
+`type(uint64).max`:
+
+- `WHITELIST_VP == 184467440737095516150000000000` (= `uint64_max × 1e10`, exact decimal)
+- `WHITELIST_VP mod 1e10 == 0` — no truncation during Parlia normalization
+- `WHITELIST_VP ÷ 1e10 == 18446744073709551615` (= `type(uint64).max`) — any stake-based
+  voting power (real stake `÷ 1e10 ≤ ~10^16`) is guaranteed to fall below this value
+
+**T-6.d — `initialize()` event-log audit** (`87-run-u3-whitelist-test.sh`, Phase 6):
+
+Uses `eth_getLogs` against the live node to confirm that the assembly loop in
+`StakeHub.initialize()` correctly decoded `INIT_WHITELIST_BYTES` and emitted one event per address:
+
+- Exactly 3 `ValidatorWhitelistUpdated(addr, true)` events, addresses matching
+  `VAL1_CONSENSUS`, `VAL2_CONSENSUS`, `VAL3_CONSENSUS` (the local drill genesis is generated
+  with `abchain-local` mode, which packs all 3 validator consensus addresses into `INIT_WHITELIST_BYTES`)
+- Exactly 1 `WhitelistEnabledUpdated(true)` event
+- Event count mismatch → assembly loop decoded wrong number of addresses;
+  address mismatch → `INIT_WHITELIST_BYTES` encoding in the bytecode is wrong
+
+**T-6.e — `updateParam` input validation (rejection tests)** (`87-run-u3-whitelist-test.sh`, Phase 7):
+
+Uses `eth_call` with `from: GovHub (0x1007)` to simulate the governance call path (satisfies the
+`onlyGov` modifier) without submitting a real transaction. Tests five sub-cases for the three new keys:
+
+- `addToValidatorWhitelist` with 32-byte value (not 20 bytes) → `InvalidValue` revert
+- `addToValidatorWhitelist` with zero address (20 zero bytes) → `InvalidValue` revert
+- `removeFromValidatorWhitelist` with zero address → `InvalidValue` revert
+- `whitelistEnabled` with flag `0x02` (exceeds 0/1 range) → `InvalidValue` revert
+- `whitelistEnabled` with flag `0x01` from GovHub → success (`"result": "0x"`)
+
+Note: the full on-chain governance path (BSCGovernor → BSCTimelock → GovHub → real `updateParam`
+transaction, 7-day vote + 24-hour timelock) remains in cloud testnet scope (E-2/S-1).
+
+**T-6.f — Whitelist vs. large-stake ordering invariant** (`87-run-u3-whitelist-test.sh`, Phase 3 extension):
+
+Extends the existing Phase 3 `stateDiff` simulation: in addition to clearing val1's whitelist
+storage slot, simultaneously overrides val1's staked-amount slot to `WHITELIST_VOTING_POWER × 2`.
+Confirms that whitelisted validators always outrank non-whitelisted validators regardless of stake size:
+
+- val2 and val3 (whitelisted) still return `WHITELIST_VOTING_POWER`
+- val1 (non-whitelisted, with artificially inflated stake) returns a voting power below
+  `WHITELIST_VOTING_POWER` — any real stake `÷ 1e10 ≤ ~10^16`, far below
+  `type(uint64).max ≈ 1.8×10^19`
+
+**T-6.g — `TokenRecoverPortal.SOURCE_CHAIN_ID` constant** (`87-run-u3-whitelist-test.sh`, Phase 8):
+
+Calls `SOURCE_CHAIN_ID()` on `TokenRecoverPortal` (`0x0000000000000000000000000000000000003000`)
+and ABI-decodes the returned `string`, confirming the genesis bytecodes were built from
+genesis-contract PR #4 or later:
+
+- Expected: `"Binance-Chain-Tigris"` (mainnet chain name; PR #4 updated from testnet
+  `"Binance-Chain-Ganges"`)
+- FAIL if result is `"Binance-Chain-Ganges"` — bytecodes predate PR #4; genesis must be regenerated
+
+**T-6.h — Full governance path: whitelist update via BSCGovernor → BSCTimelock → GovHub** (`88-run-u3-governance-whitelist.sh`):
+
+Exercises the complete on-chain governance path using the reduced timeouts baked into the
+`abchain-local` genesis (10-block voting period × 3 s/block ≈ 30 s, 0 after-quorum extension,
+3-second timelock delay = 1 block). A new address is added to the validator whitelist through a real governance
+proposal that all 3 validators vote on:
+
+1. `BSCGovernor.propose([GovHub], [0], [updateParam("addToValidatorWhitelist", newAddr, StakeHub)], description)`
+2. Wait for voting period (10 blocks × 3 s ≈ 30 s)
+3. `BSCGovernor.castVote(proposalId, 1)` from each of the 3 validators
+4. Wait for voting period to end, confirm state == `Succeeded`
+5. `BSCGovernor.queue(...)` — enqueue in BSCTimelock
+6. Wait for timelock delay (3 s), confirm state == `Queued`
+7. `BSCGovernor.execute(...)` — execute the queued transaction
+8. `StakeHub.validatorWhitelist(newAddr) == true` — whitelist entry confirmed on-chain
+
+Note: `propose_start_threshold = 0` and `init_voting_period = 10` are set only in the
+`abchain-local` genesis configuration; production values are `10_000_000 govAB` supply
+threshold and `28800 blocks` (7 days) respectively.
 
 ## U-4 — Cancun + Haber + HaberFix (timestamp activation)
 

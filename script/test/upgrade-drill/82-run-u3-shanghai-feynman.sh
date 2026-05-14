@@ -461,10 +461,14 @@ if [[ "$FAIL" -gt 0 ]]; then
   exit 1
 fi
 
-# ── T-6.b: whitelist election-priority test ───────────────────────────────────
+# ── T-6.b through T-6.h: whitelist tests (stateDiff + full governance path) ──
 log ""
-log "Running T-6.b whitelist election-priority test..."
+log "Running T-6.b through T-6.g whitelist tests..."
 GETH="${GETH}" bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
+
+log ""
+log "Running T-6.h full governance whitelist test (≈ 1 min: 10-block vote + 3-s timelock)..."
+GETH="${GETH}" bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo "PASS (U-3). Nodes remain running. Run 07-snapshot.sh before U-4."
