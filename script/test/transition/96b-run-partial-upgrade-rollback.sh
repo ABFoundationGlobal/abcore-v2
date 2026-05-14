@@ -144,7 +144,7 @@ launch_validator() {
       --http \
       --http.addr 127.0.0.1 \
       --http.port "$http" \
-      --http.api "eth,net,web3,clique,parlia,admin,personal,miner,debug" \
+      --http.api "eth,net,web3,clique,admin,miner,debug$([ -n "$toml" ] && echo ",parlia")" \
       --syncmode full \
       --mine \
       --miner.etherbase "$addr" \
