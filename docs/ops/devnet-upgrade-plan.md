@@ -256,12 +256,16 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 任何下游 indexer 都要在 cutover 之前就把共识切换适配做完。Blockscout 的具体动作是确认 `BLOCK_TRANSFORMER=base`（默认值）而**不是** `clique`。
 
-| 阶段 | RPC `eth_getBlockByNumber` 返回的 `miner` | 正确的 Blockscout 配置 |
-|---|---|---|
-| Clique (Phase 1) | `0x0000...0000`（go-ethereum 的 Clique `Author()` **不做** ECDSA recovery，直接返回 raw `header.Coinbase`） | `BLOCK_TRANSFORMER=clique` 也能用，但 `base` 也能用（前者 Blockscout 自己 ecrecover，后者拿到的 miner 就是零地址 — 准确反映 header 内容） |
-| Parlia (Phase 2+) | 真实 validator 地址（Parlia 引擎的 `Author()` 内部做了正确的 signer recovery） | **必须** `BLOCK_TRANSFORMER=base`。`clique` 会把 Parlia extraData 后 65 字节当 Clique seal 去 ecrecover，每个块算出一个**确定性但毫无意义**的伪地址，污染 `addresses` 表。 |
+**关键事实**：`eth_getBlockByNumber` 返回的 `miner` 字段直接来源于 `header.Coinbase`（见 [`internal/ethapi/api.go:1459`](../../internal/ethapi/api.go#L1459) 的 `"miner": head.Coinbase`），**不经过 `engine.Author()` 这个路径**。所以谁往 `header.Coinbase` 写什么，RPC 就返回什么。两个阶段下 Coinbase 的来源不同：
 
-Blockscout 在启动时一次性读取 `BLOCK_TRANSFORMER`，**不支持按块号切换**。所以唯一可行的策略是从一开始就用 `base`。`clique` 这个值是早期为兼容老旧不填 miner 字段的 RPC 节点留的兜底，现代 geth/abcore 不需要。
+| 阶段 | `header.Coinbase` 来源 | RPC `miner`（= 直接 marshal 的 Coinbase） | `base` transformer 的行为 |
+|---|---|---|---|
+| Clique (Phase 1) | Clique 协议规定 sealer 通过 extraData 末尾 65 字节签名表达，**`header.Coinbase` 必须为 `0x0000…0000`**（`consensus/clique/clique.go` 的 verify 规则会拒绝非零 Coinbase 的非 epoch 块） | `0x0000…0000` | 拿到 `0x0` —— 准确反映 header 内容。若想看真实 signer，得另外调 `clique_getSigner(blockHash)`（Blockscout 在 `base` 模式下不会这么做）。 |
+| Parlia (Phase 2+) | Parlia `Prepare()` 在 sealing 前把当前 validator 地址写进 `header.Coinbase`（见 [`consensus/parlia/parlia.go:1296`](../../consensus/parlia/parlia.go#L1296) 的 `header.Coinbase = p.val`） | 真实 validator 地址 | 拿到真实 validator 地址 —— 这就是 sealer 自己盖在 header 上的身份。 |
+
+参考：`Clique.Author()` 是会做 ecrecover 的（[`clique.go:215-217`](../../consensus/clique/clique.go#L215-L217)），但 `eth_getBlockByNumber` 不调用它；`Parlia.Author()` 反而**不**做 recovery，直接返回 `header.Coinbase`（[`parlia.go:340-342`](../../consensus/parlia/parlia.go#L340-L342)）—— 因为 Parlia 在 Prepare 时已经把正确地址写进 Coinbase 了，不需要再 recover。Blockscout `clique` transformer 的逻辑是**忽略 RPC `miner`**，自己拿 header extraData 的末尾 65 字节当 Clique seal 去 ecrecover；这在 Parlia 阶段就坏掉了 —— Parlia extraData 的布局是 `vanity(32) + validators(N×20) + vote_attestation + seal(65)`，末尾 65 字节确实是 seal，但 ecrecover 的是 Parlia 域的签名（hash 域不同），结果是个**确定性但毫无意义**的伪地址，每块一个，污染 `addresses` 表。
+
+Blockscout 在启动时一次性读取 `BLOCK_TRANSFORMER`，**不支持按块号切换**。所以唯一可行的策略是从一开始就用 `base`。`clique` 这个值是早期为兼容老旧不填 miner 字段的 RPC 节点留的兜底，现代 geth/abcore 的 RPC `miner` 在两个共识阶段都准确，`base` 在两个阶段都对。
 
 **Cutover 前的操作步骤（在 Blockscout 部署服务器上）：**
 
@@ -281,7 +285,12 @@ docker inspect <blockscout-backend-container> \
 docker inspect <blockscout-backend-container> \
   --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep BLOCK_TRANSFORMER
-# 期望: BLOCK_TRANSFORMER=base
+# 三种可能输出，按下面这张表判断：
+#   BLOCK_TRANSFORMER=base    → OK，显式安全配置
+#   (空输出)                  → OK，未显式设置时 Blockscout 默认就是 base，安全。但建议
+#                                显式写 BLOCK_TRANSFORMER=base 让本检查命令始终有可读
+#                                输出，便于审计与值班交接。
+#   BLOCK_TRANSFORMER=clique  → BLOCKER，必须先改成 base 再进入 cutover
 ```
 
 **如果错过了 pre-cutover，cutover 后才发现问题**（症状：dashboard 的 `total_addresses` 每秒涨，但链上 tx 极少）：

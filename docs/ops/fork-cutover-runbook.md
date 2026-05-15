@@ -158,10 +158,15 @@ echo "current head: $HEAD"
 #   docker inspect <blockscout-backend-container> \
 #     --format '{{range .Config.Env}}{{println .}}{{end}}' \
 #     | grep BLOCK_TRANSFORMER
-#   # expected: BLOCK_TRANSFORMER=base
 #
-# If it shows 'clique', stop the cutover prep and switch first — see
-# docs/ops/devnet-upgrade-plan.md "Blockscout pre-cutover checklist".
+# 三种可能输出：
+#   BLOCK_TRANSFORMER=base    → OK，显式安全配置
+#   (空输出)                  → OK，未显式设置时 Blockscout 默认就是 base，安全。
+#                                推荐显式写 BLOCK_TRANSFORMER=base，让本检查始终
+#                                有可读输出（便于审计与值班交接）。
+#   BLOCK_TRANSFORMER=clique  → BLOCKER。停下 cutover 准备，先改成 base 再继续
+#                                ——详见 docs/ops/devnet-upgrade-plan.md
+#                                "Blockscout pre-cutover checklist"。
 ```
 
 **挑选 N**：
