@@ -256,34 +256,6 @@ log "  BSCGovernor.quorumNumerator()   = ${QUORUM}"
 
 log "=== End diagnostics ==="
 
-# ── Phase 0: self-delegate govAB voting power ─────────────────────────────────
-# ERC20Votes requires an explicit delegate(self) call to create a checkpoint;
-# without it, getVotes() == 0 regardless of token balance and propose() reverts
-# with "Governor: proposer votes below proposal threshold".
-log ""
-log "Phase 0: self-delegating govAB for all validators"
-SEL_DELEGATE=$(selector "delegate(address)")
-for entry in "1:${VAL1}:${IPC1}" "2:${VAL2}:${IPC2}" "3:${VAL3}:${IPC3}"; do
-  n="${entry%%:*}"; rest="${entry#*:}"; addr="${rest%%:*}"; ipc="${rest##*:}"
-  padded_addr="$(printf '%064s' "${addr#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')"
-  delegate_data="0x${SEL_DELEGATE}${padded_addr}"
-  tx=$(send_tx_wait "$ipc" "$addr" "$GOV_TOKEN" "0x0" 100000 "$delegate_data" "delegate(val${n})") \
-    || { fail "delegate(val${n}) failed"; exit 1; }
-  ok "val${n} self-delegated (tx=${tx:0:14}…)"
-done
-# Wait 2 extra blocks so the checkpoint is recorded before propose() reads
-# getPastVotes(proposer, clock()-1).
-log "  Waiting 6 s for delegation checkpoints to be finalised (≥ 2 blocks)..."
-sleep 6
-
-# Re-check votes after delegation
-VOTES_HEX=$(eth_call_raw "$GOV_TOKEN" "0x${SEL_GET_VOTES}${VAL1_PADDED}")
-VOTES_DISPLAY=$(python3 -c "
-v = int('${VOTES_HEX}' if '${VOTES_HEX}'.startswith('0x') else '0x0', 16)
-print(f'{v/10**18:.6f} govAB  ({v} wei)')
-" 2>/dev/null || echo "$VOTES_HEX")
-log "  govToken.getVotes(val1) after delegation = ${VOTES_DISPLAY}"
-
 # ── Phase 1: build GovHub.updateParam(string,bytes,address) calldata ──────────
 log ""
 log "Phase 1: encoding GovHub.updateParam calldata"
