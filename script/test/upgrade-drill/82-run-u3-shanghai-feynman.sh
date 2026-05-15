@@ -390,7 +390,7 @@ for n in 1 2 3; do
   # ABI-encode delegate(address operatorAddress, bool delegateVotePower)
   # address = 32-byte padded; bool true = 0x...01
   padded_addr=$(printf '%064s' "${addr#0x}" | tr ' ' '0')
-  padded_bool=$(printf '%064d' 1)
+  padded_bool=$(printf '%064x' 1)
   del_calldata="0x${_DEL_SEL}${padded_addr}${padded_bool}"
   # msg.value must be >= minDelegationBNBChange (1 ether)
   _del_tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \

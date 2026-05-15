@@ -25,7 +25,7 @@
 #   whitelisted validators.
 #
 # T-6.g  TokenRecoverPortal.SOURCE_CHAIN_ID constant (Phase 8):
-#   Confirms the deployed bytecode returns "Binance-Chain-Tigris" (post-PR #4).
+#   Confirms the deployed bytecode returns "AB-Chain-Local" (abchain-local genesis mode).
 #
 # Prerequisites:
 #   - U-3 (82-run-u3-shanghai-feynman.sh) has completed successfully.
@@ -538,11 +538,22 @@ print(resp.get("result",""))' 2>/dev/null || echo "")
     else
       fail "getValidatorElectionInfo: expected 2 with WHITELIST_VOTING_POWER, got ${wl_count}"
     fi
-    # Check that val1's power (stake-based, even inflated) < WHITELIST_VP
-    # The StakeCredit totalPooledBNB slot override doesn't always reflect in election
-    # because getValidatorElectionInfo uses the credit contract's view function.
-    # We rely on the count check above; the math invariant holds by construction.
-    ok "T-6.f invariant: WHITELIST_VOTING_POWER > any stake-based power (uint64_max × 1e10 >> totalPooledBNB ÷ 1e10)"
+    # Assert val1's returned voting power < WHITELIST_VP.
+    # Even if the StakeCredit storage override is not visible (credit contract view
+    # may use its own internal accounting), val1 is off the whitelist so its power
+    # must be stake-based (÷1e10 ≤ ~10^16), which is far below WHITELIST_VP.
+    _t6f_ok=0
+    python3 -c "
+import sys
+vp = int('${val1_power}' or '0')
+wl = int('${WHITELIST_VP}')
+sys.exit(0 if vp < wl else 1)
+" 2>/dev/null || _t6f_ok=1
+    if [[ "$_t6f_ok" -eq 0 ]]; then
+      ok "T-6.f invariant: val1 voting power (${val1_power}) < WHITELIST_VP (whitelist always beats stake-based power)"
+    else
+      fail "T-6.f invariant: val1 voting power (${val1_power}) >= WHITELIST_VP (unexpected)"
+    fi
   fi
 fi
 
@@ -585,7 +596,8 @@ log "  or double-sign slash event. This path is in cloud testnet scope (E-2/S-1)
 # WhitelistEnabledUpdated events emitted by StakeHub.initialize(). The local
 # genesis uses abchain-local mode, which packs all 3 validator consensus
 # addresses into INIT_WHITELIST_BYTES (3 × 20 = 60 bytes), so we expect exactly
-# 3 ValidatorWhitelistUpdated events and 1 WhitelistEnabledUpdated event.
+# 3 ValidatorWhitelistUpdated events and 0 WhitelistEnabledUpdated events
+# (initialize() sets whitelistEnabled directly in storage without emitting).
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "Phase 6: T-6.d — initialize() event-log audit"
@@ -615,7 +627,10 @@ else
 fi
 
 # 6b. Verify each event's address matches a local validator consensus address
-python3 - <<PYEOF
+# Use || to capture exit code under set -euo pipefail (plain heredoc exits the
+# script on failure before $? can be checked in the following if statement).
+_addr_ok=0
+python3 - <<PYEOF 2>/dev/null || _addr_ok=$?
 import json, sys
 logs = json.loads('''${wl_logs}''')
 expected = {
@@ -633,9 +648,8 @@ extra   = found - expected
 if missing or extra:
     print(f"MISMATCH  missing={missing} extra={extra}", file=sys.stderr)
     sys.exit(1)
-print("OK")
 PYEOF
-if [[ $? -eq 0 ]]; then
+if [[ "$_addr_ok" -eq 0 ]]; then
   ok "ValidatorWhitelistUpdated: all 3 event addresses match VAL1/VAL2/VAL3 consensus addresses"
 else
   fail "ValidatorWhitelistUpdated: event addresses do not match expected validator consensus addresses"
@@ -677,7 +691,9 @@ fi
 log ""
 log "Phase 7: T-6.e — updateParam input validation (rejection tests via eth_call)"
 
-# Helper: expect a revert from eth_call_from_govhub
+# Helper: expect a revert from eth_call_from_govhub.
+# Only error:* counts as a revert; result:* (including result:0x from a void
+# function) always means the call succeeded and the test should fail.
 expect_revert() {
   local label="$1" data="$2"
   local result
@@ -686,24 +702,11 @@ expect_revert() {
     error:*)
       ok "${label}: call reverted as expected"
       ;;
-    result:0x|result:)
-      ok "${label}: call reverted (empty result treated as revert)"
+    result:*)
+      fail "${label}: expected revert but call succeeded (result=${result#result:})"
       ;;
     *)
-      # Check if the result could be a revert (non-zero result from updateParam would be odd)
-      if python3 -c "
-import json
-r = '''${result}'''.replace('result:','').strip()
-# updateParam returns nothing; a non-empty non-error result could be onlyCoinbase skip
-if r and r != '0x':
-    print('unexpected_success')
-else:
-    print('ok')
-" 2>/dev/null | grep -q 'unexpected_success'; then
-        fail "${label}: expected revert, got success — InvalidValue check may not be reached"
-      else
-        ok "${label}: call reverted (empty result)"
-      fi
+      fail "${label}: unexpected response '${result}'"
       ;;
   esac
 }
