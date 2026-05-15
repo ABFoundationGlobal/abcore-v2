@@ -61,6 +61,49 @@ if "error" in resp: print("0x"); sys.exit(0)
 print(resp.get("result","0x"))' || echo "0x"
 }
 
+# Simulate a call and print the revert reason (Error(string) or custom error selector).
+# Usage: eth_call_debug <to> <data> [from_addr]
+eth_call_debug() {
+  local to="$1" data="$2" from_addr="${3:-}"
+  local body resp
+  if [[ -n "$from_addr" ]]; then
+    body="{\"to\":\"${to}\",\"from\":\"${from_addr}\",\"data\":\"${data}\"}"
+  else
+    body="{\"to\":\"${to}\",\"data\":\"${data}\"}"
+  fi
+  resp=$(curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[${body},\"latest\"],\"id\":1}" \
+    2>/dev/null || echo '{}')
+  echo "$resp" | python3 -c "
+import json, sys
+resp = json.load(sys.stdin)
+if 'error' in resp:
+    err = resp['error']
+    msg = err.get('message','(no message)')
+    data = err.get('data','') or ''
+    if isinstance(data, str) and data.startswith('0x08c379a0'):
+        raw = bytes.fromhex(data[10:])
+        try:
+            length = int.from_bytes(raw[32:64], 'big')
+            reason = raw[64:64+length].decode('utf-8', 'replace')
+        except Exception as e:
+            reason = f'(decode error: {e})'
+        print(f'  [dry-run] REVERT  Error({repr(reason)})  raw={data[:66]}...')
+    elif isinstance(data, str) and len(data) >= 10:
+        print(f'  [dry-run] REVERT  custom error selector=0x{data[2:10]}  raw={data[:66]}...')
+    elif data:
+        print(f'  [dry-run] REVERT  {msg}  data={data}')
+    else:
+        print(f'  [dry-run] REVERT  {msg}  (no revert data)')
+elif 'result' in resp:
+    r = resp['result']
+    print(f'  [dry-run] SUCCESS  result={r[:66] if r else \"0x\"}')
+else:
+    print(f'  [dry-run] unexpected response: {json.dumps(resp)[:120]}')
+"
+}
+
 selector() { attach_exec "$GETH" "$IPC1" "web3.sha3('${1}').substring(2,10)" 2>/dev/null; }
 
 # Send tx via ipc; wait up to 60 s for receipt; echo tx hash to stdout or print
@@ -84,7 +127,10 @@ send_tx_wait() {
       2>/dev/null || echo "p")
     if [[ "$status" == "0x1" || "$status" == "1" ]]; then echo "$tx"; return 0; fi
     if [[ "$status" == "0x0" || "$status" == "0" ]]; then
-      log "  FAIL: ${label}: tx reverted (tx=${tx})" >&2; return 1
+      log "  FAIL: ${label}: tx reverted (tx=${tx})" >&2
+      log "  [post-revert] eth_call dry-run to get revert reason..." >&2
+      eth_call_debug "$to_addr" "$data" "$from_addr" >&2 || true
+      return 1
     fi
   done
   log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2; return 1
@@ -138,6 +184,68 @@ for _s in SEL_PROPOSE SEL_CAST_VOTE SEL_QUEUE SEL_EXECUTE SEL_WL_MEMBER SEL_GOV_
     || die "${_s}: bad selector '${!_s}' (geth attach failed?)"
 done
 log "  Selectors ready."
+
+# ── Pre-flight diagnostics (governance contract state) ─────────────────────────
+log ""
+log "=== Governance diagnostics ==="
+
+# BSCGovernor bytecode size
+code_len=$(( ( ${#code} - 2 ) / 2 ))
+log "  BSCGovernor bytecode size       = ${code_len} bytes"
+
+# govToken address from BSCGovernor.token()
+SEL_TOKEN=$(selector "token()")
+GOV_TOKEN_RAW=$(eth_call_raw "$GOVERNOR" "0x${SEL_TOKEN}")
+GOV_TOKEN="0x${GOV_TOKEN_RAW: -40}"
+log "  BSCGovernor.token()             = ${GOV_TOKEN}"
+
+# govToken.totalSupply()
+SEL_TOTAL_SUPPLY=$(selector "totalSupply()")
+TOTAL_SUPPLY_HEX=$(eth_call_raw "$GOV_TOKEN" "0x${SEL_TOTAL_SUPPLY}")
+TOTAL_SUPPLY_DISPLAY=$(python3 -c "
+v = int('${TOTAL_SUPPLY_HEX}' if '${TOTAL_SUPPLY_HEX}'.startswith('0x') else '0x0', 16)
+print(f'{v/10**18:.6f} govAB  ({v} wei)')
+" 2>/dev/null || echo "$TOTAL_SUPPLY_HEX")
+log "  govToken.totalSupply()          = ${TOTAL_SUPPLY_DISPLAY}"
+
+# govToken.getVotes(val1) — proposer must have >= proposalThreshold votes
+SEL_GET_VOTES=$(selector "getVotes(address)")
+VAL1_PADDED="$(printf '%064s' "${VAL1#0x}" | tr ' ' '0')"
+VOTES_HEX=$(eth_call_raw "$GOV_TOKEN" "0x${SEL_GET_VOTES}${VAL1_PADDED}")
+VOTES_DISPLAY=$(python3 -c "
+v = int('${VOTES_HEX}' if '${VOTES_HEX}'.startswith('0x') else '0x0', 16)
+print(f'{v/10**18:.6f} govAB  ({v} wei)')
+" 2>/dev/null || echo "$VOTES_HEX")
+log "  govToken.getVotes(val1)         = ${VOTES_DISPLAY}"
+
+# BSCGovernor.proposalThreshold()
+SEL_THRESHOLD=$(selector "proposalThreshold()")
+THRESHOLD_HEX=$(eth_call_raw "$GOVERNOR" "0x${SEL_THRESHOLD}")
+THRESHOLD_DISPLAY=$(python3 -c "
+v = int('${THRESHOLD_HEX}' if '${THRESHOLD_HEX}'.startswith('0x') else '0x0', 16)
+print(f'{v/10**18:.6f} govAB  ({v} wei)')
+" 2>/dev/null || echo "$THRESHOLD_HEX")
+log "  BSCGovernor.proposalThreshold() = ${THRESHOLD_DISPLAY}"
+
+# BSCGovernor.votingPeriod()
+SEL_VOTING_PERIOD=$(selector "votingPeriod()")
+VOTING_PERIOD_HEX=$(eth_call_raw "$GOVERNOR" "0x${SEL_VOTING_PERIOD}")
+VOTING_PERIOD=$(python3 -c "print(int('${VOTING_PERIOD_HEX}' if '${VOTING_PERIOD_HEX}'.startswith('0x') else '0x0', 16))" 2>/dev/null || echo "$VOTING_PERIOD_HEX")
+log "  BSCGovernor.votingPeriod()      = ${VOTING_PERIOD} blocks"
+
+# BSCGovernor.votingDelay()
+SEL_VOTING_DELAY=$(selector "votingDelay()")
+VOTING_DELAY_HEX=$(eth_call_raw "$GOVERNOR" "0x${SEL_VOTING_DELAY}")
+VOTING_DELAY=$(python3 -c "print(int('${VOTING_DELAY_HEX}' if '${VOTING_DELAY_HEX}'.startswith('0x') else '0x0', 16))" 2>/dev/null || echo "$VOTING_DELAY_HEX")
+log "  BSCGovernor.votingDelay()       = ${VOTING_DELAY} blocks"
+
+# BSCGovernor.quorumNumerator() — check if set
+SEL_QUORUM=$(selector "quorumNumerator()")
+QUORUM_HEX=$(eth_call_raw "$GOVERNOR" "0x${SEL_QUORUM}")
+QUORUM=$(python3 -c "print(int('${QUORUM_HEX}' if '${QUORUM_HEX}'.startswith('0x') else '0x0', 16))" 2>/dev/null || echo "$QUORUM_HEX")
+log "  BSCGovernor.quorumNumerator()   = ${QUORUM}"
+
+log "=== End diagnostics ==="
 
 # ── Phase 1: build GovHub.updateParam(string,bytes,address) calldata ──────────
 log ""
@@ -195,6 +303,11 @@ off3 = off2 + len(calldatas_enc)//2
 head = p32(off0) + p32(off1) + p32(off2) + p32(off3)
 print('0x' + sel + head + targets_enc + values_enc + calldatas_enc + desc_enc)
 ")
+
+log "  PROPOSE_DATA size: $((( ${#PROPOSE_DATA} - 2 ) / 2)) bytes"
+log "  PROPOSE_DATA prefix: ${PROPOSE_DATA:0:90}..."
+log "  Dry-run eth_call propose() from val1 (${VAL1})..."
+eth_call_debug "$GOVERNOR" "$PROPOSE_DATA" "$VAL1"
 
 PROPOSE_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 500000 "$PROPOSE_DATA" "propose()") || exit 1
 
