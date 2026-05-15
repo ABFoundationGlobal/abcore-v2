@@ -190,7 +190,28 @@ the activation block is confirmed.
 3. Wait for chain block timestamp to reach activation time
 4. Script sends one `StakeHub.createValidator()` tx per validator over IPC
    (registration must complete before the next UTC midnight breathe block)
-5. Observe for 3 minutes
+5. Script sends one `StakeHub.delegate(operator, delegateVotePower=true)` tx per validator
+   (see **govAB voting-power note** below)
+6. Observe for 3 minutes
+
+**govAB voting-power note (two-step design):**
+
+`createValidator()` stakes BNB into the validator's `StakeCredit` contract and calls
+`GovToken.sync()` to mint the equivalent govAB tokens — but it does **not** activate
+voting-power checkpoints.  `GovToken.delegateVote()` (the ERC20Votes checkpoint writer) is
+`onlyStakeHub`-gated and is only reachable via `StakeHub.delegate(operatorAddress,
+delegateVotePower=true)`.  Without this second call, `GovToken.getVotes(validator) == 0`
+regardless of token balance, and any `BSCGovernor.propose()` call would revert with
+`"Governor: proposer votes below proposal threshold"`.
+
+The separation is intentional: it lets operators delegate their governance votes to a
+separate address rather than to themselves.  The drill self-delegates by calling
+`StakeHub.delegate(operator, true)` with `minDelegationBNBChange = 1 BNB`; the extra BNB
+also enters the stake pool (nothing is burned).
+
+Both steps are performed automatically by `82-run-u3-shanghai-feynman.sh`:
+- Phase 5 (`createValidator`) — block-production registration
+- Phase 5b (`StakeHub.delegate`) — govAB voting-power activation
 
 **Verification:**
 - Post-activation blocks include a `withdrawals` field (Shanghai EIP-4895)
