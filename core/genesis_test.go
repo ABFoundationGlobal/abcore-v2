@@ -375,3 +375,26 @@ func TestVerkleGenesisCommit(t *testing.T) {
 		t.Fatal("could not find node")
 	}
 }
+
+// TestDefaultABCoreDevnetGenesisBlockHash pins the contract that
+// DefaultABCoreDevnetGenesisBlock() produces a block #0 whose hash exactly
+// matches params.ABCoreDevnetGenesisHash, which is the hash GetBuiltInChainConfig
+// uses to look up ABCoreDevnetChainConfig.
+//
+// Any change to Timestamp, Difficulty, GasLimit, ExtraData, Alloc, or the
+// chain config inside DefaultABCoreDevnetGenesisBlock() that alters the
+// resulting genesis hash will fail this test in CI. If you intentionally
+// changed any of those, the live devnet's block #0 hash also changed, and
+// params.ABCoreDevnetGenesisHash must be updated in lockstep.
+//
+// Live hash captured 2026-05-11 from ab-d4:19545:
+//
+//	0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+func TestDefaultABCoreDevnetGenesisBlockHash(t *testing.T) {
+	got := DefaultABCoreDevnetGenesisBlock().ToBlock().Hash()
+	want := params.ABCoreDevnetGenesisHash
+	if got != want {
+		t.Fatalf("DefaultABCoreDevnetGenesisBlock hash mismatch\n  want %s\n  got  %s",
+			want.Hex(), got.Hex())
+	}
+}

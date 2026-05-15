@@ -414,6 +414,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	// Defense-in-depth check for the Clique→Parlia stop-window race: if the
+	// on-disk fork block is Clique-form but the active chain config requires
+	// Parlia-form there, refuse to start with a clear recovery message rather
+	// than silently coming up with a broken Parlia snapshot cache. No-op on
+	// non-dual chains and on chains that have not yet reached the fork height.
+	// See docs/ops/fork-cutover-runbook.md for the operational SOP this guards.
+	if err := dual.VerifyForkBlockOnDisk(chainConfig, eth.blockchain.CurrentBlock(), eth.blockchain.GetHeaderByNumber); err != nil {
+		return nil, err
+	}
+
 	// Initialize filtermaps log index.
 	// Auto-enable checkpoint file
 	checkpointFile := filepath.Join(stack.DataDir(), "geth", "filtermap_checkpoints.json")

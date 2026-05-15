@@ -15,6 +15,7 @@ For the full 6-round sequential upgrade drill (v0.1 → v0.7), see
 | T-1 variant | `98-run-vote-change.sh`            | Pre-fork `clique_propose` vote-in of a 4th validator | ✅ |
 | T-1.5 | `97-run-late-restart.sh`           | Late-restart (chain already past fork block when node starts) | ✅ |
 | T-1.6 | `96-run-rollback-drill.sh`         | Coordinated rollback (Parlia→Clique rewind via debug.setHead) | ✅ |
+| T-1.7 | `96b-run-partial-upgrade-rollback.sh` | Partial-upgrade failure: 1-of-3 upgraded early → fork passes → PR #86 startup check fires on remaining nodes → recovery via PGB=nil maintenance mode | ✅ |
 | T-2 | `95-run-epoch-test.sh`             | Parlia epoch boundary; validator set transition at first and second epoch | ✅ |
 | T-3 | `94-run-tx-test.sh`                | User transaction submitted pre-fork, mined in first post-fork Parlia blocks | ✅ |
 | T-4 | `93-run-clique-epoch-fork-test.sh` | Fork block coincides with Clique epoch boundary (`CLIQUE_EPOCH == PARLIA_GENESIS_BLOCK`) | ✅ |
@@ -57,6 +58,18 @@ For the full 6-round sequential upgrade drill (v0.1 → v0.7), see
 - Each node performs `debug.setHead(N-1)` to rewind the local canonical head to the last Clique block
 - Validators restart without the Parlia override and resume sealing pure Clique blocks from block `N`
 - The rollback verifies that block `N-1` is preserved, block `N` is replaced, the Clique validator set is restored, and the `ValidatorSet` system contract is absent on the rolled-back chain
+
+### T-1.7 — Partial-upgrade failure + startup-check-triggered rollback
+
+- All 3 validators start in pure Clique mode
+- Only val-3 is upgraded to `PGB=N`; val-1 and val-2 remain on pure Clique (PGB=nil)
+- The chain crosses `ParliaGenesisBlock`: val-1 and val-2 maintain a 2-of-3 Clique majority and keep sealing Clique-form blocks at and past N; val-3 cannot import these blocks under Parlia rules and diverges (either stuck at N-1 or on a solo-Parlia fork)
+- val-1 and val-2 are stopped and the operator applies `PGB=N` to them ("late upgrade")
+- **PR #86 startup check fires on both**: their databases have a Clique-form block at `ParliaGenesisBlock`. Both refuse to start with `dual-consensus startup check: refusing to start`. The test asserts the check fires and verifies the error message
+- Recovery: val-1 and val-2 restart in maintenance mode with `PGB=nil` (startup check is a no-op when `ParliaGenesisBlock == nil`). All three nodes call `debug.setHead(N-1)`
+- All 3 restart in pure Clique mode; the chain recovers past `N`
+- Verifies: block `N-1` hash preserved, block `N` re-mined under Clique, `ValidatorSet` contract absent, Clique signer set restored
+- Exercises the "startup check fires" branch of `docs/ops/consensus-switch-rollback-runbook.md` that is NOT covered by T-1.6 (which starts from a healthy Parlia state where the check does not fire)
 
 ### T-2 — Parlia epoch boundary validator set transition
 
@@ -179,6 +192,9 @@ GETH=./build/bin/geth bash script/test/transition/97-run-late-restart.sh
 
 # T-1.6: rollback drill
 GETH=./build/bin/geth bash script/test/transition/96-run-rollback-drill.sh
+
+# T-1.7: partial-upgrade failure + startup-check-triggered rollback
+GETH=./build/bin/geth bash script/test/transition/96b-run-partial-upgrade-rollback.sh
 
 # T-2: Parlia epoch boundary (~3 minutes)
 GETH=./build/bin/geth bash script/test/transition/95-run-epoch-test.sh
