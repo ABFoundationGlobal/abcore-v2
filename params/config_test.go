@@ -167,6 +167,27 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock is scheduled for Phase 2 cutover")
 	require.Equal(t, int64(50000), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 50000 (target activation 2026-05-14 ~08:00 UTC)")
 
+	// Phase 3 (v0.3.0): LondonBlock + 13 BSC block forks all scheduled at the
+	// same block 165400 (target activation 2026-05-18 ~08:00 UTC). Asserting
+	// each field explicitly makes diffs and grep-by-field-name easy when the
+	// schedule changes again. 165400 is a Parlia epoch boundary (% 200 == 0)
+	// so the first Luban-form epoch block lands exactly on the fork.
+	require.NotNil(t, devCfg.LondonBlock, "devnet LondonBlock is scheduled for v0.3.0")
+	require.Equal(t, int64(165400), devCfg.LondonBlock.Int64(), "devnet LondonBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.RamanujanBlock.Int64(), "devnet RamanujanBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.NielsBlock.Int64(), "devnet NielsBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.MirrorSyncBlock.Int64(), "devnet MirrorSyncBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.BrunoBlock.Int64(), "devnet BrunoBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.EulerBlock.Int64(), "devnet EulerBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.GibbsBlock.Int64(), "devnet GibbsBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.NanoBlock.Int64(), "devnet NanoBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.MoranBlock.Int64(), "devnet MoranBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.PlanckBlock.Int64(), "devnet PlanckBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.LubanBlock.Int64(), "devnet LubanBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.PlatoBlock.Int64(), "devnet PlatoBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.HertzBlock.Int64(), "devnet HertzBlock = 165400")
+	require.Equal(t, int64(165400), devCfg.HertzfixBlock.Int64(), "devnet HertzfixBlock = 165400")
+
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
 }
@@ -227,6 +248,22 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	// be the one that breaks here.
 	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 49_000, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=49000 (just before PGB): %v", err)
+	}
+
+	// Phase 3 (v0.3.0) just-before-fork case: head=165000 is the realistic
+	// rolling-upgrade window for the LondonBlock + 13 BSC forks cutover at
+	// block 165400. The stored config here mirrors what's actually on disk
+	// after the live devnet crossed PGB=50000 on 2026-05-14: the prior V2
+	// binary already wrote `parliaGenesisBlock=50000` into the persisted
+	// chain config. A new V2 binary booting at head=165000 sees that stored
+	// config and must accept the additional LondonBlock+13 BSC forks as a
+	// forward-scheduled compatible change (head < 165400). Timestamp is set
+	// to ~2026-05-18 07:53 UTC, a few minutes before the projected fork
+	// arrival, so the compat check sees a current post-PGB clock.
+	storedCfgPostPGB := *storedCfg
+	storedCfgPostPGB.ParliaGenesisBlock = big.NewInt(50_000)
+	if err := storedCfgPostPGB.CheckCompatible(ABCoreDevnetChainConfig, 165_000, 1_779_080_000); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=165000 (just before LondonBlock=165400, post-PGB stored config): %v", err)
 	}
 }
 
