@@ -114,6 +114,7 @@ server-1 升级示例：
 
 路由由 `core/systemcontracts/upgrade.go` `applyParliaGenesisUpgrade` 在 PGB cutover 那一刻执行，不需要任何 flag。各网络 bytecode 不会跨链泄漏，链 ID / genesis hash 不同自动隔离。
 
+<a id="one-shot-bytecode"></a>
 ### 一次性字节码部署（One-shot bytecode deployment）—— ABCore 关键设计
 
 **与 BSC 上游不同**：BSC mainnet/chapelnet 在 ParliaGenesis 时部署的是**早期 Parlia 时代的合约 bytecode**，之后每个硬分叉（MirrorSync / Bruno / Euler / ... / **Luban** / Plato / ...）通过 `*Upgrade[network]` map 增量替换若干合约的 bytecode。这是 BSC 历史演进的产物：每次新增功能时升级对应合约。
@@ -191,7 +192,7 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 **重要校准（PR #99 加入）**：要区分**两层影响**：
 
-**Layer 1 — 系统合约 bytecode 影响**：得益于 ABCore 的[一次性字节码部署](#一次性字节码部署one-shot-bytecode-deploymentabcore-关键设计)设计，所有 13 个 BSC block fork 对 ABCore 系统合约 bytecode **都是 no-op**。`*Upgrade[abcoreXxx]` map 对 abcore* 网络全空，节点日志会看到 `"Empty upgrade config" network=ABCore* height=N` 是预期行为。**不要**因为日志里看到这条 INFO 就以为升级有问题。
+**Layer 1 — 系统合约 bytecode 影响**：得益于 ABCore 的[一次性字节码部署](#one-shot-bytecode)设计，所有 13 个 BSC block fork 对 ABCore 系统合约 bytecode **都是 no-op**。PR #99 起 `upgradeBuildInSystemContract` 对 ABCore 网络 early-return，所以 fork block 上**不会有任何**与 bytecode upgrade 相关的日志。如果运行的是 PR #99 之前的 image，会看到 `"Empty upgrade config" network=Default height=N`（INFO，每个 fork 一行）—— 那是 ABCore 网络落到 defaultNet 分支后 `applySystemContractUpgrade(nil, ...)` 产生的，**是当时的预期行为，不是 bug**，但 PR #99 起被消除。
 
 **Layer 2 — Parlia 引擎层 / chain-config gate 影响**：每个 fork 仍然按 chain config 顺序激活引擎层行为：
 
@@ -203,14 +204,19 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 | Plato | Parlia `IsOnPlato` 路径，fast-finality 投票 precompile 启用（无 vote address 时是 no-op）| no-op |
 | Hertz, Hertzfix | EIP gas 调整 | no-op（无 upgrade map）|
 
+**关于 Parlia epoch 长度**（ABCore-specific，与 BSC 上游不同）：
+BSC 上游 Parlia `defaultEpochLength = 200` (`consensus/parlia/parlia.go:58`)，但 ABCore PR #84 在 PGB cutover 时通过 `parlia.go:957-961` 把 `snap.EpochLength = Clique.Epoch`（devnet/testnet/mainnet 均为 **30000**）写入 Parlia snapshot。EpochLength 此后从 snapshot 读取，**不再回查 chain config**，且无任何 transition 路径改写它（Lorentz/Maxwell 的 transition 前置条件 `snap.EpochLength == 200` 在 ABCore 永远不成立）。
+**实测验证**：block 30000/60000/90000/120000/150000 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)。block 50000 (PGB) 也是 197B。
+**结论**：ABCore 上 Parlia 真正的 epoch boundary 是 30000 的倍数，**不是 BSC 默认的 200**。下面的"下一个 epoch block = 180000"按 30000 算。
+
 **v0.3.0 升级真正验证什么**：
 - ✓ EIP-1559 header schema（block 165400 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
-- ✓ Luban chain-config gate 生效后，**下一个 Parlia epoch block** （epoch=30000 时下个是 block 180000）会写 Luban-form 438B extraData
+- ✓ Luban chain-config gate 生效后，**下一个 Parlia epoch block** （ABCore epoch=30000，下一个是 block 180000）会写 Luban-form 438B extraData
 - ✓ 链推进无 errExtraSigners / errInvalidSpanValidators
 
 **不要验证什么**：
-- ✗ "fork block N 自身的 extraData 是 Luban-form" —— 如果 N 不是 epoch boundary（这是 ABCore 推荐的选址），N 的 extraData 还是 97B 是正确的，下个 epoch block 才会变 438B
-- ✗ "lubanUpgrade[abcoreDevNet] 被注册" —— 故意不注册，详见 [一次性字节码部署](#一次性字节码部署one-shot-bytecode-deploymentabcore-关键设计)
+- ✗ "fork block N 自身的 extraData 是 Luban-form" —— 如果 N 不是 Parlia epoch boundary（ABCore 是 30000 倍数，**不是** BSC 默认的 200），N 的 extraData 还是 97B 是正确的，下个 epoch block 才会变 438B
+- ✗ "lubanUpgrade[abcoreDevNet] 被注册" —— 故意不注册，详见 [一次性字节码部署](#one-shot-bytecode)
 
 ### 可合并的 fork
 
