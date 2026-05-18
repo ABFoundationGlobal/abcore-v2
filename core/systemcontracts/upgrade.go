@@ -1063,9 +1063,29 @@ func init() {
 	}
 
 	// ParliaGenesis: inject all Parlia system contracts at the transition block for networks
-	// migrating from Clique to Parlia. Bytecode files live in core/systemcontracts/parliagenesis/{mainnet,testnet,default}/.
+	// migrating from Clique to Parlia. Bytecode files live in core/systemcontracts/parliagenesis/{mainnet,testnet,devnet,default}/.
 	// Contracts not used by this network (e.g. cross-chain bridge) should be filled with
 	// their full BSC bytecode so that extcodesize checks pass and calls do not revert.
+	//
+	// ABCore-specific design — "one-shot bytecode deployment":
+	// Unlike BSC mainnet/chapelnet, which deploys an early-Parlia-era bytecode at
+	// ParliaGenesis and then upgrades incrementally at every subsequent hardfork
+	// (mirrorUpgrade, brunoUpgrade, ... lubanUpgrade, platoUpgrade, ...),
+	// ABCore deploys the *final, latest-version* system-contract bytecode in
+	// a single shot at ParliaGenesisBlock. The bytecode compiled into
+	// parliagenesis/{mainnet,testnet,devnet}/ already includes the full
+	// post-Hertz contract surface — getMiningValidators(), vote-address
+	// storage, StakeHub integration points, etc.
+	//
+	// Consequence: upgradeBuildInSystemContract early-returns for ABCore
+	// networks (see that function below). The chain-config gates (IsLuban,
+	// IsPlato, ...) still activate engine-level behaviour (extraData layout,
+	// vote attestation, EIP-1559 schema, etc.), and the contract bytecode
+	// already supports those code paths from block N.
+	//
+	// See docs/ops/devnet-upgrade-plan.md "One-shot system contract bytecode
+	// model" for the full rationale, including why we deviate from BSC
+	// upstream's incremental model.
 	parliaGenesisUpgrade[abcoreMainNet] = &Upgrade{
 		UpgradeName: "parliaGenesis",
 		Configs: []*UpgradeConfig{
@@ -1430,6 +1450,30 @@ func upgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 		return
 	}
 
+	// ABCore networks deploy the *final, latest-version* system-contract
+	// bytecode in one shot at ParliaGenesisBlock (see applyParliaGenesisUpgrade
+	// above and the parliaGenesisUpgrade[abcoreMainNet/abcoreTestNet/abcoreDevNet]
+	// entries). The deployed bytecode already includes the full post-Hertz
+	// contract surface — getMiningValidators(), vote-address storage,
+	// StakeHub integration points, etc. — so no subsequent BSC hardfork
+	// (Ramanujan ... Hertzfix and later) performs *any* bytecode replacement
+	// on ABCore state.
+	//
+	// Chain-config gates (IsLuban, IsPlato, ...) still activate engine-level
+	// behaviour (extraData layout, vote attestation, EIP-1559 schema, ...);
+	// only the bytecode-replacement path is short-circuited here.
+	//
+	// Do NOT remove this early return without also providing ABCore-specific
+	// bytecode in core/systemcontracts/{ramanujan,luban,...}/ — BSC mainnet
+	// bytecode in those upgrade maps embeds BSC-specific constants (validator
+	// addresses, governance contracts, chain IDs) and would corrupt ABCore
+	// state if applied. See docs/ops/devnet-upgrade-plan.md "One-shot system
+	// contract bytecode model" for the full rationale.
+	switch GenesisHash {
+	case params.ABCoreMainGenesisHash, params.ABCoreTestGenesisHash, params.ABCoreDevnetGenesisHash:
+		return
+	}
+
 	var network string
 	switch GenesisHash {
 	/* Add mainnet genesis hash */
@@ -1439,10 +1483,6 @@ func upgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 		network = chapelNet
 	case params.RialtoGenesisHash:
 		network = rialtoNet
-	case params.ABCoreMainGenesisHash:
-		network = abcoreMainNet
-	case params.ABCoreTestGenesisHash:
-		network = abcoreTestNet
 	default:
 		network = defaultNet
 	}
