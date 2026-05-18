@@ -23,6 +23,183 @@ For what each script currently tests, see [`README.md`](README.md).
 | `GovToken` | `sync` (via `createValidator`), `delegateVote` (via `StakeHub.delegate`), `getVotes` |
 | `TokenRecoverPortal` | `SOURCE_CHAIN_ID()` constant |
 
+**T-6 whitelist coverage detail** (scripts `87-run-u3-whitelist-test.sh` and `88-run-u3-governance-whitelist.sh`):
+
+| Sub-test | What is verified |
+|---|---|
+| T-6.b | Initial whitelist state read; `getValidatorElectionInfo` returns `WHITELIST_VOTING_POWER` for all 3 |
+| T-6.c | `WHITELIST_VOTING_POWER` arithmetic: `== uint64.max × 1e10`, exact divisibility, Parlia normalization |
+| T-6.d | `eth_getLogs` audit: 3 `ValidatorWhitelistUpdated(addr, true)` events from `initialize()`; 0 `WhitelistEnabledUpdated` |
+| T-6.e | `updateParam` rejection tests (5 cases): wrong-length address, zero address, flag > 1; success with `flag=1` |
+| T-6.f | Whitelist-vs-large-stake ordering invariant via dual `stateDiff` override |
+| T-6.g | `TokenRecoverPortal.SOURCE_CHAIN_ID()` returns `"AB-Chain-Local"` (abchain-local bytecode) |
+| T-6.h | Full governance path: `propose → castVote×3 → queue → execute → validatorWhitelist(newAddr)==true` |
+
+---
+
+## T-6 extensions — StakeHub whitelist deep coverage (PR #4)
+
+The changes introduced by PR #4 (`abcore-v2-genesis-contract`) add new contract
+logic paths that are only partially exercised by T-6.b–T-6.h.  The sub-tests
+below extend coverage of the same whitelist mechanism without duplicating what is
+already tested.
+
+**Scripts:** extend `87-run-u3-whitelist-test.sh` (stateDiff / read-only phases)
+and `88-run-u3-governance-whitelist.sh` (full governance phases).  
+**Prerequisite:** U-3 complete; T-6.b–T-6.h pass.
+
+### T-6.i — governance `removeFromValidatorWhitelist` (full on-chain path)
+
+T-6.h only exercises `addToValidatorWhitelist`.  This sub-test covers the
+symmetric removal path through the real governance pipeline.
+
+```
+Phase 1: encode GovHub.updateParam("removeFromValidatorWhitelist",
+                 val1_consensus_20bytes, StakeHub)
+Phase 2: BSCGovernor.propose → castVote(FOR)×3 → queue → execute
+Phase 3: verify StakeHub.validatorWhitelist(val1_consensus) == false
+Phase 4: verify getValidatorElectionInfo: val1 power < WHITELIST_VOTING_POWER
+          (reverts to stake-based power)
+Phase 5: verify ValidatorWhitelistUpdated(val1_consensus, false) event emitted
+```
+
+**Verify:** Removal is permanent until re-added; val1 is not jailed (still produces blocks).
+
+### T-6.j — governance `whitelistEnabled` toggle (off → on)
+
+T-6.e only dry-runs `flag=0x01`; this sub-test confirms the full on-chain toggle
+cycle with real governance transactions and verifies both directions.
+
+```
+# Part A: disable
+Phase 1: encode GovHub.updateParam("whitelistEnabled", 0x00..00, StakeHub)
+Phase 2: propose → vote → queue → execute
+Phase 3: verify StakeHub.whitelistEnabled() == false
+Phase 4: verify getValidatorElectionInfo: ALL validators revert to stake-based power
+          (no WHITELIST_VOTING_POWER returned)
+Phase 5: verify WhitelistEnabledUpdated(false) event
+
+# Part B: re-enable
+Phase 6: encode GovHub.updateParam("whitelistEnabled", 0x00..01, StakeHub)
+Phase 7: propose → vote → queue → execute
+Phase 8: verify StakeHub.whitelistEnabled() == true
+Phase 9: verify getValidatorElectionInfo: whitelisted validators return WHITELIST_VOTING_POWER again
+Phase 10: verify WhitelistEnabledUpdated(true) event
+```
+
+### T-6.k — `INIT_WHITELIST_BYTES` on-chain decode boundary verification
+
+Verify the assembly loop in `initialize()` decodes the packed bytes correctly
+at both the first and last address boundaries, and that the length is a multiple
+of 20.
+
+```
+Phase 1: eth_call StakeHub.INIT_WHITELIST_BYTES() — ABI-decode the raw bytes constant
+Phase 2: assert len(INIT_WHITELIST_BYTES) % 20 == 0
+Phase 3: assert len(INIT_WHITELIST_BYTES) / 20 == expected_addr_count
+Phase 4: for i in [0, count-1] (first and last):
+           decode addr[i] = INIT_WHITELIST_BYTES[i*20 : i*20+20]
+           assert addr[i] != 0x0
+Phase 5: cross-check: eth_call StakeHub.validatorWhitelist(addr[i]) == true for each decoded addr
+```
+
+**Verify:** byte-boundary decode matches the `shr(96, mload(...))` assembly logic;
+no off-by-one on the last address.
+
+### T-6.l — `getValidatorElectionInfo` mixed-state index correctness
+
+Phase 3 of `87` only counts "how many have WHITELIST_VP"; it does not verify
+*which index* maps to which validator.  This sub-test confirms that the returned
+arrays preserve the same order as `_validatorSet` enumeration regardless of
+whitelist status.
+
+```
+stateDiff: val1 whitelist slot → false; val2/val3 unchanged
+eth_call getValidatorElectionInfo(0, 3)
+          → (consensusAddrs[3], votingPowers[3], voteAddrs[3])
+verify: consensusAddrs[0] == val1_consensus  AND  votingPowers[0] < WHITELIST_VP
+verify: consensusAddrs[1] == val2_consensus  AND  votingPowers[1] == WHITELIST_VP
+verify: consensusAddrs[2] == val3_consensus  AND  votingPowers[2] == WHITELIST_VP
+```
+
+**Verify:** The contract does not re-sort by power; order is stable and predictable.
+
+### T-6.m — jailed validator overrides whitelist (priority check)
+
+The PR #4 logic is `if (jailed) → 0` **before** the whitelist check.  Verify
+that a jailed-but-whitelisted validator still gets voting power 0.
+
+```
+stateDiff: val1.jailed = true  (set Validator.jailed storage slot)
+           val1 remains in whitelist (no whitelist slot override)
+eth_call getValidatorElectionInfo(0, 3)
+verify: votingPowers[index_of_val1] == 0
+verify: val2/val3 (whitelisted, not jailed) still == WHITELIST_VP
+```
+
+**Verify:** Jailed status takes precedence over whitelist; whitelist does not
+resurrect a jailed validator's election weight.
+
+### T-6.n — `ValidatorWhitelistUpdated` event `data` field decoding
+
+T-6.d verifies event *count* and *topics[1]* (indexed address).  This sub-test
+additionally decodes the unindexed `bool whitelisted` from `data`.
+
+```
+# From initialization logs (already fetched in T-6.d):
+for each ValidatorWhitelistUpdated log from block 1:
+    verify log.data == 0x0000...0001  (whitelisted = true)
+
+# After T-6.i (removeFromValidatorWhitelist governance execution):
+eth_getLogs ValidatorWhitelistUpdated from T-6.i execute block
+verify log.topics[1] == val1_consensus (padded)
+verify log.data == 0x0000...0000  (whitelisted = false)
+```
+
+**Verify:** `data` encodes the boolean correctly for both `true` (add) and
+`false` (remove) paths.
+
+### T-6.o — `updateParam("addToValidatorWhitelist")` success path with storage read-back
+
+T-6.e Phase 7 tests rejection paths and one `whitelistEnabled` success path,
+but does not verify that a successful `addToValidatorWhitelist` actually writes
+to storage.  Use `eth_call` with `stateDiff` (no real governance round) to
+verify the write path.
+
+```
+# Dry-run: apply the updateParam calldata via eth_call with from=GovHub
+eth_call [from: GovHub(0x1007), to: StakeHub]
+         updateParam("addToValidatorWhitelist", newAddr_20bytes, StakeHub)
+         → result: 0x  (success)
+
+# Verify storage was written (stateDiff approach):
+compute keccak256(newAddr . slot_80) → storage key for validatorWhitelist[newAddr]
+eth_call [stateDiff: key → 0x1]
+         StakeHub.validatorWhitelist(newAddr)  → true
+```
+
+**Verify:** The calldata encoding is accepted; the storage key derivation for a
+new address matches the mapping layout confirmed in Phase 2 of `87`.
+
+### T-6.p — `INIT_WHITELIST_BYTES` constant vs. live `validatorWhitelist` storage cross-check
+
+T-6.d audits via event logs (reverse direction).  This sub-test reads the
+constant directly from chain, unpacks it in Python, and verifies each decoded
+address against live storage — providing independent confirmation that no address
+was silently dropped or corrupted during initialization.
+
+```
+Phase 1: eth_call StakeHub.INIT_WHITELIST_BYTES()  → raw bytes (ABI: bytes)
+Phase 2: python: unpack every 20-byte slice → [addr_0, addr_1, ...]
+Phase 3: for each addr:
+           eth_call StakeHub.validatorWhitelist(addr)  → must be true
+Phase 4: assert count(decoded) == count(ValidatorWhitelistUpdated events from T-6.d)
+```
+
+**Verify:** Every address encoded in `INIT_WHITELIST_BYTES` at compile time is
+present and active in the live `validatorWhitelist` mapping; constant and storage
+are in sync.
+
 ---
 
 ## T-7 — StakeHub: validator lifecycle edits
