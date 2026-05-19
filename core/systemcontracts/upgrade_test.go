@@ -1,13 +1,17 @@
 package systemcontracts
 
 import (
+	"context"
 	"crypto/sha256"
+	"log/slog"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/vm"
+	gethlog "github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
@@ -70,4 +74,84 @@ func TestUpgradeBuildInSystemContractNilValue(t *testing.T) {
 	GenesisHash = params.BSCGenesisHash
 
 	upgradeBuildInSystemContract(config, blockNumber, lastBlockTime, blockTime, statedb)
+}
+
+// recordingHandler is a slog.Handler that captures every Record's message
+// for assertion. Used by TestUpgradeBuildInSystemContractABCoreEarlyReturn
+// below to confirm that ABCore networks short-circuit before the
+// per-fork applySystemContractUpgrade(nil, ...) path can log
+// "Empty upgrade config".
+type recordingHandler struct {
+	records []slog.Record
+}
+
+func (h *recordingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *recordingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+// TestUpgradeBuildInSystemContractABCoreEarlyReturn pins the contract that
+// upgradeBuildInSystemContract early-returns for the three ABCore networks
+// (Main / Test / Devnet) before any per-fork applySystemContractUpgrade
+// is invoked. ABCore deploys the final-version system-contract bytecode
+// once at ParliaGenesisBlock (see parliaGenesisUpgrade[abcoreMainNet/...]
+// and the "One-shot bytecode deployment" section in docs/ops/devnet-upgrade-plan.md);
+// regressing this early return would re-introduce the misleading
+// "Empty upgrade config network=Default" INFO noise at every fork block
+// — and, worse, would expose ABCore state to BSC-mainnet hardfork
+// bytecode payloads if any *Upgrade[defaultNet] entries are ever added.
+//
+// The test sets the global GenesisHash to each ABCore genesis hash, calls
+// upgradeBuildInSystemContract at a block height that crosses every
+// implemented hardfork, and asserts that the captured slog records
+// contain no "Empty upgrade config" message. We use a far-future block
+// number so every IsOnXxx gate would fire if the early return were
+// removed.
+func TestUpgradeBuildInSystemContractABCoreEarlyReturn(t *testing.T) {
+	// Restore the global logger and GenesisHash after the test.
+	prevHash := GenesisHash
+	t.Cleanup(func() { GenesisHash = prevHash })
+
+	abCoreCases := []struct {
+		name string
+		hash common.Hash
+	}{
+		{"ABCoreMainnet", params.ABCoreMainGenesisHash},
+		{"ABCoreTestnet", params.ABCoreTestGenesisHash},
+		{"ABCoreDevnet", params.ABCoreDevnetGenesisHash},
+	}
+
+	// Pick a block far enough in the future that every IsOnXxx (Ramanujan
+	// through Plato) would trip if the early return were absent. The value
+	// is irrelevant beyond crossing all block-height-based forks; chain
+	// config is BSC's because we're only exercising upgradeBuildInSystemContract's
+	// network-routing path, not its config-correctness.
+	var (
+		config               = params.BSCChainConfig
+		blockNumber          = big.NewInt(1_000_000_000)
+		lastBlockTime uint64 = 2_000_000_000
+		blockTime     uint64 = 2_000_000_001
+		statedb       vm.StateDB
+	)
+
+	for _, tc := range abCoreCases {
+		t.Run(tc.name, func(t *testing.T) {
+			GenesisHash = tc.hash
+
+			handler := &recordingHandler{}
+			gethlog.SetDefault(gethlog.NewLogger(handler))
+
+			upgradeBuildInSystemContract(config, blockNumber, lastBlockTime, blockTime, statedb)
+
+			for _, r := range handler.records {
+				if strings.Contains(r.Message, "Empty upgrade config") {
+					t.Fatalf("%s: unexpected log %q at block %d — upgradeBuildInSystemContract should early-return for ABCore networks, leaving the per-fork applySystemContractUpgrade(nil, ...) path unreachable",
+						tc.name, r.Message, blockNumber.Int64())
+				}
+			}
+		})
+	}
 }
