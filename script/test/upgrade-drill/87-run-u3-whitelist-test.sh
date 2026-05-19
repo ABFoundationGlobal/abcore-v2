@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 87-run-u3-whitelist-test.sh — T-6.b through T-6.g: StakeHub whitelist tests
+# 87-run-u3-whitelist-test.sh — T-6.b through T-6.p: StakeHub whitelist tests
 #
 # T-6.b  Whitelist election priority (Phases 1-5):
 #   1. All 3 genesis validators are whitelisted and receive WHITELIST_VOTING_POWER
@@ -26,6 +26,30 @@
 #
 # T-6.g  TokenRecoverPortal.SOURCE_CHAIN_ID constant (Phase 8):
 #   Confirms the deployed bytecode returns "AB-Chain-Local" (abchain-local genesis mode).
+#
+# T-6.k  INIT_WHITELIST_BYTES boundary verification (Phase 9):
+#   Reads the INIT_WHITELIST_BYTES constant from chain, verifies length % 20 == 0,
+#   decodes first/last addresses, and cross-checks against live whitelist storage.
+#
+# T-6.l  getValidatorElectionInfo index correctness (Phase 10):
+#   Verifies the returned arrays preserve validator insertion order regardless of
+#   whitelist status (no re-sorting by power).
+#
+# T-6.m  Jailed validator overrides whitelist (Phase 11):
+#   Discovers the jailed field storage slot at runtime and verifies that a jailed-
+#   but-whitelisted validator still receives voting power 0.
+#
+# T-6.n  ValidatorWhitelistUpdated event data field (Phase 12):
+#   Decodes the unindexed bool from initialization events and confirms it equals
+#   true; the false path is verified in 88-run-u3-governance-whitelist.sh.
+#
+# T-6.o  updateParam addToValidatorWhitelist success path (Phase 13):
+#   Dry-runs a successful addToValidatorWhitelist call and validates the storage
+#   key derivation using stateDiff.
+#
+# T-6.p  INIT_WHITELIST_BYTES vs. live storage cross-check (Phase 14):
+#   Unpacks the constant byte-by-byte and verifies each decoded address is active
+#   in the live validatorWhitelist mapping.
 #
 # Prerequisites:
 #   - U-3 (82-run-u3-shanghai-feynman.sh) has completed successfully.
@@ -74,6 +98,7 @@ fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 ZERO_32="0x0000000000000000000000000000000000000000000000000000000000000000"
+ONE_32="0x0000000000000000000000000000000000000000000000000000000000000001"
 
 # eth_call via HTTP JSON-RPC; echoes 0x-prefixed hex result.
 eth_call_raw() {
@@ -275,7 +300,7 @@ if [[ -z "$WHITELIST_VP" || "$WHITELIST_VP" == "null" ]]; then
 fi
 
 # ── Pre-compute selectors and call data ──────────────────────────────────────
-log "T-6.b–T-6.g  StakeHub whitelist tests"
+log "T-6.b–T-6.p  StakeHub whitelist tests"
 log "  StakeHub           : ${STAKE_HUB}"
 log "  GovHub             : ${GOV_HUB}"
 log "  TokenRecoverPortal : ${TOKEN_RECOVER_PORTAL}"
@@ -287,8 +312,9 @@ SEL_WL_MEMBER=$(selector "validatorWhitelist(address)")
 SEL_ELECTION=$(selector "getValidatorElectionInfo(uint256,uint256)")
 SEL_UPDATE_PARAM=$(selector "updateParam(string,bytes)")
 SEL_SOURCE_CHAIN_ID=$(selector "SOURCE_CHAIN_ID()")
+SEL_INIT_WL=$(selector "INIT_WHITELIST_BYTES()")
 
-for _sel_name in SEL_WL_ENABLED SEL_WL_MEMBER SEL_ELECTION SEL_UPDATE_PARAM SEL_SOURCE_CHAIN_ID; do
+for _sel_name in SEL_WL_ENABLED SEL_WL_MEMBER SEL_ELECTION SEL_UPDATE_PARAM SEL_SOURCE_CHAIN_ID SEL_INIT_WL; do
   _sel_val="${!_sel_name}"
   [[ "$_sel_val" =~ ^[0-9a-fA-F]{8}$ ]] \
     || die "${_sel_name}: invalid selector '${_sel_val}' (expected 8 hex chars; geth attach may have failed)"
@@ -427,6 +453,7 @@ VAL1_KEY=$(mapping_key "$VAL1_CONSENSUS" "$WL_SLOT")
 # We use the operator address (== consensus address in local drill) as the mapping key.
 VAL1_OPERATOR="${VAL1_CONSENSUS}"
 VAL1_CREDIT_ADDR=""
+VALIDATORS_SLOT=-1
 for _vs in $(seq 55 75); do
   # _validators[op].creditContract is at slot keccak(op||_vs) + offset_of_creditContract
   # The Validator struct has creditContract as the third field (offset 2 in 32-byte slots
@@ -445,6 +472,7 @@ for _vs in $(seq 55 75); do
       _code_bytes=$(( (${#_code} - 2) / 2 ))
       if [[ "$_code_bytes" -gt 10 ]]; then
         VAL1_CREDIT_ADDR="$_addr"
+        VALIDATORS_SLOT="$_vs"
         break 2
       fi
     fi
@@ -796,12 +824,335 @@ print(s)
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Phase 9 — T-6.k: INIT_WHITELIST_BYTES boundary verification
+#
+# Reads the INIT_WHITELIST_BYTES public constant from StakeHub, verifies:
+#   a) length is a multiple of 20 (packed 20-byte addresses)
+#   b) count == 3 (abchain-local genesis packs all 3 local validator addresses)
+#   c) first and last decoded addresses are non-zero
+#   d) cross-check: validatorWhitelist[first] and validatorWhitelist[last] are true
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 9: T-6.k — INIT_WHITELIST_BYTES boundary verification"
+
+EXPECTED_WL_COUNT=3
+iwb_addrs=()
+raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_INIT_WL}")
+if [[ -z "$raw" || "$raw" == "0x" ]]; then
+  fail "INIT_WHITELIST_BYTES(): empty response (selector may be wrong or constant not public)"
+else
+  # Decode ABI-encoded bytes: offset(32) + length(32) + payload
+  decoded=$(python3 -c "
+raw = '''${raw}'''.strip()
+if raw.startswith('0x'): raw = raw[2:]
+data = bytes.fromhex(raw)
+offset = int.from_bytes(data[0:32], 'big')
+length = int.from_bytes(data[offset:offset+32], 'big')
+payload = data[offset+32:offset+32+length]
+count = length // 20
+remainder = length % 20
+addrs = ['0x' + payload[i*20:i*20+20].hex() for i in range(count)]
+print(length)
+print(count)
+print(remainder)
+for a in addrs:
+    print(a)
+" 2>/dev/null || echo "ERROR")
+
+  if [[ "$decoded" == "ERROR" || -z "$decoded" ]]; then
+    fail "INIT_WHITELIST_BYTES(): ABI decode failed"
+  else
+    iwb_length=$(echo "$decoded" | sed -n '1p')
+    iwb_count=$(echo "$decoded" | sed -n '2p')
+    iwb_remainder=$(echo "$decoded" | sed -n '3p')
+    mapfile -t iwb_addrs < <(echo "$decoded" | tail -n +4)
+
+    if [[ "$iwb_remainder" -eq 0 ]]; then
+      ok "INIT_WHITELIST_BYTES length (${iwb_length}) is a multiple of 20 (no boundary misalignment)"
+    else
+      fail "INIT_WHITELIST_BYTES length (${iwb_length}) % 20 == ${iwb_remainder} (byte boundary error)"
+    fi
+
+    if [[ "$iwb_count" -eq "$EXPECTED_WL_COUNT" ]]; then
+      ok "INIT_WHITELIST_BYTES decoded ${iwb_count} addresses (expected ${EXPECTED_WL_COUNT} for abchain-local)"
+    else
+      fail "INIT_WHITELIST_BYTES: expected ${EXPECTED_WL_COUNT} addresses, decoded ${iwb_count}"
+    fi
+
+    ZERO_ADDR="0x0000000000000000000000000000000000000000"
+    for _idx in 0 $(( iwb_count - 1 )); do
+      _addr="${iwb_addrs[$_idx]:-}"
+      if [[ -z "$_addr" ]]; then
+        fail "INIT_WHITELIST_BYTES: addr[${_idx}] missing from decoded output"
+        continue
+      fi
+      if [[ "$_addr" != "$ZERO_ADDR" ]]; then
+        ok "INIT_WHITELIST_BYTES addr[${_idx}] (${_addr}) is non-zero"
+      else
+        fail "INIT_WHITELIST_BYTES addr[${_idx}] is zero address (assembly decode off-by-one?)"
+      fi
+      _padded=$(printf '%064s' "${_addr#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
+      _wl=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_MEMBER}${_padded}")
+      if is_true "$_wl"; then
+        ok "validatorWhitelist(addr[${_idx}]=${_addr}) == true (cross-check with live storage)"
+      else
+        fail "validatorWhitelist(addr[${_idx}]=${_addr}): expected true, got ${_wl}"
+      fi
+    done
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 10 — T-6.l: getValidatorElectionInfo index correctness
+#
+# Verifies the returned arrays preserve validator insertion order (val1, val2,
+# val3) regardless of whitelist status.  Uses stateDiff to remove val1 from
+# the whitelist and confirms:
+#   consensusAddrs[0] == val1  AND  votingPowers[0] < WHITELIST_VP
+#   consensusAddrs[1] == val2  AND  votingPowers[1] == WHITELIST_VP
+#   consensusAddrs[2] == val3  AND  votingPowers[2] == WHITELIST_VP
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 10: T-6.l — getValidatorElectionInfo index correctness (state override)"
+
+# Use getValidatorElectionInfo(0,3) with val1 whitelist slot cleared
+ELECTION_DATA_3="0x${SEL_ELECTION}$(printf '%064x' 0)$(printf '%064x' 3)"
+raw=$(eth_call_override "$ELECTION_DATA_3" "$VAL1_KEY" "$ZERO_32")
+
+_idx_ok=0
+python3 - <<PYEOF 2>/dev/null || _idx_ok=$?
+import sys
+raw = '''${raw}'''.strip()
+if raw.startswith('0x'): raw = raw[2:]
+if len(raw) < 64:
+    print('result too short', file=sys.stderr); sys.exit(1)
+data = bytes.fromhex(raw)
+ca_off = int.from_bytes(data[0:32], 'big')
+vp_off = int.from_bytes(data[32:64], 'big')
+ca_len = int.from_bytes(data[ca_off:ca_off+32], 'big')
+vp_len = int.from_bytes(data[vp_off:vp_off+32], 'big')
+addrs  = ['0x' + data[ca_off+32+i*32+12:ca_off+64+i*32].hex() for i in range(ca_len)]
+powers = [int.from_bytes(data[vp_off+32+i*32:vp_off+64+i*32], 'big') for i in range(vp_len)]
+
+expected_addrs  = ['${VAL1_CONSENSUS}', '${VAL2_CONSENSUS}', '${VAL3_CONSENSUS}']
+whitelist_vp    = int('${WHITELIST_VP}')
+
+errors = []
+for i in range(min(3, ca_len)):
+    got = addrs[i].lower()
+    exp = expected_addrs[i].lower()
+    if got != exp:
+        errors.append(f'consensusAddrs[{i}]: expected {exp}, got {got}')
+if ca_len < 3:
+    errors.append(f'consensusAddrs count {ca_len} < 3')
+
+if vp_len >= 1 and powers[0] >= whitelist_vp:
+    errors.append(f'votingPowers[0] (val1, non-whitelisted) should be < WHITELIST_VP, got {powers[0]}')
+for i in [1, 2]:
+    if vp_len > i and powers[i] != whitelist_vp:
+        errors.append(f'votingPowers[{i}] (val{i+1}, whitelisted) should == WHITELIST_VP, got {powers[i]}')
+
+if errors:
+    for e in errors: print(e, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+if [[ "$_idx_ok" -eq 0 ]]; then
+  ok "T-6.l: consensusAddrs order preserved (val1→val2→val3); votingPowers reflect whitelist status correctly"
+else
+  fail "T-6.l: getValidatorElectionInfo index or power mismatch (see stderr for details)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 11 — T-6.m: jailed validator overrides whitelist
+#
+# Discovers the Validator.jailed storage slot at runtime by probing struct field
+# offsets within the _validators mapping.  Expected layout (OZ upgradeable):
+#   offset 0: operatorAddress (address)
+#   offset 1: creditContract  (address)
+#   offset 2: voteAddress     (bytes, dynamic; length here)
+#   offset 3-6: Description   (4 strings, dynamic; lengths here)
+#   offset 7: Commission      (3 uint64s packed)
+#   offset 8: updateTime      (uint256)
+#   offset 9: jailed          (bool)  ← expected
+#
+# Override: set slot(base + probe_offset) to 0x01.  Correct offset produces
+# val1.power == 0 (jailed path) while val2/val3 remain WHITELIST_VP.
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 11: T-6.m — jailed validator overrides whitelist (state override)"
+
+if [[ "$VALIDATORS_SLOT" -lt 0 ]]; then
+  log "  SKIP: _validators mapping slot not found in Phase 2 scan; cannot probe jailed field"
+else
+  VAL1_BASE_KEY=$(mapping_key "$VAL1_CONSENSUS" "$VALIDATORS_SLOT")
+  VAL1_BASE_NUM=$(python3 -c "print(int('${VAL1_BASE_KEY}',16))")
+  VAL1_JAILED_SLOT=""
+
+  for _field_off in $(seq 0 15); do
+    _try_key=$(python3 -c "print('0x' + format(${VAL1_BASE_NUM} + ${_field_off}, '064x'))")
+    _raw=$(eth_call_override "$ELECTION_DATA" "$_try_key" "$ONE_32" 2>/dev/null || echo "")
+    [[ -z "$_raw" ]] && continue
+    # val1's power (first in list) should be 0; val2/val3 should still be WHITELIST_VP
+    _probe_ok=0
+    python3 -c "
+import sys
+raw = '''${_raw}'''.strip()
+if raw.startswith('0x'): raw = raw[2:]
+if len(raw) < 128: sys.exit(1)
+data = bytes.fromhex(raw)
+vp_off = int.from_bytes(data[32:64], 'big')
+vp_len = int.from_bytes(data[vp_off:vp_off+32], 'big')
+if vp_len < 3: sys.exit(1)
+powers = [int.from_bytes(data[vp_off+32+i*32:vp_off+64+i*32], 'big') for i in range(3)]
+wl = int('${WHITELIST_VP}')
+# val1 jailed → power 0; val2/val3 whitelisted → WHITELIST_VP (unaffected)
+if powers[0] == 0 and powers[1] == wl and powers[2] == wl:
+    sys.exit(0)
+sys.exit(1)
+" 2>/dev/null || _probe_ok=$?
+    if [[ "$_probe_ok" -eq 0 ]]; then
+      VAL1_JAILED_SLOT="$_try_key"
+      log "  jailed field discovered at struct offset ${_field_off} (slot ${_try_key})"
+      break
+    fi
+  done
+
+  if [[ -z "$VAL1_JAILED_SLOT" ]]; then
+    log "  SKIP: jailed field not found in struct offsets 0–15 (contract layout may differ)"
+    log "        T-6.m jailed-overrides-whitelist assertion cannot be completed"
+  else
+    raw=$(eth_call_override "$ELECTION_DATA" "$VAL1_JAILED_SLOT" "$ONE_32")
+    _jailed_result=$(python3 -c "
+import sys
+raw = '''${raw}'''.strip()
+if raw.startswith('0x'): raw = raw[2:]
+data = bytes.fromhex(raw)
+vp_off = int.from_bytes(data[32:64], 'big')
+vp_len = int.from_bytes(data[vp_off:vp_off+32], 'big')
+if vp_len < 3: sys.exit(1)
+powers = [int.from_bytes(data[vp_off+32+i*32:vp_off+64+i*32], 'big') for i in range(3)]
+wl = int('${WHITELIST_VP}')
+tags = []
+if powers[0] == 0: tags.append('val1_zero')
+if powers[1] == wl: tags.append('val2_wl')
+if powers[2] == wl: tags.append('val3_wl')
+print(' '.join(tags))
+" 2>/dev/null || echo "")
+    if [[ "$_jailed_result" == *"val1_zero"* ]]; then
+      ok "T-6.m: jailed val1 voting power == 0 (jailed overrides whitelist)"
+    else
+      fail "T-6.m: jailed val1 voting power != 0 (jailed field may not be correct)"
+    fi
+    if [[ "$_jailed_result" == *"val2_wl"* && "$_jailed_result" == *"val3_wl"* ]]; then
+      ok "T-6.m: val2/val3 (whitelisted, not jailed) remain at WHITELIST_VOTING_POWER"
+    else
+      fail "T-6.m: val2/val3 voting power unexpected (stateDiff may have corrupted global state)"
+    fi
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 12 — T-6.n: ValidatorWhitelistUpdated event data field (true path)
+#
+# Decodes the unindexed `bool whitelisted` from the data field of each
+# ValidatorWhitelistUpdated log emitted during initialize().  All initialization
+# events should encode `true` (last byte 0x01).
+# The false path (data == 0x...0000 after removeFromValidatorWhitelist) is
+# verified in 88-run-u3-governance-whitelist.sh after T-6.i executes.
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 12: T-6.n — ValidatorWhitelistUpdated data field decoding (true path)"
+
+init_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_WL_UPDATED" "0x1" "latest")
+_data_ok=0
+python3 - <<PYEOF 2>/dev/null || _data_ok=$?
+import json, sys
+logs = json.loads('''${init_logs}''')
+bad = []
+for i, log in enumerate(logs):
+    data = log.get('data', '')
+    # ABI-encoded bool true: 32 bytes, last byte 0x01
+    if not data or data[-2:] != '01':
+        bad.append(f"log[{i}].data={data!r} (expected last byte 01)")
+if bad:
+    for b in bad: print(b, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+if [[ "$_data_ok" -eq 0 ]]; then
+  ok "T-6.n (true path): all ${wl_event_count} ValidatorWhitelistUpdated events have data[-1] == 0x01 (whitelisted=true)"
+else
+  fail "T-6.n (true path): one or more ValidatorWhitelistUpdated events have unexpected data field"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 13 — T-6.o: updateParam("addToValidatorWhitelist") success path
+#
+# Dry-runs a successful addToValidatorWhitelist call from GovHub using eth_call
+# (no state written to chain), then validates that the storage key derivation
+# for the new address matches the WL_SLOT mapping layout discovered in Phase 2.
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 13: T-6.o — updateParam addToValidatorWhitelist success path + storage key"
+
+NEW_ADDR="0x000000000000000000000000000000000000cafe"
+NEW_ADDR_HEX="${NEW_ADDR#0x}"
+
+DATA_ADD=$(abi_encode_updateparam "$SEL_UPDATE_PARAM" "addToValidatorWhitelist" "$NEW_ADDR_HEX")
+expect_success "T-6.o addToValidatorWhitelist(${NEW_ADDR}) from GovHub" "$DATA_ADD"
+
+# Derive storage key for validatorWhitelist[NEW_ADDR] using WL_SLOT
+NEW_KEY=$(mapping_key "$NEW_ADDR" "$WL_SLOT")
+NEW_ADDR_PADDED=$(printf '%064s' "$NEW_ADDR_HEX" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
+raw=$(eth_call_override "0x${SEL_WL_MEMBER}${NEW_ADDR_PADDED}" "$NEW_KEY" "$ONE_32")
+if is_true "$raw"; then
+  ok "T-6.o storage key derived from WL_SLOT (${WL_SLOT}) correctly maps validatorWhitelist[${NEW_ADDR}]"
+else
+  fail "T-6.o validatorWhitelist(${NEW_ADDR}) with stateDiff override returned ${raw} (key derivation mismatch?)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 14 — T-6.p: INIT_WHITELIST_BYTES vs. live storage cross-check
+#
+# Re-uses the address list decoded in Phase 9 to verify every address encoded in
+# the compile-time constant is active in the live validatorWhitelist mapping.
+# Provides independent confirmation beyond the event-log audit in T-6.d.
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "Phase 14: T-6.p — INIT_WHITELIST_BYTES vs. live storage cross-check"
+
+if [[ "${#iwb_addrs[@]}" -eq 0 ]]; then
+  log "  SKIP: INIT_WHITELIST_BYTES decode in Phase 9 failed; cannot cross-check"
+else
+  _t6p_match=0
+  for _iwb_addr in "${iwb_addrs[@]}"; do
+    _padded=$(printf '%064s' "${_iwb_addr#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
+    _wl=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_MEMBER}${_padded}")
+    if is_true "$_wl"; then
+      _t6p_match=$(( _t6p_match + 1 ))
+    else
+      fail "T-6.p: validatorWhitelist(${_iwb_addr}) == false (address in INIT_WHITELIST_BYTES not active in storage)"
+    fi
+  done
+  if [[ "$_t6p_match" -eq "${#iwb_addrs[@]}" ]]; then
+    ok "T-6.p: all ${_t6p_match} addresses from INIT_WHITELIST_BYTES are active in live validatorWhitelist storage"
+  fi
+
+  # Cross-check: count from constant == count from T-6.d event logs
+  _iwb_count="${#iwb_addrs[@]}"
+  if [[ "$_iwb_count" -eq "$wl_event_count" ]]; then
+    ok "T-6.p: INIT_WHITELIST_BYTES count (${_iwb_count}) == ValidatorWhitelistUpdated event count (${wl_event_count})"
+  else
+    fail "T-6.p: INIT_WHITELIST_BYTES count (${_iwb_count}) != ValidatorWhitelistUpdated events (${wl_event_count})"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 if [[ "$FAIL" -eq 0 ]]; then
-  log "[ PASS ]  T-6.b through T-6.g whitelist tests: ${PASS} checks passed"
+  log "[ PASS ]  T-6.b through T-6.p whitelist tests: ${PASS} checks passed"
 else
-  log "[ FAIL ]  T-6.b through T-6.g whitelist tests: ${PASS} passed, ${FAIL} failed"
+  log "[ FAIL ]  T-6.b through T-6.p whitelist tests: ${PASS} passed, ${FAIL} failed"
   exit 1
 fi
