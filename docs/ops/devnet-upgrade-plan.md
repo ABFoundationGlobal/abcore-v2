@@ -627,7 +627,7 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 
 | 情形 | currentValidatorSet 结果 | 链状态 |
 |---|---|---|
-| **0 个注册** | `BSCValidatorSet.updateValidatorSetV2` 空集保护跳过 `doUpdateState`（[BSCValidatorSet.sol:229-233](../../core/systemcontracts/parliagenesis/abcore-v2-genesis-contract/contracts/BSCValidatorSet.sol)），**保留原 5 个 Clique 时代 validator**，链继续 |
+| **0 个注册** | `BSCValidatorSet.updateValidatorSetV2` 空集保护跳过 `doUpdateState`（[BSCValidatorSet.sol#L229-L233](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/blob/master/contracts/BSCValidatorSet.sol#L229-L233)），**保留原 5 个 Clique 时代 validator**，链继续 |
 | **1-4 个注册** | 被覆盖成残缺集（1-4 个），链继续但单点风险大 — 任一 validator 离线 → 出块停顿 |
 | **5 个全注册** | 干净切换，新选举生效 |
 

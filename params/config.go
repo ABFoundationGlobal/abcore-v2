@@ -468,9 +468,11 @@ var (
 		// TODO: fill PGB block height before merge. Pick N such that the target
 		// activation timestamp aligns with the next Parlia epoch boundary (N % 200 == 0).
 		// See docs/ops/fork-cutover-runbook.md §3.2 for the N selection formula.
-		// The placeholder 999_999_999 keeps CheckCompatible passing pre-cutover
-		// (head will be well below this) and makes the TODO loud in any code search.
-		ParliaGenesisBlock: big.NewInt(999_999_999),
+		// The placeholder 999_999_800 keeps CheckCompatible passing pre-cutover
+		// (head will be well below this) AND satisfies % 200 == 0, so a forgotten
+		// placeholder still produces a well-formed first Luban epoch block instead
+		// of a 97B-extraData repeat of the v0.3.0 retro.
+		ParliaGenesisBlock: big.NewInt(999_999_800),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
 		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in
@@ -977,6 +979,9 @@ type ParliaConfig struct {
 
 // String implements the stringer interface, returning the consensus engine details.
 func (b *ParliaConfig) String() string {
+	if b == nil {
+		return "parlia"
+	}
 	return fmt.Sprintf("parlia(epoch: %d)", b.Epoch)
 }
 

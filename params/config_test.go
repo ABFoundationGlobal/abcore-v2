@@ -233,8 +233,9 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	//
 	// Head=10000 simulates "rolling upgrade happens well before any
 	// scheduled ParliaGenesisBlock". Post-reset ABCoreDevnetChainConfig has
-	// ParliaGenesisBlock at the placeholder 0 and all PGB-and-later forks nil,
-	// so the new config matches the stored config plus the Parlia.Epoch=200
+	// ParliaGenesisBlock at the placeholder 999_999_800 (a far-future block
+	// aligned to the 200-block Parlia epoch grid) and all PGB-and-later forks
+	// nil, so the new config matches the stored config plus the Parlia.Epoch=200
 	// addition; CheckCompatible must report no error.
 	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 10_000, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig is not backward-compatible with the "+
