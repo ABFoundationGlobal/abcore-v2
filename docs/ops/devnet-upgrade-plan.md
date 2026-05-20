@@ -503,6 +503,31 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 
 DevNet 演练要求：先在 DevNet 上串行执行所有 5 个 createValidator 并确认成功，才可以在 Testnet/Mainnet 采用同样流程。不允许"边激活边补注册"。
 
+**（可选）激活 govAB 治理投票权：**
+
+`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（合约默认值 1 BNB），该 BNB 同样进入质押池，不被销毁。
+
+> **设计原因**：投票委托与质押故意解耦，允许 operator 把 govAB 投票权委托给独立的治理代理地址（而非只能自委托）。
+
+```bash
+GOV_TOKEN="0x0000000000000000000000000000000000002005"
+
+# 每个 validator 执行一次（--private-key 使用对应 operator key）
+cast send $STAKE_HUB \
+  "delegate(address,bool)" \
+  <operator_address> \
+  true \
+  --value 1ether \
+  --private-key <operator_key> \
+  --rpc-url http://rpc-0:8545
+
+# 验证投票权已激活（应返回非零值）
+cast call $GOV_TOKEN \
+  "getVotes(address)(uint256)" \
+  <operator_address> \
+  --rpc-url http://rpc-0:8545
+```
+
 **验证清单：**
 ```bash
 # 1. PUSH0 opcode 可用（部署含 PUSH0 的合约）
