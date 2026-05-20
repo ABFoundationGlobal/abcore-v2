@@ -1,6 +1,6 @@
 genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-genesis_contract_commit: 91fb231207f646661071a61edd5ca24a5e4cfb27
-generated_at:            2026-04-23T06:26:05Z
+genesis_contract_commit: f5e6498280ca32a9be73519b734edfc95a00a241
+generated_at:            2026-05-13T09:37:58Z
 
 # Build parameters
 OUTDIR:       default
@@ -20,7 +20,7 @@ CrossChainContract                     9170edceaa3097c2dca7d5a646ed63c0008d70984
 StakingContract                        2182364862c220d0f67355631c7392faa0093f9c24cadca16bb46f5867129d34
 StakeHubContract                       89594d59204a80d6d232e9ff91a2695343fac562e83b9d3e844ea48b127a08e1
 StakeCreditContract                    529987cdd19ff32e40af3bad8882e94f7ed2f7d590ed1594b91f4ac8083988d7
-GovernorContract                       9b14bd52027801a1eff84a01101b34d663f72f89d3aad1ece15d67276ebc254b
+GovernorContract                       d40b0dc9d934239276384566a3f360b9908d84d73e5202f27bc5c2b00678196b
 GovTokenContract                       8c1cf79032d4d00caf8017f9271fc77db2a15415b155f4f2726f4c4d68097819
-TimelockContract                       1a8600e4dc6649cb2088a0eafa66c8ec5fc140a19f628a8d2dae65df03097c80
+TimelockContract                       d00b6e2dfa9e00c89db8e961285bfadc950b1c798beac2cb7f636d5dec628470
 TokenRecoverPortalContract             bb25ac5f5c91390a7dc19002ca8ce8335601e2e3ca2a08cd055ad63bd6d4bc59
