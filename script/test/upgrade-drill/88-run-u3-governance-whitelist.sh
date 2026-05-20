@@ -280,7 +280,9 @@ print('0x' + sel + head + targets_enc + values_enc + calldatas_enc + desc_enc)
   PROPOSAL_ID_HEX=$(attach_exec "$GETH" "$IPC1" \
     "(function(){var r=eth.getTransactionReceipt('${propose_tx}');
       if(!r||!r.logs||!r.logs.length) return 'null';
-      var d=r.logs[0].data;
+      var topic=web3.sha3('ProposalCreated(uint256,address,address[],uint256[],string[],bytes[],uint256,uint256,string)');
+      var log=r.logs.filter(function(l){return l.topics&&l.topics[0]===topic;})[0];
+      var d=log?log.data:null;
       return d&&d.length>=66?d.slice(2,66):'null';})()" 2>/dev/null || echo "null")
   [[ "${#PROPOSAL_ID_HEX}" -eq 64 ]] \
     || { log "  FAIL: ${label}: could not parse proposalId (got: '${PROPOSAL_ID_HEX}')" >&2; return 1; }
@@ -576,7 +578,9 @@ log ""
 log "Phase 11 (T-6.i): verifying validatorWhitelist(val1) == false"
 val1_padded=$(printf '%064s' "${VAL1_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
 raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_MEMBER}${val1_padded}")
-if [[ "${raw: -2}" != "01" ]]; then
+if [[ "${#raw}" -ne 66 ]]; then
+  fail "T-6.i: validatorWhitelist(val1): RPC returned malformed value '${raw}'"
+elif [[ "${raw: -2}" != "01" ]]; then
   ok "T-6.i: validatorWhitelist(val1) == false (whitelist entry removed)"
 else
   fail "T-6.i: validatorWhitelist(val1): expected false after removal, got ${raw}"
@@ -682,7 +686,9 @@ T6JA_EXEC_BLK_HEX="$LAST_EXEC_BLK_HEX"
 log ""
 log "Phase 16 (T-6.j-A): verifying whitelistEnabled() == false"
 raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_WL_ENABLED}")
-if [[ "${raw: -2}" != "01" ]]; then
+if [[ "${#raw}" -ne 66 ]]; then
+  fail "T-6.j-A: whitelistEnabled(): RPC returned malformed value '${raw}'"
+elif [[ "${raw: -2}" != "01" ]]; then
   ok "T-6.j-A: whitelistEnabled() == false"
 else
   fail "T-6.j-A: whitelistEnabled(): expected false after governance disable, got ${raw}"
