@@ -42,6 +42,40 @@ any code-version change in this local drill.
 | `08-restore.sh` | Restore a datadir from a snapshot archive (rollback after failed upgrade) |
 | `lib.sh` | Shared functions: `launch_validator`, `stop_all`, `wire_mesh`, `wait_for_head_at_least`, `wait_for_timestamp` |
 
+### Contract scenario tests
+
+Beyond the U-series upgrade flow, a separate set of scripts covers individual
+system-contract functions and cross-contract governance paths.  These scripts
+run against the 3-node network left up after U-3.
+
+See **[CONTRACT-SCENARIOS.md](CONTRACT-SCENARIOS.md)** for the full scenario list,
+implementation notes, and script index:
+
+**T-6 extensions — StakeHub whitelist deep coverage (PR #4)**
+
+| ID | Script | Contracts | Description |
+|---|---|---|---|
+| T-6.i | extend `88-run-u3-governance-whitelist.sh` | `StakeHub` + `BSCGovernor` | Full governance `removeFromValidatorWhitelist` path; verify voting power reverts to stake-based |
+| T-6.j | extend `88-run-u3-governance-whitelist.sh` | `StakeHub` + `BSCGovernor` | Full governance `whitelistEnabled` toggle off→on; verify `WhitelistEnabledUpdated` both directions |
+| T-6.k | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | `INIT_WHITELIST_BYTES` on-chain decode boundary: length % 20, first/last address, cross-check vs storage |
+| T-6.l | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | `getValidatorElectionInfo` mixed-state index correctness via `stateDiff`; verify per-index addr+power |
+| T-6.m | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | Jailed-but-whitelisted validator gets voting power 0; jailed check takes priority over whitelist |
+| T-6.n | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | `ValidatorWhitelistUpdated` event `data` field decoding for both `true` (add) and `false` (remove) |
+| T-6.o | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | `updateParam("addToValidatorWhitelist")` success path: calldata accepted + storage slot written |
+| T-6.p | extend `87-run-u3-whitelist-test.sh` | `StakeHub` | `INIT_WHITELIST_BYTES` constant vs. live `validatorWhitelist` storage cross-check (independent of event logs) |
+
+**T-7 through T-13 — system-contract function coverage**
+
+| ID | Script (planned) | Contracts | Description |
+|---|---|---|---|
+| T-7 | `89-run-t7-stakehub-lifecycle.sh` | `StakeHub` | Validator lifecycle edits: commission, description, consensus address, node IDs, info queries |
+| T-8 | `90-run-t8-delegation-lifecycle.sh` | `StakeHub` + `StakeCredit` | Delegation lifecycle: additional delegate, undelegate, redelegate, claim (state-override), StakeCredit reads |
+| T-9 | `91-run-t9-govtoken.sh` | `GovToken` | Voting-power history (`getPastVotes`, `getPastTotalSupply`), transfer/approve revert, `delegates` query |
+| T-10 | `92-run-t10-governor-extended.sh` | `BSCGovernor` | `castVoteWithReason`, proposal cancel, Defeated state, Governor `updateParam` via governance |
+| T-11 | `93-run-t11-validatorset-queries.sh` | `BSCValidatorSet` | `getLivingValidators`, `getMiningValidators`, `isWorkingValidator`, `getIncoming`, `updateParam` via governance |
+| T-12 | `94-run-t12-slash-indicator.sh` | `SlashIndicator` | `getSlashThresholds`, `getSlashIndicator`, slash-counter state-override, `updateParam` via governance |
+| T-13 | `95-run-t13-governance-param-matrix.sh` | `BSCGovernor` + `GovHub` + multi-target | Full governance pipeline for multiple system-contract parameter updates in sequence |
+
 ## Differences from devnet
 
 | Parameter | devnet | local drill |
