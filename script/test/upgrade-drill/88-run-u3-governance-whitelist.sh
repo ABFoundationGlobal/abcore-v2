@@ -136,6 +136,10 @@ send_tx_wait() {
   log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2; return 1
 }
 
+# OZ IGovernor.ProposalState enum:
+#   0=Pending  1=Active  2=Canceled  3=Defeated
+#   4=Succeeded  5=Queued  6=Expired  7=Executed
+
 # Query BSCGovernor.state(proposalId); returns decimal integer
 governor_state() {
   local id_hex="$1" sel raw
@@ -183,6 +187,15 @@ for _s in SEL_PROPOSE SEL_CAST_VOTE SEL_QUEUE SEL_EXECUTE SEL_WL_MEMBER SEL_GOV_
   [[ "${!_s}" =~ ^[0-9a-fA-F]{8}$ ]] \
     || die "${_s}: bad selector '${!_s}' (geth attach failed?)"
 done
+
+# Full keccak256 topic for ProposalCreated event — used to locate the correct log
+# in the propose() receipt regardless of how many other logs appear before it.
+TOPIC_PROPOSAL_CREATED=$(attach_exec "$GETH" "$IPC1" \
+  "web3.sha3('ProposalCreated(uint256,address,address[],uint256[],string[],bytes[],uint256,uint256,string)')" \
+  2>/dev/null)
+[[ "$TOPIC_PROPOSAL_CREATED" =~ ^0x[0-9a-fA-F]{64}$ ]] \
+  || die "TOPIC_PROPOSAL_CREATED: bad hash '${TOPIC_PROPOSAL_CREATED}' (geth attach failed?)"
+
 log "  Selectors ready."
 
 # ── Pre-flight diagnostics (governance contract state) ─────────────────────────
@@ -320,12 +333,21 @@ eth_call_debug "$GOVERNOR" "$PROPOSE_DATA" "$VAL1"
 
 PROPOSE_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 500000 "$PROPOSE_DATA" "propose()") || exit 1
 
-# Parse proposalId from log[0].data first 32 bytes (proposalId is first non-indexed param)
+# Parse proposalId by filtering for the ProposalCreated log via its topic hash.
+# This survives any middleware that emits additional logs before ProposalCreated.
+# proposalId is the first non-indexed parameter, so it appears at data[0:32].
 PROPOSAL_ID_HEX=$(attach_exec "$GETH" "$IPC1" \
-  "(function(){var r=eth.getTransactionReceipt('${PROPOSE_TX}');
+  "(function(){
+    var r=eth.getTransactionReceipt('${PROPOSE_TX}');
     if(!r||!r.logs||!r.logs.length) return 'null';
-    var d=r.logs[0].data;
-    return d&&d.length>=66?d.slice(2,66):'null';})()" 2>/dev/null || echo "null")
+    var topic='${TOPIC_PROPOSAL_CREATED}';
+    var matched=r.logs.filter(function(l){
+      return l.topics&&l.topics.length>0&&l.topics[0]===topic;
+    });
+    if(!matched.length) return 'null';
+    var d=matched[0].data;
+    return d&&d.length>=66?d.slice(2,66):'null';
+  })()" 2>/dev/null || echo "null")
 [[ "${#PROPOSAL_ID_HEX}" -eq 64 ]] \
   || die "Could not parse proposalId from propose() receipt (got: '${PROPOSAL_ID_HEX}')"
 
@@ -347,6 +369,7 @@ done
 # ── Phase 4: wait for Succeeded (state=4) ─────────────────────────────────────
 log ""
 log "Phase 4: waiting for voting period to end (10 blocks × 3 s ≈ 30 s, timeout 90 s)"
+# 4=Succeeded
 wait_for_governor_state "$PROPOSAL_ID_HEX" 4 90 "Succeeded" \
   || { fail "Proposal did not reach Succeeded within 90 s"; exit 1; }
 ok "Proposal state == Succeeded (quorum reached, majority FOR)"
@@ -397,15 +420,15 @@ QUEUE_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 500000 "$QUEUE_DATA" "
 ok "queue() mined"
 
 cur=$(governor_state "$PROPOSAL_ID_HEX")
-if [[ "$cur" -eq 5 ]]; then
+if [[ "$cur" -eq 5 ]]; then  # 5=Queued
   ok "Proposal state == Queued (BSCTimelock delay started)"
 else
   fail "Proposal state expected 5 (Queued), got ${cur}"
 fi
 
-# ── Phase 6: wait for timelock delay (60 s) ───────────────────────────────────
+# ── Phase 6: wait for BSCTimelock delay (3 s configured; sleep 10 s for margin) ──
 log ""
-log "Phase 6: waiting for BSCTimelock delay (3 s = 1 block)..."
+log "Phase 6: waiting for BSCTimelock delay (3 s = 1 block; sleeping 10 s to ensure inclusion)"
 sleep 10
 log "  Timelock delay elapsed."
 
@@ -417,7 +440,7 @@ EXECUTE_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 1000000 "$EXECUTE_DA
 ok "execute() mined"
 
 cur=$(governor_state "$PROPOSAL_ID_HEX")
-if [[ "$cur" -eq 7 ]]; then
+if [[ "$cur" -eq 7 ]]; then  # 7=Executed
   ok "Proposal state == Executed"
 else
   fail "Proposal state expected 7 (Executed), got ${cur}"

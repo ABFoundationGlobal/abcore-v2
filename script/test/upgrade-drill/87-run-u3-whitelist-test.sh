@@ -287,8 +287,9 @@ SEL_WL_MEMBER=$(selector "validatorWhitelist(address)")
 SEL_ELECTION=$(selector "getValidatorElectionInfo(uint256,uint256)")
 SEL_UPDATE_PARAM=$(selector "updateParam(string,bytes)")
 SEL_SOURCE_CHAIN_ID=$(selector "SOURCE_CHAIN_ID()")
+SEL_TOTAL_POOLED_BNB=$(selector "totalPooledBNB()")
 
-for _sel_name in SEL_WL_ENABLED SEL_WL_MEMBER SEL_ELECTION SEL_UPDATE_PARAM SEL_SOURCE_CHAIN_ID; do
+for _sel_name in SEL_WL_ENABLED SEL_WL_MEMBER SEL_ELECTION SEL_UPDATE_PARAM SEL_SOURCE_CHAIN_ID SEL_TOTAL_POOLED_BNB; do
   _sel_val="${!_sel_name}"
   [[ "$_sel_val" =~ ^[0-9a-fA-F]{8}$ ]] \
     || die "${_sel_name}: invalid selector '${_sel_val}' (expected 8 hex chars; geth attach may have failed)"
@@ -444,8 +445,13 @@ for _vs in $(seq 55 75); do
       _code=$(attach_exec "$GETH" "$IPC1" "eth.getCode('${_addr}','latest')" 2>/dev/null || echo "0x")
       _code_bytes=$(( (${#_code} - 2) / 2 ))
       if [[ "$_code_bytes" -gt 10 ]]; then
-        VAL1_CREDIT_ADDR="$_addr"
-        break 2
+        # Confirm this is a StakeCredit contract: totalPooledBNB() must not revert.
+        # Guards against false positives if the Validator struct layout changes.
+        _tpb=$(eth_call_raw "$_addr" "0x${SEL_TOTAL_POOLED_BNB}" 2>/dev/null || echo "")
+        if [[ "${#_tpb}" -ge 66 ]]; then
+          VAL1_CREDIT_ADDR="$_addr"
+          break 2
+        fi
       fi
     fi
   done
@@ -694,13 +700,27 @@ log "Phase 7: T-6.e — updateParam input validation (rejection tests via eth_ca
 # Helper: expect a revert from eth_call_from_govhub.
 # Only error:* counts as a revert; result:* (including result:0x from a void
 # function) always means the call succeeded and the test should fail.
+# The 4-byte error selector is logged so regressions (wrong-reason reverts)
+# are visible in the run log even when the test counts as a PASS.
 expect_revert() {
   local label="$1" data="$2"
-  local result
+  local result selector_hex
   result=$(eth_call_from_govhub "$STAKE_HUB" "$data")
   case "$result" in
     error:*)
-      ok "${label}: call reverted as expected"
+      selector_hex=$(echo "${result#error:}" | python3 -c "
+import json, sys
+try:
+    e = json.load(sys.stdin)
+    d = e.get('data', '') or ''
+    if isinstance(d, str) and len(d) >= 10 and d.startswith('0x'):
+        print('0x' + d[2:10])
+    else:
+        print('(no revert data)')
+except Exception:
+    print('(parse error)')
+" 2>/dev/null || echo "(unknown)")
+      ok "${label}: call reverted as expected (selector=${selector_hex})"
       ;;
     result:*)
       fail "${label}: expected revert but call succeeded (result=${result#result:})"
