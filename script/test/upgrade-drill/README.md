@@ -1,7 +1,10 @@
 # upgrade-drill — local 3-node phased upgrade drill (U-series)
 
+> **运营升级计划 SoT**: [docs/ops/devnet-upgrade-plan.md](../../../docs/ops/devnet-upgrade-plan.md) (6-step main path v0.2.0 → v0.7.0).
+> 本 README 描述本地演练脚本（工程验证视角），不等于运营激活决策。任何 fork 是否、何时激活上 testnet/mainnet 以 SoT 为准。
+
 Sequential drill of the 7-round abcore-v1 → abcore-v2 upgrade path, mirroring
-`docs/ops/devnet-upgrade-plan.md` (branch `devnet-upgrade-plan`).
+the SoT linked above.
 
 Uses a single abcore-v2 binary. Each round appends new fork activation block
 heights or timestamps to the shared TOML config and does a rolling restart of

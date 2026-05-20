@@ -1,7 +1,8 @@
 # ABCore DevNet 建设 + 分阶段升级路径计划
 
 > 本文档用于指导 DevNet 搭建、升级演练，以及后续 Testnet / Mainnet 的推进策略。
-> **Last updated**: 2026-04-24
+> **本文档是升级计划的 single source of truth。** drill 脚本 README（`script/test/upgrade-drill/README.md`）是工程验证视角，不等于运营计划；以本文档为准。
+> **Last updated**: 2026-05-19
 
 ---
 
@@ -13,7 +14,7 @@
 
 尽量减少 Testnet 上的升级次数，因此先建立 DevNet 完整演练整个升级路径，确认可行后再推 Testnet，最后推 Mainnet。
 
-**升级总路径（5 次升级，另有可选升级见附录）：**
+**升级总路径（6 次升级，另有真正可选的 fork 见附录）：**
 
 ```
 abcore-v1 (Clique PoA, geth v1.13.15)
@@ -26,10 +27,14 @@ v0.4.0 — Shanghai + Kepler + Feynman + FeynmanFix（PUSH0 + staking + 选举�
     ↓ Upgrade 4
 v0.5.0 — Cancun + Haber + HaberFix（EIP-4844 blob 交易）
     ↓ Upgrade 5
-v0.6.0 — Prague + Pascal + Lorentz + Maxwell（账户抽象 + epoch 变化）
+v0.6.0 — Prague + Pascal + Lorentz + Maxwell + Bohr（账户抽象 + epoch 变化 + TurnLength）
+    ↓ Upgrade 6
+v0.7.0 — Fermi + Osaka + Mendel（BSC 主网 2026 最新 fork）
 ```
 
-> **路径选择说明**：Feynman（validator 注册操作）和 Cancun（blob 交易）分开，出问题时更容易定位。若 DevNet 演练中 Feynman 注册已完全自动化，可合并 Upgrade 3+4 回到 4 次。Bohr 为可选升级（见文末附录），不在标准路径中；Bohr 实际效果为 TurnLength 动态化，不改变出块速度。
+> **路径选择说明**：Feynman（validator 注册操作）和 Cancun（blob 交易）分开，出问题时更容易定位。若 DevNet 演练中 Feynman 注册已完全自动化，可合并 Upgrade 3+4 回到 5 次。
+>
+> **关于 Bohr / Fermi / Osaka / Mendel**：BSC 上游里 Bohr 改变 TurnLength、Fermi 把出块间隔从 750ms 降到 450ms。**ABCore 永久维持 3 秒出块间隔**（已在 `params/protocol_params.go` 把 `LorentzBlockInterval` / `MaxwellBlockInterval` / `FermiBlockInterval` 全部 override 为 `3000ms`，与 `DefaultBlockInterval` 一致），所以这些 fork 在 ABCore 上对出块速度都没有影响。Bohr 并入 v0.6.0、Fermi+Osaka+Mendel 进入 v0.7.0 是为了跟上 BSC 上游 fork 顺序，免去未来 sync upstream patch 时踩坑。详见 §3 各升级段。
 
 > **Mainnet 不可逆性**：每次硬分叉激活后，已处理的外部交易、RPC 状态、外部依赖（dApp、indexer）都已基于新链前进。Mainnet 激活后的"回滚"实质上是链级重置，涉及 tx 丢失和外部方协调，代价极高。请在 DevNet + Testnet 充分验证后再推 Mainnet，不要依赖 Mainnet 回滚作为保险。
 
@@ -50,18 +55,18 @@ v0.6.0 — Prague + Pascal + Lorentz + Maxwell（账户抽象 + epoch 变化）
 
 ### 机器配置推荐
 
-> 参考 BSC 官方 validator 节点推荐配置（8 核 / 16 GB / 500 GB SSD），并根据 DevNet 实际拓扑调整。DevNet 为演练环境，流量极低，但需覆盖完整 5 次升级周期（含可选 Bohr/Fermi 升级演练）。
+> 参考 BSC 官方 validator 节点推荐配置（8 核 / 16 GB / 500 GB SSD），并根据 DevNet 实际拓扑调整。DevNet 为演练环境，流量极低，但需覆盖完整 6 次升级周期。
 
 | 服务器 | CPU | 内存 | 磁盘 | 备注 |
 |--------|-----|------|------|------|
 | server-1 | 16 核 | 32 GB | 500 GB NVMe SSD | 跑 2 个 validator 进程，资源需翻倍 |
 | server-2 | 16 核 | 32 GB | 500 GB NVMe SSD | 同 server-1 |
-| server-3 | 8 核 | 16 GB | 500 GB NVMe SSD | 单 validator；若激活 Bohr/Fermi（可选升级），IO 延迟敏感 |
-| server-4 | 8 核 | 16 GB | 500 GB NVMe SSD | RPC 节点；若激活 Bohr/Fermi（可选升级），共机器会造成 missed block，必须独立 |
+| server-3 | 8 核 | 16 GB | 500 GB NVMe SSD | 单 validator |
+| server-4 | 8 核 | 16 GB | 500 GB NVMe SSD | RPC 节点（独立服务器，与 validator 资源隔离）|
 
 **磁盘说明**：NVMe SSD，要求顺序读写 ≥ 500 MB/s、随机 4K 读写 IOPS ≥ 8000、延迟 < 1ms。DevNet 链数据量远小于生产，500 GB 足以覆盖演练周期及多次快照备份。
 
-**网络**：各节点间延迟 < 100ms；若计划激活 Bohr 或 Fermi（可选升级），激活前需 `ping` 互测验证延迟 < 100ms。公网出口带宽 ≥ 10 Mbps 即可（DevNet 无外部流量压力）。
+**网络**：各节点间延迟 < 100ms。公网出口带宽 ≥ 10 Mbps 即可（DevNet 无外部流量压力）。
 
 **云厂商参考规格**（仅供参考，按实际可用资源选择）：
 
@@ -73,7 +78,7 @@ v0.6.0 — Prague + Pascal + Lorentz + Maxwell（账户抽象 + epoch 变化）
 
 > **拓扑说明**：server-1 和 server-2 各有 2 个 validator，单机故障各失去 40% signer，但剩余 3 个仍构成多数派（3/5），链不中断。DevNet 拓扑与生产（每 validator 独立服务器）有差异，HA 测试结果不可直接推广到 Mainnet。
 
-> **为什么 RPC 必须独立**：若激活 Bohr 或 Fermi（可选升级）后出块间隔缩短，共享服务器的 IO/CPU 竞争会直接导致 val-4 missed block。server-4 在主路径中即应独立，若计划激活 Bohr/Fermi，必须在激活前完成迁移。
+> **为什么 RPC 必须独立**：尽管 ABCore 永久维持 3 秒出块（见 §0），RPC 服务的 IO/CPU 负载与 validator 出块共享时可能影响出块稳定性；server-4 在主路径中即应独立。
 
 ### 滚动升级原则
 
@@ -158,6 +163,32 @@ abcore-v2 的 DB schema 是 additive：只新增 key prefix（Parlia snapshot、
 - 启动脚本 / 环境变量      # 完整启动配置
 ```
 
+### 代码现状：block interval 永久 3 秒
+
+ABCore 在 `params/protocol_params.go` 把 Parlia 的 4 个 block interval 常量全部 override 为 `3000ms`：
+
+```go
+// params/protocol_params.go:200-203
+DefaultBlockInterval uint64 = 3000   // 3000 ms
+LorentzBlockInterval uint64 = 3000   // 上游 BSC 是 1500ms
+MaxwellBlockInterval uint64 = 3000   // 上游 BSC 是 750ms
+FermiBlockInterval   uint64 = 3000   // 上游 BSC 是 450ms
+```
+
+`consensus/parlia/snapshot.go:351-358` 的 BlockInterval switch 按 `IsLorentz / IsMaxwell / IsFermi` 切换 snapshot 里的 `BlockInterval` 字段；因为四个常量都是 3000，**激活与否不改变出块速度**。
+
+**这是 devnet / testnet / mainnet 三网共同承诺**。后续若需要改变出块速度，必须定义新 fork（已激活 fork 的 BlockInterval 不可追溯修改，历史 snapshot 已固化）。
+
+### 代码现状：one-shot system contract bytecode
+
+ABCore 网络（mainnet/testnet/devnet）的所有 system contract bytecode 在 `ParliaGenesisBlock` 时刻一次性部署最终版本，源自 `abcore-v2-genesis-contract` 仓库（init commit 来自 `bnb-chain/bsc-genesis-contract 34618f6`，已包含 Luban / Plato / Feynman / Bohr 等所有 fork 的合约改动）。
+
+`core/systemcontracts/upgrade.go:1453-1475` 在 `upgradeBuildInSystemContract` 函数入口对 ABCore 网络做 early-return，**所有 fork 的 `*Upgrade[mainNet/chapelNet]` map（含 bohr / pascal / lorentz / maxwell / fermi）对 ABCore 永不触发**。
+
+**运维含义**：
+- 每次升级（如 v0.3.0 London + 13 BSC forks）**只需要改 `params/config.go` 启用 fork**，不需要在 `upgrade.go` 注册 `*Upgrade[abcoreXxx]` 条目
+- 任何往 `upgrade.go` 加 `lubanUpgrade[abcoreDevNet]` 之类条目的 PR 都是错的（除非 PGB 时 bytecode 漏装了某功能 —— 那应当走 `abcore-v2-genesis-contract` 重新编译流程）
+
 ---
 
 ## 二、Fork 依赖关系与合并策略
@@ -169,24 +200,20 @@ abcore-v2 的 DB schema 是 additive：只新增 key prefix（Parlia snapshot、
 ParliaGenesisBlock
     ↓ 必须先于 LondonBlock（IsParlia 前置）
 LondonBlock
-    ↓ IsShanghai/IsCancun/IsFeynman/IsLorentz/IsMaxwell/IsPrague 全部依赖 IsLondon()
+    ↓ IsShanghai/IsCancun/IsFeynman/IsLorentz/IsMaxwell/IsPrague/IsBohr/IsFermi/IsOsaka/IsMendel 全部仅依赖 IsLondon()
 13 个 BSC block forks（Ramanujan → Hertzfix，须严格升序，可全设同一块高）
     ↓ CheckConfigForkOrder 要求 block forks 先于 timestamp forks
 （以下 timestamp forks 代码层仅依赖 IsLondon()，彼此无强制顺序依赖）
-KeplerTime + ShanghaiTime
-FeynmanTime + FeynmanFixTime
-CancunTime + HaberTime + HaberFixTime
-PascalTime + PragueTime
-LorentzTime（epoch 200 → 500）
-MaxwellTime（epoch 500 → 1000）
-
-【演练推荐顺序】（非代码依赖，基于风险隔离和观察窗口）
-Shanghai/Feynman → Cancun → Prague+Lorentz+Maxwell（间隔排期以充分验证）
-
-（可选，代码层仅依赖 IsLondon()，与主路径各 fork 无激活顺序依赖）
-BohrTime — TurnLength 动态化（出块速度不变）
-FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
+KeplerTime + ShanghaiTime                                — v0.4.0 (T3)
+FeynmanTime + FeynmanFixTime                              — v0.4.0 (T3)
+CancunTime + HaberTime + HaberFixTime                     — v0.5.0 (T4)
+PascalTime + PragueTime + LorentzTime + MaxwellTime + BohrTime  — v0.6.0 (T5)
+FermiTime + OsakaTime + MendelTime                        — v0.7.0 (T6)
 ```
+
+> **Bohr / Fermi 在 ABCore 上的行为**：因 `BlockInterval` 已在 params override 为 3000ms（见 §1"代码现状"），Fermi 不改变出块速度。Bohr 的 TurnLength 在 ABCore 上默认仍为 1（`BSCValidatorSet.getTurnLength()` 在 `turnLength == 0` 时返回 1），与未激活 Bohr 时一致；唯一可见变化是 header.extra 末尾追加 1 字节 turnLength（值为 1）。将来要打开"动态 TurnLength"完全是治理操作（`updateParam("turnLength", N)`），与 fork 激活解耦。
+
+> **演练推荐顺序**（非代码依赖，基于风险隔离和观察窗口）：Shanghai/Feynman → Cancun → Prague+Lorentz+Maxwell+Bohr → Fermi+Osaka+Mendel，间隔排期以充分验证。
 
 ### 关于"13 个 BSC block forks 是 no-op"的说明
 
@@ -234,21 +261,21 @@ BSC 上游 Parlia `defaultEpochLength = 200` (`consensus/parlia/parlia.go:58`)�
 |--------|------|
 | Upgrade 1（Parlia）和 Upgrade 2（London）分两批 | 先稳定 Parlia 共识（≥1 Parlia epoch）再引入 basefee |
 | Upgrade 3（Feynman）和 Upgrade 4（Cancun）分开 | Feynman 有手动 validator 注册，独立后出问题更容易定位 |
-| LorentzTime / MaxwellTime 各留缓冲 | epoch 长度变化影响 validator rotation，需逐步验证 |
-| Bohr / Fermi 单独激活（若计划激活）| Fermi 的出块加速是高影响变更，需专项压测；Bohr 的 TurnLength 动态化影响较小但仍应独立验证 |
+| Upgrade 6（Fermi+Osaka+Mendel）和 Upgrade 5 分开 | Osaka 需要 `blobSchedule.osaka` 配置，与 Cancun blob schedule 解耦后更容易验证 |
+| LorentzTime / MaxwellTime 在 Upgrade 5 内部各留 1 天 / 7 天偏移 | epoch 长度变化影响 validator rotation，需逐步验证 |
 
 ---
 
-## 三、5 次升级详细内容
+## 三、6 次升级详细内容
+
+> **T 编号约定**：T1 / T2 不存在，因 Upgrade 1（Parlia）和 Upgrade 2（London）按**块高 N / M** 激活；从 Upgrade 3 起按**时间戳**激活，依次为 T3 (v0.4.0)、T4 (v0.5.0)、T5 (v0.6.0)、T6 (v0.7.0)。
 
 ### 每批次标准激活前 Checklist
 
 ```
 □ 1. 确认当前块高/时间戳，验证激活点仍有足够操作窗口（块高 fork：距 N 至少剩余 500 块；时间戳 fork：T 已硬编码于 binary，确认 T 距当前时间仍有足够替换窗口）
 □ 2. Observer 节点（非 validator）先运行新 binary，验证同步无崩溃（canary 检查）
-□ 3. 验证所有节点 NTP 偏差（chronyc tracking）：
-      - 所有 timestamp fork 前：< 1s
-      - 若计划激活 Bohr 或 Fermi（可选升级）：< 50ms
+□ 3. 验证所有节点 NTP 偏差（chronyc tracking）< 1s
 □ 4. 验证节点间 peer count 稳定（每个节点至少 2 个已连接 peer）
 □ 5. 发送测试交易，确认链正在出块
 □ 6. 停机前做全量 datadir 快照（clean shutdown 后再复制，见快照规程）
@@ -292,6 +319,77 @@ BSC 上游 Parlia `defaultEpochLength = 200` (`consensus/parlia/parlia.go:58`)�
 > **⚠️ 块高为演练示例值，不是预设的真实值。** N、M 及所有后续块高/时间戳均须在执行前根据实际环境重新设定：DevNet 可选较小值（如 N=500）缩短等待；Testnet/Mainnet 的具体值在 DevNet 演练通过后才确定。
 
 > **⚠️ Cutover 操作步骤参考 [fork-cutover-runbook.md](fork-cutover-runbook.md)。** 该 runbook 详述了"为什么 Phase 2 必须 rolling 升级（不能 stop-all）"、安全余量计算、abort 标准、后置验证。本节只列 N 的设定与块 N 自动行为，不重复 cutover 流程。
+
+<a id="blockscout-pre-cutover-checklist"></a>
+**Blockscout pre-cutover checklist：**
+
+任何下游 indexer 都要在 cutover 之前就把共识切换适配做完。Blockscout 的具体动作是确认 `BLOCK_TRANSFORMER=base`（默认值）而**不是** `clique`。
+
+**关键事实**：`eth_getBlockByNumber` 返回的 `miner` 字段直接来源于 `header.Coinbase`（见 [`internal/ethapi/api.go:1459`](../../internal/ethapi/api.go#L1459) 的 `"miner": head.Coinbase`），**不经过 `engine.Author()` 这个路径**。所以谁往 `header.Coinbase` 写什么，RPC 就返回什么。两个阶段下 Coinbase 的来源不同：
+
+| 阶段 | `header.Coinbase` 来源 | RPC `miner`（= 直接 marshal 的 Coinbase） | `base` transformer 的行为 |
+|---|---|---|---|
+| Clique (Phase 1) | Clique 协议规定 sealer 通过 extraData 末尾 65 字节签名表达，**`header.Coinbase` 必须为 `0x0000…0000`**（`consensus/clique/clique.go` 的 verify 规则会拒绝非零 Coinbase 的非 epoch 块） | `0x0000…0000` | 拿到 `0x0` —— 准确反映 header 内容。若想看真实 signer，得另外调 `clique_getSigner(blockHash)`（Blockscout 在 `base` 模式下不会这么做）。 |
+| Parlia (Phase 2+) | Parlia `Prepare()` 在 sealing 前把当前 validator 地址写进 `header.Coinbase`（见 [`consensus/parlia/parlia.go:1296`](../../consensus/parlia/parlia.go#L1296) 的 `header.Coinbase = p.val`） | 真实 validator 地址 | 拿到真实 validator 地址 —— 这就是 sealer 自己盖在 header 上的身份。 |
+
+参考：`Clique.Author()` 是会做 ecrecover 的（[`clique.go:215-217`](../../consensus/clique/clique.go#L215-L217)），但 `eth_getBlockByNumber` 不调用它；`Parlia.Author()` 反而**不**做 recovery，直接返回 `header.Coinbase`（[`parlia.go:340-342`](../../consensus/parlia/parlia.go#L340-L342)）—— 因为 Parlia 在 Prepare 时已经把正确地址写进 Coinbase 了，不需要再 recover。Blockscout `clique` transformer 的逻辑是**忽略 RPC `miner`**，自己拿 header extraData 的末尾 65 字节当 Clique seal 去 ecrecover；这在 Parlia 阶段就坏掉了 —— Parlia extraData 的布局是 `vanity(32) + validators(N×20) + vote_attestation + seal(65)`，末尾 65 字节确实是 seal，但 ecrecover 的是 Parlia 域的签名（hash 域不同），结果是个**确定性但毫无意义**的伪地址，每块一个，污染 `addresses` 表。
+
+Blockscout 在启动时一次性读取 `BLOCK_TRANSFORMER`，**不支持按块号切换**。所以唯一可行的策略是从一开始就用 `base`。`clique` 这个值是早期为兼容老旧不填 miner 字段的 RPC 节点留的兜底，现代 geth/abcore 的 RPC `miner` 在两个共识阶段都准确，`base` 在两个阶段都对。
+
+**Cutover 前的操作步骤（在 Blockscout 部署服务器上）：**
+
+```bash
+# 1. 查看当前值
+docker inspect <blockscout-backend-container> \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep BLOCK_TRANSFORMER
+
+# 2. 如果是 clique，改成 base：
+#    在 blockscout 的 docker-compose override 文件（例如 geth-clique-consensus.yml）里：
+#       BLOCK_TRANSFORMER: 'base'
+#    然后重启 backend：
+#       docker compose up -d --force-recreate backend
+
+# 3. 验证生效
+docker inspect <blockscout-backend-container> \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep BLOCK_TRANSFORMER
+# 三种可能输出，按下面这张表判断：
+#   BLOCK_TRANSFORMER=base    → OK，显式安全配置
+#   (空输出)                  → OK，未显式设置时 Blockscout 默认就是 base，安全。但建议
+#                                显式写 BLOCK_TRANSFORMER=base 让本检查命令始终有可读
+#                                输出，便于审计与值班交接。
+#   BLOCK_TRANSFORMER=clique  → BLOCKER，必须先改成 base 再进入 cutover
+```
+
+**如果错过了 pre-cutover，cutover 后才发现问题**（症状：dashboard 的 `total_addresses` 每秒涨，但链上 tx 极少）：
+
+```bash
+# 1. 改 BLOCK_TRANSFORMER=base 并重启 backend（如上）
+#
+# 2. 触发 Parlia 区块 refetch（让 base transformer 重写 miner）：
+psql -U blockscout -c "
+  INSERT INTO missing_block_ranges (from_number, to_number, priority)
+  VALUES (<current_head>, <PGB>, 5);"
+# (range 写法：from_number > to_number，indexer 从高到低拉)
+#
+# 3. 等 indexer 跑完（~1 分钟/几千块），然后清理孤儿地址：
+psql -U blockscout -c "
+  DELETE FROM addresses
+  WHERE contract_code IS NULL
+    AND (nonce IS NULL OR nonce = 0)
+    AND (fetched_coin_balance IS NULL OR fetched_coin_balance = 0)
+    AND hash NOT IN (SELECT DISTINCT miner_hash FROM blocks WHERE miner_hash IS NOT NULL)
+    AND hash NOT IN (SELECT DISTINCT from_address_hash FROM transactions
+                     UNION SELECT DISTINCT to_address_hash FROM transactions
+                     WHERE to_address_hash IS NOT NULL);"
+#
+# 4. last_fetched_counters.addresses_count 是 cached 值，会在下一个
+#    Blockscout 内部 recount 周期自动更新（≤ 1 小时）。不急可以等；
+#    急了可 DELETE 那一行让下次请求即时 recount。
+```
+
+DevNet 2026-05-14 cutover 验证过这套补救流程，约 1 分钟完成 2400 块 refetch。
 
 **params/config.go 修改：**
 ```go
@@ -580,12 +678,13 @@ cast send --blob --rpc-url http://rpc-0:8545 ...
 
 ---
 
-### Upgrade 5：v0.6.0 — Prague + Pascal + Lorentz + Maxwell
+### Upgrade 5：v0.6.0 — Prague + Pascal + Lorentz + Maxwell + Bohr
 
 **params/config.go 修改：**
 ```go
 PascalTime:  newUint64(T5),
 PragueTime:  newUint64(T5),
+BohrTime:    newUint64(T5),
 LorentzTime: newUint64(T5 + 86400),    // +1 天，epoch 200 → 500
 MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 ```
@@ -595,8 +694,11 @@ MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 **激活效果：**
 - Pascal：EIP-7623（calldata cost 调整）
 - Prague：EIP-7702（EOA 账户委托合约实现，委托状态持久写入账户）、EIP-2537（BLS12-381 precompile）
-- Lorentz：Parlia epoch 200 → 500 blocks
-- Maxwell：Parlia epoch 500 → 1000 blocks
+- Lorentz：Parlia epoch 200 → 500 blocks（**不改变出块速度**，见 §1"代码现状"）
+- Maxwell：Parlia epoch 500 → 1000 blocks（同上）
+- **Bohr：在 ABCore 上行为为 no-op**。系统合约 bytecode 已在 PGB 一次性部署到含 Bohr 改动的最终版（见 §1"one-shot system contract bytecode"）；`getTurnLength()` 在 `turnLength == 0` 时返回 1，跟未激活 Bohr 时的 `defaultTurnLength = 1` 一致。激活的唯一可见变化：epoch block header.extra 末尾追加 1 字节 turnLength（值为 1）。
+
+> **Bohr 为何并入主路径而非可选附录**：跟上 BSC 上游 fork 顺序，免去未来 sync upstream patch 时的踩坑风险。Bohr 在 ABCore 不引入实质功能变化，但保持代码层面"已激活 Bohr"的状态，能让将来的 BSC patch（依赖 Bohr 的功能）正常工作。将来要打开"动态 TurnLength"完全是治理操作（`updateParam("turnLength", N)`），与 fork 激活解耦。
 
 **验证清单：**
 ```bash
@@ -604,10 +706,46 @@ MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 # EIP-2537: BLS precompile 调用返回正确结果
 # Lorentz: 激活后第一个 epoch block 正常产生，validator rotation 正确，后续 epoch 间隔为 500 块
 # Maxwell: epoch 边界从 N*500 切换到 N*1000，validator rotation 正确
-# 链继续正常推进
+# Bohr: epoch block 的 extraData 包含 turnLength 字节（值=1），与 ValidatorContract.getTurnLength() 返回值一致
+# 链继续正常推进（出块速度仍为 3s/block）
 ```
 
 **观察窗口：≥ 9 天（T5 + 7 天等待 Maxwell 激活 + 48h 观察）**
+
+---
+
+### Upgrade 6：v0.7.0 — Fermi + Osaka + Mendel
+
+**params/config.go 修改：**
+```go
+FermiTime:  newUint64(T6),
+OsakaTime:  newUint64(T6),
+MendelTime: newUint64(T6),
+
+// BlobScheduleConfig 需要扩展：
+BlobScheduleConfig: &BlobScheduleConfig{
+    Cancun: DefaultCancunBlobConfig,
+    Prague: DefaultPragueBlobConfigBSC,
+    Osaka:  DefaultOsakaBlobConfigBSC,  // 新增
+},
+```
+
+> **为什么把 Fermi / Osaka / Mendel 合并到一个升级**：BSC 主网 2026-04-28 同一时间戳激活 Osaka + Mendel；Fermi 在 ABCore 上为 no-op（不改变出块速度，见 §1"代码现状"）。三者合并节省一次升级窗口。
+
+**激活效果：**
+- **Fermi：在 ABCore 上行为为 no-op**。上游 BSC 把 `FermiBlockInterval` 从 750ms 改为 450ms，但 ABCore 在 `params/protocol_params.go` 已 override 为 3000ms（与 `DefaultBlockInterval` 一致），出块速度不变。激活 Fermi 的目的是跟上 BSC 上游 fork 顺序。
+- Osaka：BPO (Blob Parameter Only) fork，引入新 blob schedule；要求 chain config 含 `blobSchedule.osaka` 字段，否则 `CheckConfigForkOrder` 在启动时报错。
+- Mendel：与 Osaka 同时激活；具体内容参考 BSC 上游 release notes。
+
+**验证清单：**
+```bash
+# 1. CheckConfigForkOrder 通过（chain config 含 blobSchedule.osaka）
+# 2. 出块速度仍为 3s/block（不变）
+# 3. blob tx 仍可正常发送和打包（Osaka schedule 不影响功能性）
+# 4. 链继续正常推进
+```
+
+**观察窗口：≥ 48h**
 
 ---
 
@@ -615,13 +753,14 @@ MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 
 | # | 版本 | Fork 内容 | 激活方式 | 特殊操作 | 观察窗口 |
 |---|------|-----------|----------|----------|---------|
-| 1 | v0.2.0 | ParliaGenesisBlock = 30001 | 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 30000 块（≈25h）|
-| 2 | v0.3.0 | London + 13 BSC block forks = 60001 | 块高 | Luban extraData 验证 | ≥ 48h |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 10 分钟内 5 个 validator 注册 StakeHub | ≥ 48h |
+| 1 | v0.2.0 | ParliaGenesisBlock = N（演练值 30001 / 实测值 50000）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 30000 块（≈25h）|
+| 2 | v0.3.0 | London + 13 BSC block forks = M | 块高 | Luban extraData 验证（在下个 ABCore epoch boundary = 30000 倍数）| ≥ 48h |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 ≤10 分钟内 5 个 validator 注册 StakeHub + delegate govAB | ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
-| 5 | v0.6.0 | Prague + Pascal = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察 | ≥ 9 天 |
+| 5 | v0.6.0 | Prague + Pascal + Bohr = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察；出块速度不变 | ≥ 9 天 |
+| 6 | v0.7.0 | Fermi + Osaka + Mendel = T6 | 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
 
-> **可选升级（Bohr / Fermi）**：不在标准路径中，可在主路径完成后按需激活，见文末附录。
+> 真正"可选"且暂未规划的 fork（BPO1 / BPO2 / Amsterdam / Pasteur）见文末附录。
 
 ---
 
@@ -633,11 +772,12 @@ MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 DevNet 搭建（abcore-v1，5 validator + 1 RPC 独立服务器）
   → Upgrade 1（Parlia 切换）+ snapshot restore drill
   → Upgrade 2（London + BSC forks）
-  → Upgrade 3（Feynman，coordinator 执行注册）
+  → Upgrade 3（Feynman，coordinator 执行 StakeHub 注册 + delegate govAB）
   → Upgrade 4（Cancun，BlobScheduleConfig 必设）
-  → Upgrade 5（Prague + Lorentz + Maxwell，9 天观察窗口）
+  → Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr，9 天观察窗口）
+  → Upgrade 6（Fermi + Osaka + Mendel，blobSchedule.osaka 必设）
 全部通过后
-  → Testnet 执行相同 5 步（各步观察窗口相同）
+  → Testnet 执行相同 6 步（各步观察窗口相同）
   → Testnet 稳定 ≥ 2 周后执行 Mainnet
 ```
 
@@ -664,8 +804,8 @@ DevNet 搭建（abcore-v1，5 validator + 1 RPC 独立服务器）
 
 ### Testnet
 
-- DevNet 5 步全部通过后执行
-- N、M、T3～T5 根据当前 Testnet 块高重新设定
+- DevNet 6 步全部通过后执行
+- N、M、T3～T6 根据当前 Testnet 块高重新设定
 - 时间戳 fork 的 T 值在发布 binary 时硬编码，选择距发布时间 ≥ 48h 的 UTC 整点
 - 同样需要执行 snapshot restore drill（在 Testnet 的非关键节点上执行）
 
@@ -729,9 +869,9 @@ load balancer 探针失败时自动摘除，其余健康节点继续服务，不
 - Upgrade 2 的 M 在 N+30000 之后（一个完整 Parlia epoch）
 - **Mainnet 激活后无法依赖"回滚"作为保险**（见背景章节）
 
-### 可选：Upgrade 1+2 合并（执行次数减少为 4 次）
+### 可选：Upgrade 1+2 合并（执行次数减少为 5 次）
 
-> 注：主路径逻辑上仍是 5 步（Upgrade 1–5），合并 Upgrade 1+2 是指将两次 binary 替换操作合并为一次执行窗口，执行次数从 5 次减为 4 次，逻辑步骤数不变。
+> 注：主路径逻辑上仍是 6 步（Upgrade 1–6），合并 Upgrade 1+2 是指将两次 binary 替换操作合并为一次执行窗口，执行次数从 6 次减为 5 次，逻辑步骤数不变。
 
 - 仅适用于 DevNet 演练，Testnet/Mainnet 不推荐
 - 合并条件：ParliaGenesisBlock=N，LondonBlock=M，gap ≥ 30000 块（一个完整 Parlia epoch）
@@ -755,13 +895,14 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 ## 八、Mainnet 升级 FAQ（外部集成方参考）
 
-> 本节作用域：Mainnet 五次升级（主路径 Upgrade 1–5，不含可选 Bohr/Fermi）对外部集成方的影响，用于协调外部对接团队的准备工作。
+> 本节作用域：Mainnet 六次升级（主路径 Upgrade 1–6）对外部集成方的影响，用于协调外部对接团队的准备工作。
 > DevNet / Testnet 升级仅用于内部演练，不作为对外服务承诺的参考。
 > "链不中断"指链持续出块、RPC 持续可用；不代表所有外部集成无需任何适配。RPC 方法名向后兼容，但各升级后区块 schema 会新增字段、引入新交易类型，严格 JSON schema 解析或 ORM 映射的集成方需关注兼容性。
+> **ABCore 永久维持 3 秒出块间隔**（见 §1"代码现状"），所有升级不改变出块速度；外部集成无需为出块加速做适配。
 
 ---
 
-### Q1：Mainnet 五次升级总共需要多长时间？
+### Q1：Mainnet 六次升级总共需要多长时间？
 
 #### 时间构成（每次升级）
 
@@ -770,7 +911,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | 提前通知期 | 向外部集成方发布升级公告；交易所、跨链桥、托管、硬件钱包厂商通常需要更长准备周期 | 建议提前 ≥ 2 周；对有固件/App 发版、变更审批需求的对接方，建议 4 周 |
 | 操作窗口 | 逐节点替换 binary（滚动，链不中断） | 2–4 小时 |
 | 激活缓冲 | T 在发布 binary 时硬编码，与块高激活对称；Mainnet 建议 T 距发布时间 ≥ 1 周，DevNet/Testnet 建议 ≥ 48h | 无额外等待；替换窗口已包含在通知期内 |
-| 观察窗口 | 激活后验证各项指标（见下表）；Upgrade 1–4 为运维/风控门槛，Upgrade 5 的 9 天含协议固定偏移（Maxwell = T5+7d） | 各升级不同 |
+| 观察窗口 | 激活后验证各项指标（见下表）；Upgrade 1–4 / 6 为运维/风控门槛，Upgrade 5 的 9 天含协议固定偏移（Maxwell = T5+7d） | 各升级不同 |
 | 间隔缓冲 | 确认稳定后才排期下一次升级 | 稳妥模式：1–2 周 |
 
 #### 各升级观察窗口
@@ -779,11 +920,10 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |---|------|---------|------------|------|
 | 1 | v0.2.0 Parlia | 块高（自动）| ≥ 25h（≥ 30000 块）| 需等待至少 1 个完整 Parlia epoch |
 | 2 | v0.3.0 London+BSC forks | 块高（自动）| ≥ 48h | London baseFee 和 Luban extraData 须专项验证 |
-| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后约 10 分钟内须完成 5 个 validator StakeHub 注册 |
+| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后约 10 分钟内须完成 5 个 validator StakeHub 注册 + delegate govAB |
 | 4 | v0.5.0 Cancun | 时间戳 | ≥ 48h | — |
-| 5 | v0.6.0 Prague/Maxwell | 时间戳 | ≥ 9 天 | Lorentz = T5+1d；Maxwell = T5+7d（协议配置固定）；Maxwell 激活后再观察 ≥ 48h |
-| — | Bohr（可选）| 时间戳 | ≥ 24h | TurnLength 动态化，出块速度不变；可在主路径完成后按需激活 |
-| — | Fermi（可选）| 时间戳 | ≥ 24h（压测）| 出块间隔降至约 450ms，高影响，需专项压测；见附录 |
+| 5 | v0.6.0 Prague + Pascal + Lorentz + Maxwell + Bohr | 时间戳 | ≥ 9 天 | Lorentz = T5+1d；Maxwell = T5+7d（协议配置固定）；Maxwell 激活后再观察 ≥ 48h；Bohr 在 ABCore 上为 no-op |
+| 6 | v0.7.0 Fermi + Osaka + Mendel | 时间戳 | ≥ 48h | Fermi 在 ABCore 上为 no-op（出块速度不变）；Osaka 需要 blobSchedule.osaka 配置 |
 
 > **Upgrade 5 的 9 天含不可提前的协议配置**（Maxwell 时间点由链配置写死为 T5+7d），与间隔缓冲无关。
 
@@ -791,10 +931,10 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 | 模式 | 说明 | 估算总时长 |
 |------|------|----------|
-| 激进模式（不推荐用于 Mainnet）| 各升级观察窗口结束后立即排期下一次，无额外间隔缓冲 | 约 16 天（观察窗口合计约 13 天 + 操作/激活开销）|
+| 激进模式（不推荐用于 Mainnet）| 各升级观察窗口结束后立即排期下一次，无额外间隔缓冲 | 约 17 天（观察窗口合计约 15 天 + 操作/激活开销）|
 | 稳妥模式（推荐）| 每次升级间隔 1–2 周（含观察窗口和缓冲），Upgrade 5 内部含固定 9 天 | 约 2–3 个月 |
 
-> 实际排期还需叠加：外部集成方准备时间、公告发布周期、Testnet 稳定运行要求（≥ 2 周）。Mainnet 推进前须先在 Testnet 完成相同 5 步演练。
+> 实际排期还需叠加：外部集成方准备时间、公告发布周期、Testnet 稳定运行要求（≥ 2 周）。Mainnet 推进前须先在 Testnet 完成相同 6 步演练。
 
 ---
 
@@ -810,9 +950,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | Upgrade 2（London+BSC forks）| 手续费模型变化：钱包开始展示 base fee + priority fee；Gas 更可预测；旧式 gasPrice 交易仍可提交 | 确认所使用的钱包已适配 EIP-1559 fee 展示 |
 | Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 对普通转账透明；StakeHub 注册在激活后约 10 分钟内完成，链正常出块。极端情形（≥ 2 个 validator 漏注册）可能出现短时出块抖动（概率极低，有 DevNet/Testnet 演练保障） | 无需操作；可关注官方状态页 |
 | Upgrade 4（Cancun）| 引入 blob 交易（type-3）；通常情况下普通用户不会直接发送 blob 交易；区块头新增 blob 相关字段 | 无需操作 |
-| Upgrade 5（Prague + Lorentz + Maxwell）| EIP-7702：EOA 可通过 type-4 set-code 交易将其账户委托给合约实现；**委托状态写入账户，持续有效直到主动撤销**；普通 ETH 和 ERC-20 转账不受影响。Lorentz/Maxwell：Parlia epoch 长度变化（200→500→1000），对普通转账透明 | 无需操作；如有账户抽象需求可在此升级后评估 |
-
-> **可选升级 Fermi（出块速度变化）**：若后续激活 Fermi，出块速度提升约 6.7 倍（从 3s 降至约 450ms）；依赖固定出块时间（如硬编码 3s 等待）的 DApp 行为会变化。激活 Fermi 前将单独发布升级通知，届时由 DApp 开发者评估适配（建议改为事件驱动）。
+| Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| EIP-7702：EOA 可通过 type-4 set-code 交易将其账户委托给合约实现；**委托状态写入账户，持续有效直到主动撤销**；普通 ETH 和 ERC-20 转账不受影响。Lorentz/Maxwell：Parlia epoch 长度变化（200→500→1000），对普通转账透明。Bohr 在 ABCore 上为 no-op | 无需操作；如有账户抽象需求可在此升级后评估 |
+| Upgrade 6（Fermi + Osaka + Mendel）| 在 ABCore 上**出块速度仍为 3s**（不变）；Fermi 上游本应降至 450ms，已在 params override；Osaka 引入新 blob schedule，普通用户不感知 | 无需操作 |
 
 #### b. AB Connect ↔ BSC 跨链桥
 
@@ -824,8 +963,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | Upgrade 2（London+BSC forks）| 区块头格式变化、EIP-1559 fee 模型影响 |
 | Upgrade 3（Feynman）| 激活前后监控跨链事件处理正常 |
 | Upgrade 4（Cancun）| 新区块头字段、新交易类型影响 |
-| Upgrade 5（Prague / EIP-7702）| 新交易类型、EOA 账户委托机制对桥安全假设的影响 |
-| Fermi（可选升级）| 出块间隔变化对超时参数、轮询逻辑的影响；激活前单独通知 |
+| Upgrade 5（Prague / EIP-7702 / Bohr）| 新交易类型、EOA 账户委托机制对桥安全假设的影响；Bohr 在 ABCore 上为 no-op |
+| Upgrade 6（Fermi / Osaka / Mendel）| Fermi 在 ABCore 上为 no-op（出块速度不变）；Osaka blob schedule 变化对跨链 blob tx 的影响（若有） |
 
 #### c. AB IOT ↔ AB Connect 跨链桥
 
@@ -841,9 +980,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | Upgrade 2（London+BSC forks，含 Luban）| baseFeePerGas 引入，原 gasPrice 估算可能不足；归集、提现、nonce 管理、replace-by-fee 逻辑均受影响；须确保 gasPrice ≥ baseFee + 目标 tip | 【强制】更新热钱包/提现服务的 gas 估算：支持 EIP-1559 fee（maxFeePerGas / maxPriorityFeePerGas）；或验证 type-0 legacy tx（gasPrice ≥ baseFee + tip）可正常广播打包 |
 | Upgrade 3（Feynman）| ERC-20 事件无变化；链正常运行 | 监控即可；参考下方 Feynman 注解 |
 | Upgrade 4（Cancun）| 引入 type-3 blob 交易；区块头新增字段；ERC-20 充提逻辑不变 | 【强制】确认交易解析器对 type-3 tx 不会崩溃（可识别并跳过，不静默解码失败） |
-| Upgrade 5（Prague + Lorentz + Maxwell）| ERC-20 Transfer 事件和充提流程无变化；type-4 为新交易类型；EIP-7702 授权账户的 code 为 `0xef0100 + target_address` 委托标记（不是普通合约 bytecode），extcodesize > 0；Lorentz/Maxwell 修改 Parlia epoch 长度（200→500→1000 blocks），与出块间隔无关，对充提业务透明 | 确认交易解析器对 type-4 tx 不会崩溃；若有"充币地址非合约（extcodesize == 0）"校验逻辑，需评估 EIP-7702 授权账户的影响（授权持续到主动撤销） |
-
-> **可选升级 Fermi（出块速度变化）**：若后续激活 Fermi，原"N 个确认"对应的时间大幅缩短（约 1/6.7）；入账速度加快，但原有安全性假设须重新核验。届时【强制】重新评估确认数策略，须结合 Fermi 后的重组特性和最终性模型与安全/风控团队共同制定；**不应机械地按 ×6.7 换算**（时间等价 ≠ 安全性等价）。激活 Fermi 前将单独发布升级通知。
+| Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| ERC-20 Transfer 事件和充提流程无变化；type-4 为新交易类型；EIP-7702 授权账户的 code 为 `0xef0100 + target_address` 委托标记（不是普通合约 bytecode），extcodesize > 0；Lorentz/Maxwell 修改 Parlia epoch 长度（200→500→1000 blocks），与出块间隔无关，对充提业务透明；Bohr 在 ABCore 上为 no-op | 确认交易解析器对 type-4 tx 不会崩溃；若有"充币地址非合约（extcodesize == 0）"校验逻辑，需评估 EIP-7702 授权账户的影响（授权持续到主动撤销） |
+| Upgrade 6（Fermi + Osaka + Mendel）| ERC-20 充提逻辑不变；出块速度仍为 3s（不变）；Osaka 引入新 blob schedule，对 ERC-20 充提无影响 | 无需操作；确认数策略沿用现有规则 |
 
 > **Upgrade 3 Feynman StakeHub 注册失败的外部表现**：
 > - 若在 T3 到达前发现准备不足，可发布新 binary（将 T3 设为 maxUint64）暂停激活并重新排期；一旦 T3 已到达，无法撤销激活，进入应急恢复流程
@@ -861,8 +999,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | Upgrade 2（London+BSC forks，含 Luban）| baseFeePerGas 字段展示；epoch block 每条 validator 记录 68B 格式；type-2 tx 索引 |
 | Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 的 tracer/反编译器支持；opcode 表更新 |
 | Upgrade 4（Cancun）| 区块头新增 blob 相关字段（blobGasUsed、excessBlobGas 等）；type-3 blob tx 索引；blob sidecar 查询（需确认 AB Chain 是否实现对应 RPC 方法） |
-| Upgrade 5（Prague+Lorentz+Maxwell）| type-4 EIP-7702 tx 索引；BLS precompile（EIP-2537）调用记录；7702 授权账户状态展示；epoch 长度变化（200→500→1000）对 validator rotation 监控和 epoch block 解析的影响 |
-| Fermi（可选升级）| 出块速度提升后 indexer 摄入速率、存储 I/O、RPC QPS 压力评估；激活前单独通知 |
+| Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| type-4 EIP-7702 tx 索引；BLS precompile（EIP-2537）调用记录；7702 授权账户状态展示；epoch 长度变化（200→500→1000）对 validator rotation 监控和 epoch block 解析的影响；Bohr 后 epoch block extraData 末尾追加 1 字节 turnLength（值=1），解析器须容忍 |
+| Upgrade 6（Fermi + Osaka + Mendel）| Osaka blob schedule 字段变化（若 indexer 解析 blob schedule 配置）；Fermi 在 ABCore 上为 no-op，无 indexer 影响 |
 
 ---
 
@@ -876,8 +1014,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 | Upgrade 2（London+BSC forks）| baseFeePerGas 引入；fee market 模型变化 | ① 正确处理 baseFee（gas 估算须满足 gasPrice ≥ baseFee + 目标 tip，避免合法但长时间不打包）；② 支持展示 EIP-1559 fee 参数（建议）；③ 若继续支持 legacy type-0 tx，则追踪 baseFee 是【强制】（不是可选）——可选的是"是否继续支持 legacy 发送"，但支持后必须正确处理 baseFee | 【强制：①；继续支持 legacy 路径时③也为强制】【建议：②】|
 | Upgrade 2（type-2 支持）| type-2 tx 为可选新能力 | 支持 type-2 签名和广播是**可选能力**；但不支持时遇到 type-2 须明确报错/提示，不可静默失败或返回错误 gas 估算 | 【可选支持；遇到 type-2 时明确拒绝为强制】|
 | Upgrade 3–4 | EVM opcode / blob tx | Upgrade 3 对钱包透明；Upgrade 4 若展示 tx 列表须能渲染 type-3（blob）而不崩溃；通常情况下用户不会发送 blob tx | — / 建议 |
-| Upgrade 5（Prague + Lorentz + Maxwell）| EIP-7702：EOA 可通过 type-4 set-code tx 委托合约实现，**委托写入账户状态，持续有效直到主动撤销**；Lorentz/Maxwell 修改 Parlia epoch 长度（200→500→1000 blocks），对钱包功能透明 | ① 对 7702 授权账户（账户代码为 EIP-7702 委托标记 `0xef0100 + target_address`，区别于普通合约字节码）须展示安全提示，告知用户该账户已委托合约实现；② 对未知 tx type（type-4）须明确拒绝或提示，不可静默失败；③ 支持发起 type-4 tx（可选，高级功能） | 【强制：①②】【可选：③】|
-| Fermi（可选升级）| 出块速度降至约 450ms | Receipt 轮询间隔可缩短以改善确认速度体验；固定定时器可优化；无兼容性破坏 | 建议（UX 优化），激活前单独通知 |
+| Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| EIP-7702：EOA 可通过 type-4 set-code tx 委托合约实现，**委托写入账户状态，持续有效直到主动撤销**；Lorentz/Maxwell 修改 Parlia epoch 长度（200→500→1000 blocks），对钱包功能透明；Bohr 在 ABCore 上为 no-op | ① 对 7702 授权账户（账户代码为 EIP-7702 委托标记 `0xef0100 + target_address`，区别于普通合约字节码）须展示安全提示，告知用户该账户已委托合约实现；② 对未知 tx type（type-4）须明确拒绝或提示，不可静默失败；③ 支持发起 type-4 tx（可选，高级功能） | 【强制：①②】【可选：③】|
+| Upgrade 6（Fermi + Osaka + Mendel）| 出块速度仍为 3s（不变）；Osaka 引入新 blob schedule，普通转账不感知 | 无需变化 | — |
 
 #### 分阶段行动清单
 
@@ -897,9 +1035,8 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 **Upgrade 5 后（可选后续）**：
 - 评估是否支持 type-4 tx 构造（账户抽象高级功能）
 
-**可选升级 Fermi 激活前（届时单独通知）**：
-- 评估 receipt 轮询策略（可缩短间隔或改用订阅）
-- 检查"待确认"tx 的 timeout 逻辑（若基于时间不需改动；若基于块数则受出块加速影响）
+**Upgrade 6 前**：
+- 对未知 tx type 实现明确拒绝或提示（Osaka 后 blob schedule 字段会变化）
 
 #### 硬件钱包兼容性建议
 
@@ -913,83 +1050,34 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 ## 附录：可选升级
 
-> 本附录列出不在标准 5 步升级路径中、但可按需激活的 fork。与主路径的 fork 相比，这些升级没有强制依赖关系（仅需 London 已激活），可在主路径完成、网络稳定后根据运营需求决定是否激活及激活时机。
+> 本附录列出代码已有 fork time 字段、但 BSC 上游尚未上线或定位未明、暂不规划进 ABCore 主路径升级的 fork。任何决定激活前需单独 review。
 >
 > **激活前提**：均需要 London（LondonBlock）已激活。
-> **激活顺序**：各可选升级之间无强制顺序依赖，但配置时须满足 `params/config.go` 中 `CheckConfigForkOrder` 的时间戳升序要求。
+> **激活顺序**：各可选 fork 之间无强制顺序依赖，但配置时须满足 `params/config.go` 中 `CheckConfigForkOrder` 的时间戳升序要求。
 
-### Bohr（可选）
+### BPO1 / BPO2（可选）
 
-**实际效果**：
-- `TurnLength` 改为动态读取：每个 epoch block 从 ValidatorSet 系统合约读取 TurnLength 并写入 extraData
-- 默认 `TurnLength = 1`（等同于未激活 Bohr 时的行为），激活后若合约未设置则仍保持 1
-- **出块速度不变**：Bohr 本身不改变出块间隔；出块间隔由时间戳 fork 控制（Lorentz=1500ms，Maxwell=750ms，Fermi=450ms）
+**状态**：BSC 上游已定义字段（`BPO1Time` / `BPO2Time`，`params/config.go` 中均为 `nil`），但 BSC 主网尚未激活。BPO = Blob Parameter Only fork（仅修改 blob schedule 容量参数，不引入 EVM 功能）。
 
-**代码依据**：`IsBohr()` 仅依赖 `IsLondon() && isTimestampForked(BohrTime)`，与 Lorentz/Maxwell/Prague 零依赖（`params/config.go` 确认）。
-
-**何时考虑激活**：当需要动态调整 TurnLength（每个 validator 连续出块数）时。对于固定 TurnLength=1 的网络，Bohr 无实质收益，可跳过。
-
-**激活前置条件**：
-- rpc-0 已独立服务器（若 TurnLength 调大，出块密度上升）
-- NTP 偏差 < 50ms
-- 节点间延迟 < 100ms（ping 互测）
-
-**params/config.go：**
-```go
-BohrTime: newUint64(T_bohr),  // T_bohr 在 binary 发布时硬编码，建议距发布 ≥ 48h
-```
-
-**验证清单：**
-```bash
-# 1. epoch block 的 extraData 中 TurnLength 字段存在（epoch block 为 epoch 长度整数倍）
-# 2. TurnLength 与 ValidatorSet 合约返回值一致
-# 3. 链继续正常推进，无 consensus 错误
-```
-
-**观察窗口：≥ 2 个完整 epoch（epoch 长度取决于当前激活的 fork：激活 Lorentz 前为 200 块≈10 分钟；激活 Maxwell 后为 1000 块≈50 分钟；选较长者确保充分验证）**
+**何时考虑激活**：跟随 BSC 上游激活节奏。具体内容、性能影响以 BSC 上线后的实测数据为准。
 
 ---
 
-### Fermi（可选，出块间隔 → 450ms）
+### Amsterdam / Pasteur（可选）
 
-**实际效果**：
-- 出块间隔从当前值（默认 3s；若已激活 Lorentz 则 1500ms；若已激活 Maxwell 则 750ms）降至约 450ms
-- **这是真正改变出块速度的 fork**，而非 Bohr
-
-**代码依据**：`IsFermi()` 仅依赖 `IsLondon() && isTimestampForked(FermiTime)`。
-
-**⚠️ 高影响变更**，激活前须满足：
-- rpc-0 已独立服务器（必须，避免 IO/CPU 竞争导致 missed block）
-- 所有 validator 节点间网络延迟 < 100ms（ping 互测验证）
-- NTP 偏差 < 50ms（chronyc tracking）
-
-**params/config.go：**
-```go
-FermiTime: newUint64(T_fermi),  // T_fermi 在 binary 发布时硬编码，建议距发布 ≥ 48h
-```
-
-**验证清单：**
-```bash
-# 出块速率监控：统计 100 块窗口内的平均出块间隔
-# (block_N.timestamp - block_{N-100}.timestamp) / 100，期望 ≈ 0.45s
-# missed block 率（滚动 1 小时内 missed > 10% 即回滚）
-# consensus 错误日志（任意 validator 出现即调查）
-# 网络分叉检查（所有节点 eth.blockNumber 一致）
-```
-
-**回滚触发条件（任一满足即立即回滚）：**
-- 滚动 1 小时内 missed block > 10%
-- 任意两节点出现不同 head hash（分叉）
-- 任意 validator state root 不匹配
-- 任意 validator invalid block import 错误
-
-**观察窗口：≥ 24h 专项压测**
+**状态**：上游字段已定义（`AmsterdamTime` / `PasteurTime`），但 BSC 主网尚未激活。具体内容需在 BSC 上线后 review。
 
 ---
 
-### 说明：Bohr 与 Lorentz/Maxwell/Prague 的依赖关系
+### 关于 Bohr / Fermi / Osaka / Mendel 不在本附录的说明
 
-`IsLorentz()`、`IsMaxwell()`、`IsPrague()` 均只依赖 `IsLondon()`，与 `IsBohr()` 零关联。Bohr 的 TurnLength 动态读取功能在 Lorentz/Maxwell 的 epoch 计算逻辑中不参与，可完全独立于主路径激活，也可永久跳过。
+这四个 fork **已纳入主路径**（Bohr 进 v0.6.0，Fermi+Osaka+Mendel 进 v0.7.0），不是"可选"。理由：
+
+- BSC 主网均已激活（Bohr=2024-09-26、Fermi=2026-01-14、Osaka/Mendel=2026-04-28）
+- 对 ABCore 上的运行行为都是 no-op 或仅小幅配置变化（Osaka 需要 `blobSchedule.osaka` 字段），无实质风险
+- 跟上 BSC 上游 fork 顺序可避免未来 sync upstream patch 时的依赖踩坑
+
+代码层面 `IsBohr` / `IsFermi` / `IsOsaka` / `IsMendel` 均只依赖 `IsLondon()`，与其它 fork 零关联，因此即便希望"永远不激活"也是技术上可行的；但 ABCore 当前的运营决策是按主路径激活。
 
 ---
 
@@ -997,11 +1085,83 @@ FermiTime: newUint64(T_fermi),  // T_fermi 在 binary 发布时硬编码，建�
 
 | 资源 | 路径 |
 |------|------|
-| Fork 激活路径完整文档 | `.claude/fork-activation-roadmap.md` |
-| 共识切换回滚 Runbook | `docs/ops/consensus-switch-rollback-runbook.md` |
-| Validator 升级 Runbook | `docs/ops/validator-upgrade-v1-to-v2.md` |
-| 链参数配置 | `params/config.go`（ABCoreMainChainConfig / ABCoreTestChainConfig）|
-| 系统合约 bytecode | `core/systemcontracts/parliagenesis/` |
-| 混版本兼容性测试脚本 | `script/compat-clique-v1-v2/` |
-| 过渡测试脚本 | `script/transition-test/` |
-| 本地 Parlia devnet | `script/local-v2/` |
+| 共识切换 cutover Runbook | [docs/ops/fork-cutover-runbook.md](fork-cutover-runbook.md) |
+| 共识切换回滚 Runbook | [docs/ops/consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) |
+| Validator 升级 Runbook | [docs/ops/validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md) |
+| 节点部署文档 | [docs/ops/node-deployment-v2.md](node-deployment-v2.md) |
+| 链参数配置 | `params/config.go`（ABCoreMainChainConfig / ABCoreTestChainConfig / ABCoreDevnetChainConfig）|
+| Block interval 常量（永久 3 秒）| `params/protocol_params.go:200-203` |
+| System contract one-shot 部署 | `core/systemcontracts/upgrade.go:1453-1475` |
+| 系统合约 bytecode | `core/systemcontracts/parliagenesis/{mainnet,testnet,default}/` |
+| Genesis contract 源码 | `https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract` |
+| 演练脚本 README（工程视角）| [script/test/upgrade-drill/README.md](../../script/test/upgrade-drill/README.md) |
+| 混版本兼容性测试脚本 | `script/test/compat/` |
+| 过渡测试脚本 | `script/test/transition/` |
+| 本地 Parlia devnet | `script/local/` |
+
+---
+
+## 十、Execution History（devnet 实际执行记录）
+
+> 本节记录 devnet 每一次升级的实际执行情况，作为 testnet/mainnet 同阶段升级的参照模板。每行记录三件事：calculation basis 和 ETA 准确性、触达的代码改动 PR、跨越过程中踩到的坑及对应修复。
+
+### v0.2.0 — Phase 2: Clique → Parlia cutover
+
+| 项 | 值 |
+|---|---|
+| Target activation | 2026-05-14 ~08:00 UTC |
+| Actual cutover ts | **2026-05-14T07:58:43Z**（比 target 早 77 s）|
+| Cutover block | 50000 |
+| Calculation basis | head=#36871 @ 2026-05-13T21:02Z, period=3.03 s/block, safety=13129 blocks ≈ 11h |
+| Image tag | v0.2.0 |
+| Activation PR | [#94](https://github.com/ABFoundationGlobal/abcore-v2/pull/94) — `params/config.go` `ParliaGenesisBlock: 50000` |
+| 配套 PRs | [#82](https://github.com/ABFoundationGlobal/abcore-v2/pull/82) seal-race retry-loop tuning · [#84](https://github.com/ABFoundationGlobal/abcore-v2/pull/84) `stop_below_pgb_or_die` 三层防御 Layer A · [#85](https://github.com/ABFoundationGlobal/abcore-v2/pull/85) `docs/ops/fork-cutover-runbook.md` Layer B · [#86](https://github.com/ABFoundationGlobal/abcore-v2/pull/86) `VerifyForkBlockOnDisk` engine refuse-to-start Layer C · [#90](https://github.com/ABFoundationGlobal/abcore-v2/pull/90) `--abcore.devnet` flag + `MuirGlacierBlock` align · [#91](https://github.com/ABFoundationGlobal/abcore-v2/pull/91) remove `script/devnet/` (superseded by devnet-ops) · [#93](https://github.com/ABFoundationGlobal/abcore-v2/pull/93) runbook Jenkins automation notes · [#95](https://github.com/ABFoundationGlobal/abcore-v2/pull/95) T-1.7 partial-upgrade rollback drill · [#96](https://github.com/ABFoundationGlobal/abcore-v2/pull/96) Blockscout `BLOCK_TRANSFORMER=base` checklist |
+| devnet-ops PRs | #3 §3.4 + §3.5 Jenkins automation · #4 `muirGlacierBlock: 0` in Jenkinsfile.init |
+
+**踩到的问题 + 修复**：
+
+1. **Fork-block seal-window race**（2026-05-07 incident，DevNet）—— "engine bug" 假象。
+   - 现象：测试脚本 `wait_for_same_head` → `03-stop.sh` 之间 Clique 偶尔多 seal 一个块到 height==PGB，重启用新 chain config 时 Parlia 规则把这个 Clique-form 块判 `errInvalidSpanValidators`，链在 fork block 死锁。
+   - 根因：测试脚本约束违反，但同时也是真实 production cutover 风险（stop-all-then-restart-all 模式）。
+   - 三层防御：[#84](https://github.com/ABFoundationGlobal/abcore-v2/pull/84) (`stop_below_pgb_or_die` 在测试脚本 fail-fast) + [#85](https://github.com/ABFoundationGlobal/abcore-v2/pull/85) (cutover runbook 改为 rolling-only SOP) + [#86](https://github.com/ABFoundationGlobal/abcore-v2/pull/86) (engine 启动时检测 Clique-form 在 PGB 直接 refuse-to-start)。
+
+2. **MuirGlacierBlock 不一致**（2026-05-11 发现）—— rolling upgrade compat 隐患。
+   - 现象：V1→V2 CheckCompatible 测试发现 V1 inline genesis.json 不含 `muirGlacierBlock`，但 `ABCoreDevnetChainConfig` 设了 `MuirGlacierBlock=big.NewInt(0)`，rolling upgrade 时 `ConfigCompatError`。
+   - 修复：devnet-ops #4 给 Jenkinsfile.init 加 `'muirGlacierBlock': 0`；[#90](https://github.com/ABFoundationGlobal/abcore-v2/pull/90) 同步 abcore-v2 + 加 `TestABCoreDevnetCompatWithLiveGenesis` 钉死契约。
+
+3. **Blockscout `BLOCK_TRANSFORMER=clique` 在 Parlia 阶段产生伪 miner 地址**（2026-05-14 cutover 后发现）—— indexer 配置错误。
+   - 现象：cutover 后 ~3h，Blockscout `total_addresses` 从 9 涨到 2388（每个 Parlia 块 +1 个伪地址）。
+   - 根因：`BLOCK_TRANSFORMER=clique` 让 Blockscout 忽略 RPC `miner` 字段，自己拿 extraData 后 65 字节当 Clique seal ecrecover；Parlia extraData 布局不同，ecrecover 出确定性但毫无意义的伪地址。
+   - 现场修复：`BLOCK_TRANSFORMER=base` + Parlia 区间 refetch + DELETE 孤儿 `addresses` 行（2388 → 23 行）。
+   - 文档化：[#96](https://github.com/ABFoundationGlobal/abcore-v2/pull/96) cutover runbook 加 pre-cutover checklist。
+   - **教训**：所有下游 indexer 的 consensus-switch 适配必须在 cutover **之前**确认。
+
+### v0.3.0 — Phase 3: London + 13 BSC block forks
+
+| 项 | 值 |
+|---|---|
+| Target activation | 2026-05-18 ~08:00 UTC |
+| Actual cutover ts | **2026-05-18T08:08:43Z** (block 165400 sealed) |
+| Cutover block | 165400 |
+| Calculation basis | head=#152404 @ 2026-05-17T21:18Z, period=3.000 s/block (实测精确), safety=12996 blocks ≈ 10.83h |
+| Image tag | v0.3.0 |
+| Activation PR | [#98](https://github.com/ABFoundationGlobal/abcore-v2/pull/98) — `params/config.go` 14 个 fork field 同设 165400 |
+| 配套 PRs | [#99](https://github.com/ABFoundationGlobal/abcore-v2/pull/99) — docs + abcoreDevNet 路由对称化（v0.3.0 retro 引发）|
+
+**踩到的问题（升级 day 实测）**：
+
+1. **错误地以为 fork block 165400 自身应该是 Luban-form 438B extraData** —— 实际链上是 97B，对吗？
+   - 校准：M=165400 选址时计算用了 Parlia `defaultEpochLength=200` 假设（`165400 % 200 == 0`），但 ABCore devnet 实际 `snap.EpochLength=30000`（PGB 时从 Clique config 拷贝，PR #84 路径），`165400 % 30000 = 5400 ≠ 0`，**165400 不是 epoch block**。
+   - 结果：`prepareValidators` 在非 epoch block 直接 return nil 不写 validator list，**97B 是正确行为**。
+   - 真正的 Luban-form 验证块是下一个 epoch block 180000（实测 2026-05-18T20:18:43Z 出 438B extraData，6/6 节点 hash 一致 `0x449ecb..711ae6`）。
+
+2. **错误地以为 `lubanUpgrade[abcoreDevNet]` 漏注册导致 bytecode 没升级**
+   - 实际：ABCore 一次性字节码部署 → 后续 fork 都不需要 bytecode 升级 → `Empty upgrade config network=Default height=165400` log 是预期 INFO，不是 bug。PR #99 起 early-return 跳过这段，日志干净。
+   - 调试用错 selector：从 BSC mainnet bytecode 反推用了 `0x96713da9`，但 ABCore 编译版 `getMiningValidators()` selector 是 `0x4df6e0c3`。用正确 selector 调用：返回 5 validators + 5 空 BLS pubkey，**完全正常**。
+   - **教训**：调试 BSC 合约 ABI 时去 `consensus/parlia/abi.go` 查 ABCore 编译版 ABI，不要从 BSC mainnet deployed bytecode 反推。
+
+**Verification 结果**：✓ chain config gates 全部生效 ✓ EIP-1559 header schema ✓ `getMiningValidators()` 返回 5 validators ✓ Parlia round-robin 健康 ✓ legacy type-0 tx 仍可发送 ✓ block 180000 Luban epoch block 438B extraData。**v0.3.0 升级完全成功**。
+
+### v0.4.0+ — 后续 upgrades（待执行）
+
+模板待 v0.4.0（Shanghai + Kepler + Feynman + FeynmanFix）实际执行时按 v0.2.0/v0.3.0 同样格式补全。
