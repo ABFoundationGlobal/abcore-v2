@@ -372,6 +372,53 @@ for i in 0 1 2; do
   fi
 done
 
+# ── Phase 5b: self-delegate govAB voting power via StakeHub.delegate() ────────
+# createValidator() mints govAB via GovToken.sync() but does NOT call
+# delegateVote(), so getVotes() == 0.  Call StakeHub.delegate(operator, true)
+# for each validator to stake 1 more BNB and activate their voting-power
+# checkpoint. Required for any governance operations (BSCGovernor.propose).
+log "Self-delegating govAB voting power for all validators via StakeHub..."
+_DEL_SIG="delegate(address,bool)"
+_DEL_SEL=$(attach_exec "$GETH" "$IPC1" \
+  "web3.sha3('${_DEL_SIG}').slice(2,10)" 2>/dev/null || echo "")
+[[ -n "$_DEL_SEL" && "${#_DEL_SEL}" -eq 8 ]] \
+  || die "Failed to compute StakeHub.delegate selector (got: '${_DEL_SEL}')"
+
+DEL_TX=()
+for n in 1 2 3; do
+  addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
+  # ABI-encode delegate(address operatorAddress, bool delegateVotePower)
+  # address = 32-byte padded; bool true = 0x...01
+  padded_addr=$(printf '%064s' "${addr#0x}" | tr ' ' '0')
+  padded_bool=$(printf '%064x' 1)
+  del_calldata="0x${_DEL_SEL}${padded_addr}${padded_bool}"
+  # msg.value must be >= minDelegationBNBChange (1 ether)
+  _del_tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \
+    "eth.sendTransaction({from:'${addr}',to:'${STAKEHUB}',value:'0xde0b6b3a7640000',gas:300000,data:'${del_calldata}'})" \
+    2>/dev/null || echo "")
+  if [[ ! "$_del_tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    die "validator-${n}: StakeHub.delegate sendTransaction rejected (got: '${_del_tx}')"
+  fi
+  log "  validator-${n}: delegate tx=${_del_tx}"
+  DEL_TX+=("$_del_tx")
+done
+
+log "Waiting for delegation transactions to be mined (5s)..."
+sleep 5
+
+for i in 0 1 2; do
+  n=$(( i + 1 ))
+  tx="${DEL_TX[$i]:-}"
+  _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+    "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:null;})()" \
+    2>/dev/null || echo "null")
+  if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
+    pass "validator-${n}: govAB voting power delegated (tx=${tx:0:14}…)"
+  else
+    fail "validator-${n}: delegation tx failed or not mined (status=${_status}, tx=${tx})"
+  fi
+done
+
 # ── Phase 6: wait for post-fork observation window ───────────────────────────
 
 POST_OBS=$(( ACT_BLOCK + 5 ))
@@ -461,10 +508,14 @@ if [[ "$FAIL" -gt 0 ]]; then
   exit 1
 fi
 
-# ── T-6.b: whitelist election-priority test ───────────────────────────────────
+# ── T-6.b through T-6.h: whitelist tests (stateDiff + full governance path) ──
 log ""
-log "Running T-6.b whitelist election-priority test..."
+log "Running T-6.b through T-6.g whitelist tests..."
 GETH="${GETH}" bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
+
+log ""
+log "Running T-6.h full governance whitelist test (≈ 1 min: 10-block vote + 3-s timelock)..."
+GETH="${GETH}" bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo "PASS (U-3). Nodes remain running. Run 07-snapshot.sh before U-4."
