@@ -107,11 +107,35 @@ server-1 升级示例：
 
 | 环境 | bytecode 目录 | 自动路由依据 |
 |------|--------------|-------------|
-| DevNet | `parliagenesis/default/` | genesis hash 不匹配 mainnet/testnet，自动路由到 default |
-| Testnet | `parliagenesis/testnet/` | genesis hash = ABCoreTestGenesisHash |
-| Mainnet | `parliagenesis/mainnet/` | genesis hash = ABCoreMainGenesisHash |
+| DevNet (chain 17140) | `parliagenesis/devnet/` | genesis hash = ABCoreDevnetGenesisHash（PR #90 起）|
+| Testnet (chain 26888) | `parliagenesis/testnet/` | genesis hash = ABCoreTestGenesisHash |
+| Mainnet (chain 36888) | `parliagenesis/mainnet/` | genesis hash = ABCoreMainGenesisHash |
+| Local self-test | `parliagenesis/default/` | genesis hash 不匹配任何 ABCore 网络 → fallthrough |
 
-路由由 `core/blockchain.go:471` 在节点启动时自动完成，不需要任何 flag。DevNet 的 dev bytecode 不会泄漏到 Testnet/Mainnet，链 ID 不同导致 genesis hash 不同，自动隔离。
+路由由 `core/systemcontracts/upgrade.go` `applyParliaGenesisUpgrade` 在 PGB cutover 那一刻执行，不需要任何 flag。各网络 bytecode 不会跨链泄漏，链 ID / genesis hash 不同自动隔离。
+
+<a id="one-shot-bytecode"></a>
+### 一次性字节码部署（One-shot bytecode deployment）—— ABCore 关键设计
+
+**与 BSC 上游不同**：BSC mainnet/chapelnet 在 ParliaGenesis 时部署的是**早期 Parlia 时代的合约 bytecode**，之后每个硬分叉（MirrorSync / Bruno / Euler / ... / **Luban** / Plato / ...）通过 `*Upgrade[network]` map 增量替换若干合约的 bytecode。这是 BSC 历史演进的产物：每次新增功能时升级对应合约。
+
+**ABCore 的设计**：`parliagenesis/{mainnet,testnet,devnet}/` 里嵌入的是**最终版（含所有 post-Hertz 特性的）bytecode**。这意味着：
+
+- ParliaGenesisBlock 那一刻 → 部署的合约**已经**支持 `getMiningValidators()` (Luban)、vote address 存储 (Luban+)、StakeHub 集成接口 (Feynman)、`updateValidatorSetV2` (Feynman) 等等
+- 后续所有 BSC fork（Ramanujan ... Hertzfix、Feynman、Bohr、Lorentz、Maxwell、...）**对系统合约 bytecode 都是 no-op**
+- `upgradeBuildInSystemContract` 在函数入口对 ABCore 网络 **early-return**（PR #99 起），完全跳过 14 个 `*Upgrade[network]` map lookup
+
+**为什么这样设计**：
+- ABCore 没有 BSC 那种"按时间线分批引入功能"的历史包袱，可以一次部署到位
+- 减少出错面：BSC 上一个 fork 漏 bytecode 升级会让该 fork 引擎层失灵；ABCore 一次性部署后只要 PGB 跨过就所有功能都在
+- bytecode 由 ABCore 自己的 `abcore-v2-genesis-contract` 仓库编译，5 个 validator 地址、chain ID、治理合约地址等已 baked-in；BSC mainnet/chapel bytecode 含 BSC-specific 常量，**不能**直接拿来增量升级 ABCore
+
+**Chain config gate 仍然按 fork 顺序逐个激活**：`IsLuban(block) == true` 从 LubanBlock 起生效，引擎层（`Prepare`/`verifyValidators`/extraData layout/EIP-1559 schema/vote attestation）按 fork 边界切换。**合约 bytecode 不变 + chain config 按时激活** 是 ABCore 的标准工作模型。
+
+**运维含义**：
+- 每次升级（如 v0.3.0 London + 13 BSC forks）**只需要改 `params/config.go` 启用 fork**，不需要在 `upgrade.go` 注册 `*Upgrade[abcoreXxx]` 条目
+- 任何往 `upgrade.go` 里加 `lubanUpgrade[abcoreDevNet]` 之类条目的 PR 都是**错的**（除非 PGB 时 bytecode 漏装了某功能 —— 那应当走 `abcore-v2-genesis-contract` 重新编译流程，而不是后置 hardfork upgrade）
+- PR #99 之前节点日志会有 `Empty upgrade config network=Default height=N`（每个 fork 一行 INFO），那是 ABCore 网络落到 defaultNet 分支后调 `applySystemContractUpgrade(nil, ...)` 产生的噪音；PR #99 起 early-return 跳过这段，日志干净
 
 ### 混版本兼容性
 
@@ -166,15 +190,33 @@ FermiTime — 出块间隔降至约 450ms（高影响，需专项压测）
 
 ### 关于"13 个 BSC block forks 是 no-op"的说明
 
-不完全正确，Luban 是实质性变更：
+**重要校准（PR #99 加入）**：要区分**两层影响**：
 
-| Fork | 实际影响 |
-|------|---------|
-| Ramanujan, Niels | 出块 backoff 逻辑改进，ABCore 轻微影响 |
-| MirrorSync, Bruno, Euler, Gibbs, Nano, Moran, Planck | 系统合约逻辑/gas/内存调整，ABCore 上多为 no-op |
-| **Luban** | **非 no-op**：validator extraData 格式从 20B → 68B（20B 地址 + 48B 零值 BLS 公钥），epoch block header 格式改变；必须显式验证 |
-| Plato | Parlia `IsOnPlato` 路径，影响系统合约调用方式 |
-| Hertz, Hertzfix | EIP gas 调整 |
+**Layer 1 — 系统合约 bytecode 影响**：得益于 ABCore 的[一次性字节码部署](#one-shot-bytecode)设计，所有 13 个 BSC block fork 对 ABCore 系统合约 bytecode **都是 no-op**。PR #99 起 `upgradeBuildInSystemContract` 对 ABCore 网络 early-return，所以 fork block 上**不会有任何**与 bytecode upgrade 相关的日志。如果运行的是 PR #99 之前的 image，会看到 `"Empty upgrade config" network=Default height=N`（INFO，每个 fork 一行）—— 那是 ABCore 网络落到 defaultNet 分支后 `applySystemContractUpgrade(nil, ...)` 产生的，**是当时的预期行为，不是 bug**，但 PR #99 起被消除。
+
+**Layer 2 — Parlia 引擎层 / chain-config gate 影响**：每个 fork 仍然按 chain config 顺序激活引擎层行为：
+
+| Fork | 引擎层实际影响 | bytecode 升级（对 ABCore）|
+|------|---------|---|
+| Ramanujan, Niels | 出块 backoff 逻辑改进 | no-op |
+| MirrorSync, Bruno, Euler, Gibbs, Nano, Moran, Planck | gas/内存调整、少量系统合约调用方式变化 | no-op |
+| **Luban** | **非 no-op**：epoch block extraData 从 20B/validator → 68B/validator（20B 地址 + 48B 零值 BLS 公钥）；vote-attestation 字段引入；引擎调 `getMiningValidators()` 替代 `getValidators()` 读 validator set | no-op（合约 bytecode 从 PGB 起就支持 Luban 接口）|
+| Plato | Parlia `IsOnPlato` 路径，fast-finality 投票 precompile 启用（无 vote address 时是 no-op）| no-op |
+| Hertz, Hertzfix | EIP gas 调整 | no-op（无 upgrade map）|
+
+**关于 Parlia epoch 长度**（ABCore-specific，与 BSC 上游不同）：
+BSC 上游 Parlia `defaultEpochLength = 200` (`consensus/parlia/parlia.go:58`)，但 ABCore PR #84 在 PGB cutover 时通过 `parlia.go:957-961` 把 `snap.EpochLength = Clique.Epoch`（devnet/testnet/mainnet 均为 **30000**）写入 Parlia snapshot。EpochLength 此后从 snapshot 读取，**不再回查 chain config**，且无任何 transition 路径改写它（Lorentz/Maxwell 的 transition 前置条件 `snap.EpochLength == 200` 在 ABCore 永远不成立）。
+**实测验证**：block 30000/60000/90000/120000/150000 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)。block 50000 (PGB) 也是 197B。
+**结论**：ABCore 上 Parlia 真正的 epoch boundary 是 30000 的倍数，**不是 BSC 默认的 200**。下面的"下一个 epoch block = 180000"按 30000 算。
+
+**v0.3.0 升级真正验证什么**：
+- ✓ EIP-1559 header schema（block 165400 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
+- ✓ Luban chain-config gate 生效后，**下一个 Parlia epoch block** （ABCore epoch=30000，下一个是 block 180000）会写 Luban-form 438B extraData
+- ✓ 链推进无 errExtraSigners / errInvalidSpanValidators
+
+**不要验证什么**：
+- ✗ "fork block N 自身的 extraData 是 Luban-form" —— 如果 N 不是 Parlia epoch boundary（ABCore 是 30000 倍数，**不是** BSC 默认的 200），N 的 extraData 还是 97B 是正确的，下个 epoch block 才会变 438B
+- ✗ "lubanUpgrade[abcoreDevNet] 被注册" —— 故意不注册，详见 [一次性字节码部署](#one-shot-bytecode)
 
 ### 可合并的 fork
 
