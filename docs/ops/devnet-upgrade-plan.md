@@ -179,6 +179,43 @@ FermiBlockInterval   uint64 = 3000   // 上游 BSC 是 450ms
 
 **这是 devnet / testnet / mainnet 三网共同承诺**。后续若需要改变出块速度，必须定义新 fork（已激活 fork 的 BlockInterval 不可追溯修改，历史 snapshot 已固化）。
 
+### 代码现状：EpochLength 统一为 Parlia defaultEpochLength = 200
+
+Clique 的 `Clique.Epoch = 30000` 和 Parlia 的 `defaultEpochLength = 200` 是**两个独立、不同语义**的常量：
+
+| 常量 | 文件 | 值 | 作用 |
+|---|---|---|---|
+| `Clique.Epoch` | `params/config.go` | 30000 | Clique snapshot 校验点间隔；v1 节点的 30000 块一次 signers 投票快照 |
+| `defaultEpochLength` | `consensus/parlia/parlia.go:58` | 200 | Parlia 把当前 active mining set 写入 `header.Extra` 的节奏；validator set 的"链上检查点" |
+| `lorentzEpochLength` | `consensus/parlia/parlia.go:59` | 500 | Lorentz fork 后 epoch 长度 |
+| `maxwellEpochLength` | `consensus/parlia/parlia.go:60` | 1000 | Maxwell fork 后 epoch 长度 |
+
+**PGB 时 `snap.EpochLength` 的来源**（v0.3.0 retro 修复后）：
+
+```go
+// consensus/parlia/parlia.go:956-967（修复后路径）
+epochLen := defaultEpochLength
+if p.chainConfig.Parlia != nil && p.chainConfig.Parlia.Epoch > 0 {
+    epochLen = p.chainConfig.Parlia.Epoch
+}
+snap.EpochLength = epochLen
+```
+
+读取顺序：`ChainConfig.Parlia.Epoch`（显式覆盖）→ `defaultEpochLength = 200`（fallback）。**不再从 `Clique.Epoch` 拷贝**——v0.3.0 实测踩坑的根因（165400 % 30000 ≠ 0，导致 fork block 不是 Parlia epoch block；详见 §10 retro）。
+
+ABCore 三网 chain config 显式设 `Parlia: &ParliaConfig{Epoch: 200}`，与 BSC 上游对齐：BSC mainnet 起步 100 → 改 200 → Lorentz fork 200→500 → Maxwell fork 500→1000。`consensus/parlia/snapshot.go:362-372` 的自动 promotion 逻辑要求**起点必须是 `defaultEpochLength = 200`**，否则 Lorentz/Maxwell 激活时 epoch 切换永远不触发。
+
+**fork × epoch 切换对照**：
+
+| fork | 激活前 epoch | 激活后 epoch | 切换触发条件 |
+|---|---|---|---|
+| (起点) | — | 200 | PGB 时 reseed |
+| Lorentz | 200 | 500 | 第一个 `block.Number % 500 == 0` 且 `IsLorentz(time)` |
+| Maxwell | 500 | 1000 | 第一个 `block.Number % 1000 == 0` 且 `IsMaxwell(time)` |
+| Fermi/Osaka/... | 1000 | 1000（不变） | — |
+
+**测试时如何覆盖**：chain config 直接设 `Parlia: &ParliaConfig{Epoch: N}` 即可。`consensus/parlia/transition_snapshot_test.go` 中 `TestSnapshotGenesisPathRespectsParliaEpoch` 验证了 N=600 的覆盖路径。
+
 ### 代码现状：one-shot system contract bytecode
 
 ABCore 网络（mainnet/testnet/devnet）的所有 system contract bytecode 在 `ParliaGenesisBlock` 时刻一次性部署最终版本，源自 `abcore-v2-genesis-contract` 仓库（init commit 来自 `bnb-chain/bsc-genesis-contract 34618f6`，已包含 Luban / Plato / Feynman / Bohr 等所有 fork 的合约改动）。
@@ -540,9 +577,63 @@ FeynmanFixTime: newUint64(T3),
 - Shanghai/Kepler：EIP-3855（PUSH0）、EIP-3860（initcode size limit）、EIP-4895 对应的 BSC staking 相关逻辑（非 Ethereum beacon chain withdrawal 语义）
 - Feynman：`updateValidatorSetV2` 在 breathe block 生效，StakeHub 开始参与 validator 选举
 
-**⚠️ Feynman 特殊操作（T3 激活后、第一个 breathe block 之前完成）：**
+#### Validator 注册流程与活动窗口（Feynman 运维必读）
 
-`BREATHE_BLOCK_INTERVAL = 10 分钟`（合约内定义）。T3 后第一个 breathe block 触发 `updateValidatorSetV2`（窗口长度取决于 T3 与下一个 breathe 对齐点的距离，见上方 T3 设定建议）。
+Feynman 后 validator 管理由 StakeHub (`0x...2002`) 接管，但实际"出块名册"仍由 BSCValidatorSet (`0x...1000`) 持有。理解三层 set + 两套时钟是避免 cutover 事故的前提。
+
+**三层 validator 集合**：
+
+```
+StakeHub._validatorSet            (注册池，无上限 — createValidator 写入)
+    │
+    ▼  breathe block (Go 层 24h，触发 updateValidatorSetV2)
+    │    StakeHub.getValidatorElectionInfo → top-N 按 voting power 选举
+    │    BSCValidatorSet.updateValidatorSetV2(top-N) 覆盖 currentValidatorSet
+    │
+BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~41)
+    │
+    ▼  epoch block (block.Number % 200 == 0，Parlia 调 getMiningValidators)
+    │    过滤 jailed/maintaining → cabinet (numOfCabinets, mainnet 21) + 候补洗牌
+    │    写入 header.Extra（链上检查点，供历史回放/同步验签）
+    │
+实际出块名册                       (cabinet_count 个，每 200 块洗一次候补)
+```
+
+**两套独立时钟**——名字都叫"breathe block"但**作用不同、节奏不同**：
+
+| 时钟 | 来源 | devnet 实际值 | 作用 |
+|---|---|---|---|
+| **Epoch block** | Parlia `defaultEpochLength` | 200 块 ≈ 10 分钟 | 每 200 块把 mining set 写进 header.Extra |
+| **Breathe block (Go 层)** | `params.BreatheBlockInterval` | 24 小时（UTC 天对齐） | 触发 `updateValidatorSetV2` 刷新 currentValidatorSet |
+| **`BREATHE_BLOCK_INTERVAL` (合约)** | `StakeHub.sol` 常量（devnet 编译时替换） | 10 分钟 | editXxx 冷却 + slash 桶 + 旧地址过期 |
+
+> ⚠️ 后两者**不会同步漂移**，是设计上独立的两套时钟。Go 层每 24h 才会刷新 active set；合约 10 分钟只控制 validator 自己改 commission/consensus address 的冷却。
+
+**validator 操作对照**：
+
+| 操作 | 冷却 | 谁可调 | 备注 |
+|---|---|---|---|
+| `createValidator` | 无 | 任何账户 | 任意时刻可注册；注册本身 set `updateTime`，10 分钟内不能 editXxx |
+| `editConsensusAddress` / `editCommissionRate` / `editDescription` / `editVoteAddress` | **共享** 10 分钟 | 自己 operator key | 4 项共享同一个 `valInfo.updateTime` |
+| `getValidatorBasicInfo` / `getValidatorElectionInfo` / `getMiningValidators` | — | 任何账户 | 三个查询角度，前两者读 StakeHub，最后一个读 BSCValidatorSet |
+
+**Feynman 激活后的注册窗口（运维流程）：**
+
+- **窗口起点**：T3 激活的那一刻
+- **窗口终点**：第一个 Go 层 breathe block（最坏接近 0 秒，取决于 T3 落在 UTC 0 点前后多远）
+- **建议**：T3 选在 UTC 边界 (HH:00:00) 之后 3-5 分钟，给注册操作留出至少 7 分钟缓冲
+
+**错过窗口的真实后果**（修正以前文档的 Parlia BFT 阈值误解 — Parlia 是轮值出块，1 个 validator 就能持续出块，无 N/2 阈值）：
+
+| 情形 | currentValidatorSet 结果 | 链状态 |
+|---|---|---|
+| **0 个注册** | `BSCValidatorSet.updateValidatorSetV2` 空集保护跳过 `doUpdateState`（[BSCValidatorSet.sol:229-233](../../core/systemcontracts/parliagenesis/abcore-v2-genesis-contract/contracts/BSCValidatorSet.sol)），**保留原 5 个 Clique 时代 validator**，链继续 |
+| **1-4 个注册** | 被覆盖成残缺集（1-4 个），链继续但单点风险大 — 任一 validator 离线 → 出块停顿 |
+| **5 个全注册** | 干净切换，新选举生效 |
+
+**推荐运维策略**：要么一次性把 5 个 validator 全 `createValidator`，要么一个都别注册等下一窗口再统一做。**绝对避免"先注册 1-2 个测试一下"**——这会触发第一次 `updateValidatorSetV2` 把 active set 收缩成残缺集。
+
+#### Feynman 操作命令（5 个 validator 注册）
 
 `createValidator()` 作用：注册现有的 5 个 Parlia validator 到 StakeHub（consensus address 已在 `INIT_VALIDATORSET_BYTES` 中），active set 大小不变，不新增 validator。调用是幂等的：已存在时 revert，不 panic。
 
@@ -591,15 +682,11 @@ sha256sum /usr/local/bin/geth
 createValidator 是幂等的：已存在时 revert，可以安全重试，不会造成状态损坏
 ```
 
-**StakeHub 注册部分完成的处理：**
+**StakeHub 注册补救策略**（详细的"错过窗口后果"已在上方 Validator 注册流程章节给出）：
 
-| 情形 | 结果 | 处置 |
-|------|------|------|
-| 所有 5 个 validator 在第一个 breathe block 前注册完成 | active set 不变 | 继续观察 |
-| 1 个 validator 错过第一个 breathe block | 该 validator 从 active set 移除（~10 分钟） | 补充调用 createValidator；等下一个 breathe block 重新加入；链继续（4/5 多数） |
-| 2+ 个 validator 同时未注册 | active set 缩减为 ≤3；若 ≤2 则链无法正常出块 | 立即暂停 Feynman 激活计划；恢复快照回滚 |
-
-DevNet 演练要求：先在 DevNet 上串行执行所有 5 个 createValidator 并确认成功，才可以在 Testnet/Mainnet 采用同样流程。不允许"边激活边补注册"。
+- 如果发现窗口已过且有部分注册（1-4 个）：等下一个 Go 层 breathe block（24h 后）自动重选举；中间这段时间用现有残缺集出块，单点风险高，**禁止重启不在 active set 里的 validator 节点**
+- 如果发现窗口已过且 0 个注册：链按原 5 个 Clique-时代 validator 继续出块（合约空集保护），可以从容补注册，下一个 breathe block 才生效
+- DevNet 演练要求：先在 DevNet 上串行执行所有 5 个 createValidator 并确认成功，才可以在 Testnet/Mainnet 采用同样流程。**不允许"边激活边补注册"**。
 
 **（可选）激活 govAB 治理投票权：**
 
@@ -1161,6 +1248,20 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
    - **教训**：调试 BSC 合约 ABI 时去 `consensus/parlia/abi.go` 查 ABCore 编译版 ABI，不要从 BSC mainnet deployed bytecode 反推。
 
 **Verification 结果**：✓ chain config gates 全部生效 ✓ EIP-1559 header schema ✓ `getMiningValidators()` 返回 5 validators ✓ Parlia round-robin 健康 ✓ legacy type-0 tx 仍可发送 ✓ block 180000 Luban epoch block 438B extraData。**v0.3.0 升级完全成功**。
+
+**Addendum (post-v0.3.0)：EpochLength misalignment 根因修复**
+
+v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的根因是 [parlia.go:957-958（修复前）](../../consensus/parlia/parlia.go) 在 PGB 时把 `snap.EpochLength` 从 `Clique.Epoch`（30000）拷贝，而 Parlia 默认应为 200。因此 `165400 % 30000 ≠ 0`，PGB 之后第一个所谓"epoch block"实际不是 Parlia epoch block，`prepareValidators` 在非 epoch block 直接 return 不写 validator list。
+
+**修复方案**：本次 devnet reset 同步修：
+1. `params.ParliaConfig` 加 `Epoch uint64` 字段
+2. PGB 路径 [parlia.go:956-973（修复后）](../../consensus/parlia/parlia.go) 改读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength = 200`，不再从 Clique.Epoch 拷贝
+3. 三个 ABCore chain config 显式设 `Parlia: &ParliaConfig{Epoch: 200}`
+4. ABCoreDevnetChainConfig 清空 PGB 之后所有 fork 字段（pre-PGB Clique-only 基线），ParliaGenesisBlock 重新选址
+
+**二阶 bug 同步消除**：[snapshot.go:362-372](../../consensus/parlia/snapshot.go) 的 Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `snap.EpochLength == defaultEpochLength` 时触发，30000 永远不满足。修复后 Lorentz/Maxwell 激活时 epoch 切换会正确发生。
+
+修复 PR：本文档与代码改动在同一 PR 中；合并后 devnet 数据重置 → 重新部署 binary → 重打 v0.2.0 tag。
 
 ### v0.4.0+ — 后续 upgrades（待执行）
 
