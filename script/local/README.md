@@ -186,6 +186,41 @@ The script scans the 50 most recent blocks via `geth attach --exec` and looks fo
 PASS  updateValidatorSetV2 breathe blocks found: #30@ts=…, #10@ts=…
 ```
 
+## Test: `updateValidatorSetV2` Fails Without Registration
+
+`10-test-breathe-no-registration.sh` is the negative counterpart of test 08.
+It starts the chain **without** registering any validator in StakeHub and verifies that `updateValidatorSetV2` never executes successfully.
+
+**Why it should fail**: `updateValidatorSetV2` passes the StakeHub election set (empty arrays) to `BSCValidatorSet._forceMaintainingValidatorsExit()`. With no validators, `numOfFelony (0) >= _validatorSet.length (0)` is true, causing an out-of-bounds array access — INVALID opcode in Solidity < 0.8.0. `Finalize()` propagates the error; the block sealing attempt is abandoned with no on-chain trace.
+
+### Run
+
+```bash
+./10-test-breathe-no-registration.sh
+```
+
+### How it verifies
+
+After waiting two full breathe periods, the test scans the last 50 blocks for the exact `updateValidatorSetV2` 4-byte selector in transactions to ValidatorContract (`0x1000`). Because failed breathe-block attempts leave no on-chain trace, the selector should be absent.
+
+- **PASS** — selector not found: all breathe attempts failed as expected.
+- **FAIL** — selector found: a breathe block unexpectedly succeeded.
+
+### Expected output
+
+```
+==> Waiting 75s (≥ 2 breathe periods) for attempts to accumulate...
+  Current block: 15
+  Block 15 ≥ 9 — Feynman contracts initialized, breathe periods have elapsed.
+==> Scanning last 50 blocks for updateValidatorSetV2 (selector-specific)...
+
+PASS  No updateValidatorSetV2 execution found in last 50 blocks.
+      Every breathe-block attempt failed (empty candidate set → INVALID opcode)
+      and was abandoned by the miner, leaving no on-chain trace.
+```
+
+---
+
 ## Test: StakeHub Partial Registration
 
 Verifies that the network stays live when validators register with StakeHub in two stages, and that `updateValidatorSetV2` reflects the correct election set after each stage.
