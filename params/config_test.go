@@ -177,24 +177,35 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
 	require.Equal(t, uint64(200), devCfg.Parlia.Epoch, "devnet Parlia.Epoch = 200 (BSC defaultEpochLength)")
 
-	// Post devnet-reset baseline: all PGB-and-later forks are nil. They will be
-	// re-scheduled incrementally per docs/ops/devnet-upgrade-plan.md. Asserting
-	// each field is nil prevents accidental partial schedules (mismatched fork
-	// orderings broke the v0.3.0 cutover plan once already; see §10 retro).
-	require.Nil(t, devCfg.LondonBlock, "devnet LondonBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.RamanujanBlock, "devnet RamanujanBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.NielsBlock, "devnet NielsBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.MirrorSyncBlock, "devnet MirrorSyncBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.BrunoBlock, "devnet BrunoBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.EulerBlock, "devnet EulerBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.GibbsBlock, "devnet GibbsBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.NanoBlock, "devnet NanoBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.MoranBlock, "devnet MoranBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.PlanckBlock, "devnet PlanckBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.LubanBlock, "devnet LubanBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.PlatoBlock, "devnet PlatoBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.HertzBlock, "devnet HertzBlock must be nil pre-PGB")
-	require.Nil(t, devCfg.HertzfixBlock, "devnet HertzfixBlock must be nil pre-PGB")
+	// Phase 3 (v0.3.0): LondonBlock + 13 BSC block forks all scheduled at the
+	// same block 6000 (target activation 2026-05-21 ~12:52 UTC). 6000 is a
+	// Parlia epoch boundary (6000 % 200 == 0) so the LubanBlock-form validator
+	// list is written into header.Extra exactly at block 6000 (avoids the
+	// v0.3.0 retro on the old 165400 schedule). Asserting each field
+	// explicitly prevents accidental partial schedules.
+	require.NotNil(t, devCfg.LondonBlock, "devnet LondonBlock is scheduled for v0.3.0")
+	require.Equal(t, int64(6000), devCfg.LondonBlock.Int64(), "devnet LondonBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.RamanujanBlock.Int64(), "devnet RamanujanBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.NielsBlock.Int64(), "devnet NielsBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.MirrorSyncBlock.Int64(), "devnet MirrorSyncBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.BrunoBlock.Int64(), "devnet BrunoBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.EulerBlock.Int64(), "devnet EulerBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.GibbsBlock.Int64(), "devnet GibbsBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.NanoBlock.Int64(), "devnet NanoBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.MoranBlock.Int64(), "devnet MoranBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.PlanckBlock.Int64(), "devnet PlanckBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.LubanBlock.Int64(), "devnet LubanBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.PlatoBlock.Int64(), "devnet PlatoBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.HertzBlock.Int64(), "devnet HertzBlock = 6000")
+	require.Equal(t, int64(6000), devCfg.HertzfixBlock.Int64(), "devnet HertzfixBlock = 6000")
+
+	// LubanBlock-form validator list requires the fork block to be on the
+	// 200-block Parlia epoch grid. This is the real protocol-relevant invariant
+	// that the v0.3.0 retro footgun (165400 % 30000 = 5400 ≠ 0 under the broken
+	// EpochLength=30000 carry-over) was supposed to prevent. Assert it here so
+	// future LondonBlock reschedules cannot regress.
+	require.Equal(t, int64(0), devCfg.LubanBlock.Int64()%int64(devCfg.Parlia.Epoch),
+		"devnet LubanBlock must align to Parlia epoch grid (LubanBlock %% Parlia.Epoch == 0) for first Luban-form epoch block to land at the activation height")
 
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
@@ -255,6 +266,23 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	// check all gate on this exact moment.
 	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 1500, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=1500 (just before PGB=1600): %v", err)
+	}
+
+	// Phase 3 (v0.3.0) just-before-fork case: head=5800 is the realistic
+	// rolling-upgrade window for the LondonBlock + 13 BSC forks cutover at
+	// block 6000. The stored config here mirrors what's actually on disk
+	// after the live devnet crossed PGB=1600 on 2026-05-21: the prior V2
+	// binary already wrote ParliaGenesisBlock=1600 + Parlia.Epoch=200 into
+	// the persisted chain config. A new V2 binary booting at head=5800 sees
+	// that stored config and must accept the additional LondonBlock+13 BSC
+	// forks as a forward-scheduled compatible change (head < 6000).
+	// Timestamp is set to ~2026-05-21 12:42 UTC, a few minutes before the
+	// projected fork arrival, so the compat check sees a current post-PGB clock.
+	storedCfgPostPGB := *storedCfg
+	storedCfgPostPGB.ParliaGenesisBlock = big.NewInt(1600)
+	storedCfgPostPGB.Parlia = &ParliaConfig{Epoch: 200}
+	if err := storedCfgPostPGB.CheckCompatible(ABCoreDevnetChainConfig, 5800, 1_779_374_544); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=5800 (just before LondonBlock=6000, post-PGB stored config): %v", err)
 	}
 }
 

@@ -106,7 +106,7 @@ server-1 升级示例：
 | 共识（初始）| Clique PoA |
 | Clique Period | 3s（与 mainnet 一致）|
 | Clique Epoch | 30000 |
-| ParliaGenesisBlock | 演练时设定（建议 block 30001）|
+| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 1600（2026-05-21 reset 后）|
 
 ### 系统合约字节码路由
 
@@ -268,18 +268,18 @@ FermiTime + OsakaTime + MendelTime                        — v0.7.0 (T6)
 | Plato | Parlia `IsOnPlato` 路径，fast-finality 投票 precompile 启用（无 vote address 时是 no-op）| no-op |
 | Hertz, Hertzfix | EIP gas 调整 | no-op（无 upgrade map）|
 
-**关于 Parlia epoch 长度**（ABCore-specific，与 BSC 上游不同）：
-BSC 上游 Parlia `defaultEpochLength = 200` (`consensus/parlia/parlia.go:58`)，但 ABCore PR #84 在 PGB cutover 时通过 `parlia.go:957-961` 把 `snap.EpochLength = Clique.Epoch`（devnet/testnet/mainnet 均为 **30000**）写入 Parlia snapshot。EpochLength 此后从 snapshot 读取，**不再回查 chain config**，且无任何 transition 路径改写它（Lorentz/Maxwell 的 transition 前置条件 `snap.EpochLength == 200` 在 ABCore 永远不成立）。
-**实测验证**：block 30000/60000/90000/120000/150000 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)。block 50000 (PGB) 也是 197B。
-**结论**：ABCore 上 Parlia 真正的 epoch boundary 是 30000 的倍数，**不是 BSC 默认的 200**。下面的"下一个 epoch block = 180000"按 30000 算。
+**关于 Parlia epoch 长度**（PR #103 后已对齐 BSC 上游）：
+ABCore Parlia `Parlia.Epoch = 200`（与 BSC mainnet `defaultEpochLength` 一致）。PGB reseed 时 `Parlia.snapshot()` 读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength=200`，**不再从 `Clique.Epoch=30000` 拷贝**。Lorentz/Maxwell 激活时 200→500→1000 的自动 promotion（`snapshot.go` 的 `apply()`）现在可以正确触发。
+
+**实测验证**（devnet post-reset 2026-05-21）：PGB=1600 (197B, IsOnParliaGenesis 路径)、block 1800/2000/... 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)，epoch interval = 200 块。
 
 **v0.3.0 升级真正验证什么**：
-- ✓ EIP-1559 header schema（block 165400 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
-- ✓ Luban chain-config gate 生效后，**下一个 Parlia epoch block** （ABCore epoch=30000，下一个是 block 180000）会写 Luban-form 438B extraData
+- ✓ EIP-1559 header schema（block M 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
+- ✓ Luban chain-config gate 生效后，**第一个 Parlia epoch block** 写 Luban-form 438B extraData（若 M 选在 200 倍数上，则 M 本身就是；否则要等到 `ceil(M/200)*200`）
 - ✓ 链推进无 errExtraSigners / errInvalidSpanValidators
 
 **不要验证什么**：
-- ✗ "fork block N 自身的 extraData 是 Luban-form" —— 如果 N 不是 Parlia epoch boundary（ABCore 是 30000 倍数，**不是** BSC 默认的 200），N 的 extraData 还是 97B 是正确的，下个 epoch block 才会变 438B
+- ✗ "fork block M 自身的 extraData 是 Luban-form" —— 仅在 `M % 200 == 0` 时成立。若 M off-grid，M 本身的 extraData 仍是 97B（这是正确行为，不是 bug），下一个 epoch block 才会变 438B
 - ✗ "lubanUpgrade[abcoreDevNet] 被注册" —— 故意不注册，详见 [一次性字节码部署](#one-shot-bytecode)
 
 ### 可合并的 fork
@@ -430,10 +430,13 @@ DevNet 2026-05-14 cutover 验证过这套补救流程，约 1 分钟完成 2400 
 
 **params/config.go 修改：**
 ```go
-// N = 30001（示例值：第一个 Clique epoch 结束后的首块，避免 epoch boundary 冲突）
-// 实际值须在执行前根据当前链高度重新设定
-ABCoreMainChainConfig.ParliaGenesisBlock = big.NewInt(30001)
-ABCoreTestChainConfig.ParliaGenesisBlock = big.NewInt(N_testnet)
+// N = 1600（devnet 实测值，2026-05-21 reset 后）
+// 选址要求：(a) head + ≥1h safety margin；(b) 200 grid 对齐属运维约定（非协议要求），
+// 因为 PGB 通过 IsOnParliaGenesis 路径已被强制视为 epoch boundary。
+// 实际值须在执行前根据当前链高度重新设定。
+ABCoreDevnetChainConfig.ParliaGenesisBlock = big.NewInt(1600)
+ABCoreMainChainConfig.ParliaGenesisBlock   = big.NewInt(N_mainnet)
+ABCoreTestChainConfig.ParliaGenesisBlock   = big.NewInt(N_testnet)
 ```
 
 **Parlia validator-set bootstrap（自动，无需预填充）：**
@@ -473,7 +476,7 @@ cast call 0x0000000000000000000000000000000000001000 \
 - 块 N 之前：全网换回 PGB=nil 配置，Clique 继续，无影响
 - 块 N 之后或 cutover 失败（链卡住、报 `errInvalidSpanValidators`、节点之间 b N hash 不一致）：执行 [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) 完整流程（停链 + maintenance 模式 setHead(N-1) + 移除 PGB 配置 + 全网 Clique 恢复）。**不要简单重启**——磁盘上的 Clique-form b N 仍在，重启会重新进入死锁。
 
-**观察窗口：≥ 30000 块（≈25h）再推进 Upgrade 2。**
+**观察窗口：≥ 24h（≈ 28800 块 @ 3s）再推进 Upgrade 2。覆盖至少一个完整 Go 层 breathe block 周期，即使 v0.4.0 还没激活 Feynman 也确认调度路径不报错。**
 
 **Upgrade 1 后执行 snapshot restore drill：**
 ```
@@ -512,27 +515,27 @@ eth.getBlock(0).hash
 
 ### Upgrade 2：v0.3.0 — London + 13 BSC block forks
 
-**params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M = N+30000 以满足 Upgrade 1 的观察窗口；M 本身不是 epoch boundary，Luban extraData 变更在 M 之后的第一个 epoch block `ceil(M/200)*200` 生效）：**
+**params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M 满足：(a) ≥ N + 28800 块（≥ 24h 观察窗口 @ 3s），(b) M mod 200 = 0（epoch boundary），这样 Luban extraData 变更在 M 自己生效）：**
 ```go
-// M = 60001（示例值，= N(30001) + 30000，满足 Upgrade 1 ≥ 30000 块观察窗口要求）
+// M = 6000（示例值，= N(1600) + 4400，满足 ≥ 24h 观察窗口 @ 3s；6000 mod 200 = 0）
 // 实际值须在执行前根据当前链高度重新设定
-LondonBlock:     big.NewInt(60001),
-RamanujanBlock:  big.NewInt(60001),
-NielsBlock:      big.NewInt(60001),
-MirrorSyncBlock: big.NewInt(60001),
-BrunoBlock:      big.NewInt(60001),
-EulerBlock:      big.NewInt(60001),
-GibbsBlock:      big.NewInt(60001),
-NanoBlock:       big.NewInt(60001),
-MoranBlock:      big.NewInt(60001),
-PlanckBlock:     big.NewInt(60001),
-LubanBlock:      big.NewInt(60001),   // 非 no-op，需专项验证
-PlatoBlock:      big.NewInt(60001),
-HertzBlock:      big.NewInt(60001),
-HertzfixBlock:   big.NewInt(60001),
+LondonBlock:     big.NewInt(6000),
+RamanujanBlock:  big.NewInt(6000),
+NielsBlock:      big.NewInt(6000),
+MirrorSyncBlock: big.NewInt(6000),
+BrunoBlock:      big.NewInt(6000),
+EulerBlock:      big.NewInt(6000),
+GibbsBlock:      big.NewInt(6000),
+NanoBlock:       big.NewInt(6000),
+MoranBlock:      big.NewInt(6000),
+PlanckBlock:     big.NewInt(6000),
+LubanBlock:      big.NewInt(6000),   // 非 no-op，需专项验证；必须落在 epoch boundary
+PlatoBlock:      big.NewInt(6000),
+HertzBlock:      big.NewInt(6000),
+HertzfixBlock:   big.NewInt(6000),
 ```
 
-> **关于 M 与 epoch boundary 的关系**：Luban extraData 格式变更在 epoch block 生效（epoch block 为 200 的整数倍块）。若 M 不是 epoch block（M mod 200 ≠ 0），第一个可验证 Luban extraData 的块为 `ceil(M/200)*200`。如需在激活块即完成验证，可将 M 直接选为 epoch boundary（即 M mod 200 = 0）。
+> **关于 M 与 epoch boundary 的关系**：Luban extraData 格式变更只在 Parlia epoch block 生效（epoch block 为 `Parlia.Epoch=200` 的整数倍块）。若 M 不是 epoch block，M 本身的 extraData 仍是 97B 是正确行为（不是 bug），第一个可验证 Luban-form 438B 的块为 `ceil(M/200)*200`。**推荐**将 M 直接选为 epoch boundary（M mod 200 = 0）以便在激活块即完成可观察性验证；运维上这也避免读者把 "97B 不是 438B" 误判为 bug。详见 §10 v0.3.0 retro addendum 中的 165400 复盘。
 
 **激活效果：**
 - EIP-1559 basefee 机制生效
@@ -623,15 +626,19 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 - **窗口终点**：第一个 Go 层 breathe block（最坏接近 0 秒，取决于 T3 落在 UTC 0 点前后多远）
 - **建议**：T3 选在 UTC 边界 (HH:00:00) 之后 3-5 分钟，能有一天的注册时间
 
-**错过窗口的真实后果**（修正以前文档的 Parlia BFT 阈值误解 — Parlia 是轮值出块，1 个 validator 就能持续出块，无 N/2 阈值）：
+**错过窗口的真实后果**（Parlia 是轮值出块，1 个 validator 就能持续出块，无 N/2 阈值）：
 
 | 情形 | currentValidatorSet 结果 | 链状态 |
 |---|---|---|
-| **0 个注册** | `BSCValidatorSet.updateValidatorSetV2` 空集保护跳过 `doUpdateState`（[BSCValidatorSet.sol#L229-L233](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/blob/master/contracts/BSCValidatorSet.sol#L229-L233)），**保留原 5 个 Clique 时代 validator**，链继续 |
-| **1-4 个注册** | 被覆盖成残缺集（1-4 个），链继续但单点风险大 — 任一 validator 离线 → 出块停顿 |
-| **5 个全注册** | 干净切换，新选举生效 |
+| **0 个注册** | Go 层 `updateValidatorSetV2(empty, empty, empty)` 调到合约 → `_forceMaintainingValidatorsExit` 在 `numOfFelony (0) >= _validatorSet.length (0)` 分支访问空数组 `_validatorSet[0]` → **合约 revert** → system tx 失败 → block finalize 失败 | **链卡住**（参 [BSCValidatorSet.sol#L1011-L1019](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/blob/master/contracts/BSCValidatorSet.sol#L1011-L1019)） |
+| **1-4 个注册** | currentValidatorSet 被覆盖成残缺集（1-4 个），链继续但单点风险大 — 任一 validator 离线 → 出块停顿 | 高风险但能出块 |
+| **5 个全注册** | 干净切换，新选举生效 | ✅ 正常 |
 
-**推荐运维策略**：要么一次性把 5 个 validator 全 `createValidator`，要么一个都别注册等下一窗口再统一做。**绝对避免"先注册 1-2 个测试一下"**——这会触发第一次 `updateValidatorSetV2` 把 active set 收缩成残缺集。
+**推荐运维策略**：**必须**在第一个 Go 层 breathe block 之前完成全部 5 个 `createValidator`。这跟之前文档版本的建议相反——空集**不**安全，会直接卡链。
+**绝对避免**"先注册 1-2 个测试一下"——会触发第一次 `updateValidatorSetV2` 把 active set 收缩成残缺集，恢复需要等下一个 24h breathe block。
+**也绝对避免**"暂时一个都不注册等下次再统一做"——空集会让合约 revert 卡链。
+
+> **协议级保护缺失**：上游 BSC 假设 Feynman 激活时 StakeHub 已经有 mainnet 那 41 个注册 validator，所以从未测试过"空 StakeHub" 路径，合约里 line 229-233 的空集 short-circuit (`if (validatorSetTemp.length != 0)`) 看似在防空集，但**到不了那里**——line 211 `_forceMaintainingValidatorsExit` 先 revert。ABCore 走 Clique→Parlia migration 路径是 BSC 没设想过的场景，必须在 v0.4.0 激活之前手动保证 StakeHub 非空。
 
 #### Feynman 操作命令（5 个 validator 注册）
 
@@ -685,7 +692,9 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 **StakeHub 注册补救策略**（详细的"错过窗口后果"已在上方 Validator 注册流程章节给出）：
 
 - 如果发现窗口已过且有部分注册（1-4 个）：等下一个 Go 层 breathe block（24h 后）自动重选举；中间这段时间用现有残缺集出块，单点风险高，**禁止重启不在 active set 里的 validator 节点**
-- 如果发现窗口已过且 0 个注册：链按原 5 个 Clique-时代 validator 继续出块（合约空集保护），可以从容补注册，下一个 breathe block 才生效
+- **如果发现窗口已过且 0 个注册：链将在第一个 breathe block 时卡住**（`updateValidatorSetV2` 空入参在合约 `_forceMaintainingValidatorsExit` 处 revert，block 无法 finalize）。紧急动作：
+  1. 立即至少把 1 个 validator 调用 `createValidator` 到 StakeHub（任意节点的 RPC，只要它在 cutover 前能接受 tx 进 mempool）；该 tx 必须在 breathe block 出块前被打包进某个 block
+  2. 如果已经卡住，必须 rollback：见 [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md)
 - DevNet 演练要求：先在 DevNet 上串行执行所有 5 个 createValidator 并确认成功，才可以在 Testnet/Mainnet 采用同样流程。**不允许"边激活边补注册"**。
 
 **（可选）激活 govAB 治理投票权：**
@@ -840,8 +849,8 @@ BlobScheduleConfig: &BlobScheduleConfig{
 
 | # | 版本 | Fork 内容 | 激活方式 | 特殊操作 | 观察窗口 |
 |---|------|-----------|----------|----------|---------|
-| 1 | v0.2.0 | ParliaGenesisBlock = N（演练值 30001 / 实测值 50000）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 30000 块（≈25h）|
-| 2 | v0.3.0 | London + 13 BSC block forks = M | 块高 | Luban extraData 验证（在下个 ABCore epoch boundary = 30000 倍数）| ≥ 48h |
+| 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 1600，PR #103/#104）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
+| 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 计划值 6000）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
 | 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 ≤10 分钟内 5 个 validator 注册 StakeHub + delegate govAB | ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察；出块速度不变 | ≥ 9 天 |
@@ -952,8 +961,8 @@ load balancer 探针失败时自动摘除，其余健康节点继续服务，不
 ### Mainnet 推进注意
 
 - 可跳过 v0.1.x，直接 abcore-v1 → v0.2.0
-- Upgrade 1 的 N 建议留 3 天块高缓冲（约 86400 块）
-- Upgrade 2 的 M 在 N+30000 之后（一个完整 Parlia epoch）
+- Upgrade 1 的 N 建议留 3 天块高缓冲（约 86400 块 @ 3s）
+- Upgrade 2 的 M 在 N + ≥ 28800 块之后（≥ 24h 观察窗口）；并对齐到 200 grid（M mod 200 = 0）以便 Luban-form extraData 在激活块即可验证
 - **Mainnet 激活后无法依赖"回滚"作为保险**（见背景章节）
 
 ### 可选：Upgrade 1+2 合并（执行次数减少为 5 次）
@@ -961,8 +970,8 @@ load balancer 探针失败时自动摘除，其余健康节点继续服务，不
 > 注：主路径逻辑上仍是 6 步（Upgrade 1–6），合并 Upgrade 1+2 是指将两次 binary 替换操作合并为一次执行窗口，执行次数从 6 次减为 5 次，逻辑步骤数不变。
 
 - 仅适用于 DevNet 演练，Testnet/Mainnet 不推荐
-- 合并条件：ParliaGenesisBlock=N，LondonBlock=M，gap ≥ 30000 块（一个完整 Parlia epoch）
-- gap 5000 块（约 4h）不够，因为 Upgrade 1 的观察窗口要求 ≥ 30000 块
+- 合并条件：ParliaGenesisBlock=N，LondonBlock=M，gap ≥ 28800 块（≥ 24h 观察窗口）
+- gap 5000 块（约 4h）不够，因为 Upgrade 1 的观察窗口要求 ≥ 24h
 
 ---
 
@@ -1005,7 +1014,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 | # | 版本 | 激活方式 | 最短观察窗口 | 备注 |
 |---|------|---------|------------|------|
-| 1 | v0.2.0 Parlia | 块高（自动）| ≥ 25h（≥ 30000 块）| 需等待至少 1 个完整 Parlia epoch |
+| 1 | v0.2.0 Parlia | 块高（自动）| ≥ 24h（≈ 28800 块 @ 3s）| 覆盖至少一个完整 Go 层 breathe block 周期；Parlia epoch=200 块 (≈ 10 min) 已经在 PGB 自身 + 后续每 200 块验证过 |
 | 2 | v0.3.0 London+BSC forks | 块高（自动）| ≥ 48h | London baseFee 和 Luban extraData 须专项验证 |
 | 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后约 10 分钟内须完成 5 个 validator StakeHub 注册 + delegate govAB |
 | 4 | v0.5.0 Cancun | 时间戳 | ≥ 48h | — |
