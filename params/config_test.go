@@ -164,10 +164,16 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Clique, "devnet Clique config must be set")
 	require.Equal(t, uint64(3), devCfg.Clique.Period, "devnet Clique period")
 	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
-	// ParliaGenesisBlock is a placeholder until the new cutover height is picked
-	// post devnet-reset (see docs/ops/devnet-upgrade-plan.md). Compatibility test
-	// TestABCoreDevnetCompatWithLiveGenesis covers the rolling-upgrade semantics
-	// once the real height is filled in.
+	// Phase 2 cutover scheduled at block 1600 (target activation 2026-05-21
+	// ~08:55 UTC). PGB itself is treated as an epoch boundary by Parlia
+	// regardless of `PGB % epochLength` — see `IsOnParliaGenesis` branches
+	// in `getValidatorBytesFromHeader` / `verifyHeader` in
+	// consensus/parlia/parlia.go. So 200-grid alignment for PGB is an
+	// operational convention, not a protocol invariant, and not asserted
+	// here. Future non-PGB fork blocks (LubanBlock etc.) do need to land
+	// on epoch boundaries; those should be guarded when they are scheduled.
+	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock must be scheduled")
+	require.Equal(t, int64(1600), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 1600 (Phase 2 cutover)")
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
 	require.Equal(t, uint64(200), devCfg.Parlia.Epoch, "devnet Parlia.Epoch = 200 (BSC defaultEpochLength)")
 
@@ -231,22 +237,24 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	// shortcut on block-zero handling — this is the regime a real rolling
 	// upgrade hits, where the chain has been producing blocks for hours.
 	//
-	// Head=10000 simulates "rolling upgrade happens well before any
-	// scheduled ParliaGenesisBlock". Post-reset ABCoreDevnetChainConfig has
-	// ParliaGenesisBlock at the placeholder 999_999_800 (a far-future block
-	// aligned to the 200-block Parlia epoch grid) and all PGB-and-later forks
-	// nil, so the new config matches the stored config plus the Parlia.Epoch=200
-	// addition; CheckCompatible must report no error.
-	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 10_000, 1_700_000_000); err != nil {
+	// head=500 < ParliaGenesisBlock=1600 simulates "rolling upgrade happens
+	// well before the scheduled PGB". storedCfg has no ParliaGenesisBlock
+	// field (omitempty in v1.13.15 genesis.json) — that's the forward-
+	// scheduling case where the new config adds a fork ahead of head.
+	// CheckCompatible must report no error: stored=nil → new=1600 with
+	// head=500 < 1600 means the fork hasn't been crossed yet, so adding
+	// the field is always safe.
+	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 500, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig is not backward-compatible with the "+
 			"stored config produced by devnet-ops/Jenkinsfile.init (post-reset): %v", err)
 	}
 
-	// Sanity: also verify head=49000 produces no error. Post-reset the chain
-	// will run pure Clique well into the new PGB schedule window; this
-	// confirms that CheckCompatible stays clean at any pre-PGB head.
-	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 49_000, 1_700_000_000); err != nil {
-		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=49000 (pre-PGB): %v", err)
+	// Sanity: also verify head=1500 (just before PGB=1600) produces no error.
+	// This is the realistic state during rolling-upgrade just before the
+	// cutover — Layer A test scripts + Layer B runbook + Layer C engine
+	// check all gate on this exact moment.
+	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 1500, 1_700_000_000); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=1500 (just before PGB=1600): %v", err)
 	}
 }
 

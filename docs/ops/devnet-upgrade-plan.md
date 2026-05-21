@@ -201,7 +201,7 @@ if p.chainConfig.Parlia != nil && p.chainConfig.Parlia.Epoch > 0 {
 snap.EpochLength = epochLen
 ```
 
-读取顺序：`ChainConfig.Parlia.Epoch`（显式覆盖）→ `defaultEpochLength = 200`（fallback）。**不再从 `Clique.Epoch` 拷贝**——v0.3.0 实测踩坑的根因（165400 % 30000 ≠ 0，导致 fork block 不是 Parlia epoch block；详见 §10 retro）。
+读取顺序：`ChainConfig.Parlia.Epoch`（显式覆盖）→ `defaultEpochLength = 200`（fallback）。**不再从 `Clique.Epoch` 拷贝**——v0.3.0 实测踩坑的根因：LubanBlock 选址用了 Parlia `defaultEpochLength=200` 假设（`165400 % 200 == 0`），但运行时 `snap.EpochLength=30000`（PGB 时从 Clique 拷贝），导致 `165400 % 30000 ≠ 0`，**165400 在运行时不是 epoch block**，Luban-form validator list 没写进 extraData。注意：PGB 本身不受这个影响，因为 PGB 通过 `IsOnParliaGenesis` 路径强制视为 epoch boundary；问题出在 PGB 之后的**普通** fork block（LubanBlock 等）依赖 `number % epochLength == 0` 走正常 epoch 路径。详见 §10 retro。
 
 ABCore 三网 chain config 显式设 `Parlia: &ParliaConfig{Epoch: 200}`，与 BSC 上游对齐：BSC mainnet 起步 100 → 改 200 → Lorentz fork 200→500 → Maxwell fork 500→1000。`consensus/parlia/snapshot.go:362-372` 的自动 promotion 逻辑要求**起点必须是 `defaultEpochLength = 200`**，否则 Lorentz/Maxwell 激活时 epoch 切换永远不触发。
 
@@ -1251,15 +1251,24 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 **Addendum (post-v0.3.0)：EpochLength misalignment 根因修复**
 
-v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的根因是 [parlia.go:957-958（修复前）](../../consensus/parlia/parlia.go) 在 PGB 时把 `snap.EpochLength` 从 `Clique.Epoch`（30000）拷贝，而 Parlia 默认应为 200。因此 `165400 % 30000 ≠ 0`，PGB 之后第一个所谓"epoch block"实际不是 Parlia epoch block，`prepareValidators` 在非 epoch block 直接 return 不写 validator list。
+v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的**实际**根因（精确版）：
+
+- 165400 是 **LubanBlock**（与其他 13 个 BSC block fork 同块），**不是 PGB**（PGB 是 50000，已经过了）
+- 选址时假设运行时 `snap.EpochLength=200`，所以 `165400 % 200 == 0` 是 epoch boundary
+- 但运行时 `snap.EpochLength=30000`——`Parlia.snapshot()` 在 PGB reseed 时把 `snap.EpochLength` 从 `Clique.Epoch`（30000）拷贝过来
+- `165400 % 30000 ≠ 0` → 165400 走非 epoch 路径 → `prepareValidators` 不写 validator list → extraData = 97B
+- **链没有报错也没有 split**：`verifyHeader` 的 epoch 检查（见 `getValidatorBytesFromHeader` 和 `isEpoch` 判定）对非 epoch block 接受空 validator list 是正确行为。"缺失"的实际后果是 Luban 升级的扩展信息（BLS pubkey + 验证器格式变化）没在我们计划的激活块出现，要等到下一个真正的 epoch block (180000) 才补上
+- 注意：**PGB 自身不受影响**——`getValidatorBytesFromHeader` 和 `verifyHeader` 的 `isEpoch` 判定都把 `IsOnParliaGenesis(PGB)` 强制视为 epoch boundary，PGB 那块的 validator list 总会写进 extraData。问题只发生在 PGB 之后依赖 `number % epochLength == 0` 的**普通** fork block 上
 
 **修复方案**：本次 devnet reset 同步修：
 1. `params.ParliaConfig` 加 `Epoch uint64` 字段
-2. PGB 路径 [parlia.go:956-973（修复后）](../../consensus/parlia/parlia.go) 改读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength = 200`，不再从 Clique.Epoch 拷贝
+2. PGB reseed 路径（`Parlia.snapshot()` 中处理 `HasCliqueAndParlia()` migration 那段）改读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength = 200`，不再从 `Clique.Epoch` 拷贝
 3. 三个 ABCore chain config 显式设 `Parlia: &ParliaConfig{Epoch: 200}`
-4. ABCoreDevnetChainConfig 清空 PGB 之后所有 fork 字段（pre-PGB Clique-only 基线），ParliaGenesisBlock 重新选址
+4. ABCoreDevnetChainConfig 清空 PGB 之后所有 fork 字段（pre-PGB Clique-only 基线），ParliaGenesisBlock 重新选址（PR #103 + 后续 #104 把 PGB 设为 1600）
 
-**二阶 bug 同步消除**：[snapshot.go:362-372](../../consensus/parlia/snapshot.go) 的 Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `snap.EpochLength == defaultEpochLength` 时触发，30000 永远不满足。修复后 Lorentz/Maxwell 激活时 epoch 切换会正确发生。
+**二阶 bug 同步消除**：`consensus/parlia/snapshot.go` 中 `apply()` 的 Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `snap.EpochLength == defaultEpochLength` 时触发，30000 永远不满足。修复后 Lorentz/Maxwell 激活时 epoch 切换会正确发生。
+
+**对未来 fork 调度的指导（运维建议，不是协议约束）**：PGB 可以是任何块号——`IsOnParliaGenesis` 已经把它当 epoch boundary。但 PGB 之后**计划在固定块高激活的 fork**（LubanBlock、HertzBlock 等）应当对齐 `% epochLength == 0`，否则该 fork 的扩展信息（如 Luban 的 BLS pubkey 列表）会延迟到下一个真正的 epoch block 才出现在 extraData 里。链不会 split——`verifyHeader` 的 isEpoch 检查接受非 epoch block 的空 validator list——但激活的"可观察性"被推迟一个 epoch 窗口。
 
 修复 PR：本文档与代码改动在同一 PR 中；合并后 devnet 数据重置 → 重新部署 binary → 重打 v0.2.0 tag。
 
