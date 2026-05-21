@@ -191,7 +191,7 @@ done
 echo ""
 echo -e "${YELLOW}==> Waiting for Feynman contracts to initialize (block ≥ 9)...${NC}"
 for i in $(seq 1 30); do
-    BN=$(_attach "eth.blockNumber" | grep -o '[0-9]*' | head -1)
+    BN=$(_attach "eth.blockNumber" | grep -o '[0-9]*' | head -1) || true
     [ "${BN:-0}" -ge 9 ] && break
     [ $i -eq 30 ] && { echo -e "${RED}Block 9 not reached after 30 s${NC}"; exit 1; }
     sleep 1
@@ -199,15 +199,15 @@ done
 echo -e "  ${GREEN}At block $BN — Feynman contracts initialized.${NC}"
 
 echo -e "${YELLOW}==> Querying StakeHub constants...${NC}"
-CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)")
-DEL_SEL=$(_attach "web3.sha3('delegate(address,bool)').slice(2,10)")
+CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)") || true
+DEL_SEL=$(_attach "web3.sha3('delegate(address,bool)').slice(2,10)") || true
 
-LOCK_SEL=$(_attach "web3.sha3('LOCK_AMOUNT()').slice(2,10)")
-LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})")
+LOCK_SEL=$(_attach "web3.sha3('LOCK_AMOUNT()').slice(2,10)") || true
+LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})") || true
 LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x',''),16))")
 
-MIN_SEL=$(_attach "web3.sha3('minSelfDelegationBNB()').slice(2,10)")
-MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})")
+MIN_SEL=$(_attach "web3.sha3('minSelfDelegationBNB()').slice(2,10)") || true
+MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})") || true
 MIN_WEI=$(python3 -c "print(int('${MIN_RAW}'.replace('0x',''),16))")
 
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_WEI}+${LOCK_WEI}))")
