@@ -445,26 +445,52 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// Post-PGB forks (London + 13 BSC block forks, Shanghai/Cancun/Prague time,
-		// and all Kepler/Feynman/Haber/Bohr/Pascal/Lorentz/Maxwell/Fermi/Osaka/Mendel
-		// time-based forks) are nil until the corresponding upgrade step schedules them.
-		LondonBlock:     nil,
-		RamanujanBlock:  nil,
-		NielsBlock:      nil,
-		MirrorSyncBlock: nil,
-		BrunoBlock:      nil,
-		EulerBlock:      nil,
-		GibbsBlock:      nil,
-		NanoBlock:       nil,
-		MoranBlock:      nil,
-		PlanckBlock:     nil,
-		LubanBlock:      nil,
-		PlatoBlock:      nil,
-		HertzBlock:      nil,
-		HertzfixBlock:   nil,
-		ShanghaiTime:    nil,
-		CancunTime:      nil,
-		PragueTime:      nil,
+		// Phase 3 cutover scheduled at block 6000 (target activation
+		// 2026-05-21 ~12:52 UTC, +3h10 from measurement). LondonBlock + 13 BSC
+		// block forks (Ramanujan through Hertzfix) all activate at the same height.
+		// Calculation basis (measured 2026-05-21 09:42:24 UTC):
+		//   - head=#2198 at ts=1779356544
+		//   - measured period: 3.000 s/block (Parlia, post-PGB)
+		//   - target activation window: ~3h from measurement = 2026-05-21 12:42 UTC
+		//   - raw M estimate: 2198 + 3600 = 5798
+		//   - M chosen: 6000 (next 200-block boundary above raw + 200-block buffer
+		//     for PR review/merge latency; 6000 % 200 == 0)
+		//   - estimated arrival of #6000: 2026-05-21 ~12:52:30 UTC
+		//   - safety margin from +3h target: +10.1 min (202 blocks)
+		// Gap from PGB=1600: 4400 blocks = 220 min ≈ 3h40 (22 full Parlia epochs).
+		// This is **deliberately shorter** than the runbook's documented ≥24h
+		// observation window (≈28800 blocks @ 3s) — this is a devnet rehearsal
+		// pacing demo, not the testnet/mainnet schedule. Don't copy this gap
+		// to higher environments. See docs/ops/devnet-upgrade-plan.md §3 for
+		// the recommended gap and §6 for the mainnet推进 guidance.
+		//
+		// Why 200-grid alignment matters here (unlike PGB): LubanBlock changes
+		// validator extraData layout from 20B/validator to 68B/validator (BLS pubkey
+		// gets appended). The Luban-form list is only written at epoch boundaries
+		// (number % epochLength == 0). If M is off-grid the Luban-form list won't
+		// appear at the activation block — it lands at the next epoch block. Putting
+		// M on the grid makes M itself the first verifiable Luban-form epoch block.
+		// CheckConfigForkOrder permits all 14 forks at the same height; no need
+		// to spread them.
+		LondonBlock:     big.NewInt(6000),
+		RamanujanBlock:  big.NewInt(6000),
+		NielsBlock:      big.NewInt(6000),
+		MirrorSyncBlock: big.NewInt(6000),
+		BrunoBlock:      big.NewInt(6000),
+		EulerBlock:      big.NewInt(6000),
+		GibbsBlock:      big.NewInt(6000),
+		NanoBlock:       big.NewInt(6000),
+		MoranBlock:      big.NewInt(6000),
+		PlanckBlock:     big.NewInt(6000),
+		LubanBlock:      big.NewInt(6000),
+		PlatoBlock:      big.NewInt(6000),
+		HertzBlock:      big.NewInt(6000),
+		HertzfixBlock:   big.NewInt(6000),
+		// Timestamp-based forks (Shanghai, Cancun, Prague, Kepler, Feynman, etc.)
+		// remain nil until v0.4.0+ explicitly schedules them.
+		ShanghaiTime: nil,
+		CancunTime:   nil,
+		PragueTime:   nil,
 		// Phase 2 cutover scheduled at block 1600 (target activation
 		// 2026-05-21 ~08:56 UTC, +1h22 from devnet reset 2026-05-21 07:34 UTC).
 		// Calculation basis (measured 2026-05-21 07:49:35 UTC):
