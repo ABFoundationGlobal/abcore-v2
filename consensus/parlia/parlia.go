@@ -953,13 +953,23 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					return nil, err
 				}
 				snap.Validators = validatorInfoMap(forkValidators)
-				if p.chainConfig.Clique != nil {
-					if p.chainConfig.Clique.Epoch > 0 {
-						snap.EpochLength = p.chainConfig.Clique.Epoch
-					}
-					if p.chainConfig.Clique.Period > 0 {
-						snap.BlockInterval = p.chainConfig.Clique.Period * 1000
-					}
+				// EpochLength source: chainConfig.Parlia.Epoch → defaultEpochLength fallback.
+				// Do NOT inherit Clique.Epoch — Parlia and Clique use independent epoch
+				// lengths, and aligning Parlia to Clique.Epoch (typically 30000) breaks the
+				// Lorentz/Maxwell auto-promotion in snapshot.go which expects defaultEpochLength
+				// as the starting precondition.
+				epochLen := defaultEpochLength
+				if p.chainConfig.Parlia != nil && p.chainConfig.Parlia.Epoch > 0 {
+					epochLen = p.chainConfig.Parlia.Epoch
+				}
+				snap.EpochLength = epochLen
+				log.Info("Parlia PGB snapshot reseed", "epochLength", epochLen, "forkBlock", forkBlock)
+
+				// BlockInterval still derives from Clique.Period until Parlia gains its own
+				// BlockInterval field (subsequent Lorentz/Maxwell/Fermi forks override via
+				// snapshot.go).
+				if p.chainConfig.Clique != nil && p.chainConfig.Clique.Period > 0 {
+					snap.BlockInterval = p.chainConfig.Clique.Period * 1000
 				}
 			}
 			// Advance the snapshot anchor to the last pre-fork block, skipping

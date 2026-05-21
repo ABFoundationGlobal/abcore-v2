@@ -135,7 +135,10 @@ func TestSnapshotSeedsForkParentFromCliqueCheckpoint(t *testing.T) {
 	assertValidatorSet(t, seed.Validators, genesisValidators)
 }
 
-func TestSnapshotGenesisPathUsesCliqueCheckpointAndEpoch(t *testing.T) {
+// TestSnapshotGenesisPathUsesCliqueCheckpointAndParliaEpoch verifies the PGB reseed
+// path pulls the validator set from the Clique checkpoint but takes EpochLength from
+// Parlia (default fallback 200, not Clique.Epoch — those are independent values).
+func TestSnapshotGenesisPathUsesCliqueCheckpointAndParliaEpoch(t *testing.T) {
 	const (
 		forkBlock   = uint64(35)
 		cliqueEpoch = uint64(10)
@@ -176,10 +179,53 @@ func TestSnapshotGenesisPathUsesCliqueCheckpointAndEpoch(t *testing.T) {
 		t.Fatalf("snapshot hash: got %s, want %s", snap.Hash, forkParent.Hash())
 	}
 	assertValidatorSet(t, snap.Validators, checkpointValidators)
-	if snap.EpochLength != cliqueEpoch {
-		t.Fatalf("snapshot epoch length: got %d, want %d", snap.EpochLength, cliqueEpoch)
+	// migrationChainConfig leaves Parlia.Epoch == 0, so the PGB reseed must fall
+	// back to defaultEpochLength (200) — NOT cliqueEpoch (10).
+	if snap.EpochLength != defaultEpochLength {
+		t.Fatalf("snapshot epoch length: got %d, want %d (defaultEpochLength fallback)", snap.EpochLength, defaultEpochLength)
 	}
 	if snap.BlockInterval != 1000 {
 		t.Fatalf("snapshot block interval: got %d, want %d", snap.BlockInterval, 1000)
+	}
+}
+
+// TestSnapshotGenesisPathRespectsParliaEpoch verifies that an explicit Parlia.Epoch
+// in chain config overrides the defaultEpochLength fallback.
+func TestSnapshotGenesisPathRespectsParliaEpoch(t *testing.T) {
+	const (
+		forkBlock   = uint64(35)
+		cliqueEpoch = uint64(10)
+		parliaEpoch = uint64(600)
+	)
+	genesisValidators := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+	}
+	checkpointValidators := []common.Address{
+		common.HexToAddress("0x1000000000000000000000000000000000000001"),
+		common.HexToAddress("0x2000000000000000000000000000000000000002"),
+		common.HexToAddress("0x3000000000000000000000000000000000000003"),
+	}
+
+	cfg := migrationChainConfig(forkBlock, cliqueEpoch)
+	cfg.Clique.Period = 1
+	cfg.Parlia = &params.ParliaConfig{Epoch: parliaEpoch}
+	db := rawdb.NewMemoryDatabase()
+	sigCache := lru.NewCache[common.Hash, common.Address](inMemorySignatures)
+	p := &Parlia{
+		chainConfig: cfg,
+		config:      cfg.Parlia,
+		db:          db,
+		recentSnaps: lru.NewCache[common.Hash, *Snapshot](inMemorySnapshots),
+		signatures:  sigCache,
+	}
+	chain, forkParent := buildTransitionSnapshotChain(cfg, forkBlock, 30, genesisValidators, checkpointValidators)
+
+	snap, err := p.snapshot(chain, forkParent.Number.Uint64(), forkParent.Hash(), nil)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.EpochLength != parliaEpoch {
+		t.Fatalf("snapshot epoch length: got %d, want %d (Parlia.Epoch override)", snap.EpochLength, parliaEpoch)
 	}
 }

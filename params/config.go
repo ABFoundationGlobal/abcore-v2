@@ -378,7 +378,12 @@ var (
 		// ParliaGenesisBlock: nil = pure Clique mode; set to enable DualConsensus transition.
 		ParliaGenesisBlock: nil,
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
-		Parlia:             &ParliaConfig{},
+		// Parlia.Epoch: 200 matches BSC mainnet's defaultEpochLength. Setting it
+		// explicitly (instead of leaving the zero value) keeps the PGB reseed in
+		// consensus/parlia/parlia.go from any future reinterpretation of the
+		// fallback path, and matches BSC's Lorentz/Maxwell auto-promotion start
+		// condition (snapshot.go expects 200 as the starting precondition).
+		Parlia: &ParliaConfig{Epoch: 200},
 	}
 
 	// ABCoreTestChainConfig is the chain parameters for ABCore testnet (chain ID 26888).
@@ -417,60 +422,17 @@ var (
 		HertzfixBlock:      nil,
 		ParliaGenesisBlock: nil,
 		Clique:             &CliqueConfig{Period: 1, Epoch: 30000},
-		Parlia:             &ParliaConfig{},
+		// See ABCoreMainChainConfig for the rationale on Parlia.Epoch = 200.
+		Parlia: &ParliaConfig{Epoch: 200},
 	}
 
 	// ABCoreDevnetChainConfig is the chain parameters for ABCore devnet (chain ID 17140).
 	//
-	// Derived from devnet-ops/jenkins/Jenkinsfile.init. Same shape as
-	// ABCoreMainChainConfig (Clique period 3, all base forks at block 0). Three
-	// intentional differences:
-	//   1. ChainID: 17140 (vs mainnet 36888, testnet 26888)
-	//   2. ParliaGenesisBlock: scheduled at block 50000 for Phase 2 rehearsal
-	//   3. LondonBlock + 13 BSC block forks: scheduled at block 165400 for
-	//      Phase 3 (v0.3.0) rehearsal — EIP-1559 + Luban extraData
-	// Used to rehearse the Phase 2 (Clique → Parlia) and Phase 3 (London + BSC
-	// block forks) cutovers before scheduling the same changes for
-	// testnet / mainnet.
-	//
-	// Phase 2 schedule (v0.2.0 / docs/ops/devnet-upgrade-plan.md Upgrade 1):
-	//   ParliaGenesisBlock = 50000
-	//   Target activation time: 2026-05-14 ~08:00 UTC
-	//   Calculation basis (measured 2026-05-13 21:02 UTC):
-	//     - head=#36871 at ts=1778706139
-	//     - measured period: 3.03 s/block (over last 100 blocks)
-	//     - blocks to target: ~13,023
-	//     - estimated arrival of #50000: 2026-05-14 ~08:05 UTC
-	//     - safety margin (50000 − 36871 = 13,129 blocks ≈ 11 h)
-	//       far exceeds runbook §3.2 recommended +1200 blocks (1 h).
-	//   Actual outcome: block #50000 sealed at ts=1778745523 (2026-05-14T07:58:43Z),
-	//   77 s ahead of the 08:00 target.
-	// See docs/ops/fork-cutover-runbook.md §3.2 for the N selection formula.
-	//
-	// Phase 3 schedule (v0.3.0 / docs/ops/devnet-upgrade-plan.md Upgrade 2):
-	//   LondonBlock and 13 BSC block forks (Ramanujan, Niels, MirrorSync,
-	//   Bruno, Euler, Gibbs, Nano, Moran, Planck, Luban, Plato, Hertz,
-	//   Hertzfix) = 165400
-	//   Target activation time: 2026-05-18 ~08:00 UTC
-	//   Calculation basis (measured 2026-05-17 21:18 UTC):
-	//     - head=#152404 at ts=1779052735
-	//     - measured period: 3.000 s/block (over last 100 blocks)
-	//     - blocks to target: ~12,822
-	//     - raw N estimate: 152404 + 12822 = 165226
-	//     - N chosen: 165400 (next Parlia epoch boundary, 165400 % 200 == 0)
-	//     - estimated arrival of #165400: 2026-05-18 ~08:08:43 UTC
-	//     - safety margin (165400 − 152404 = 12996 blocks ≈ 10.83 h)
-	//       far exceeds runbook §3.2 recommended +1200 blocks (1 h).
-	//   Why epoch boundary: Luban changes validator-list extraData layout from
-	//   N×20B addresses to N×68B (address + BLS pubkey). The validator list
-	//   is written at epoch blocks (block % defaultEpochLength == 0, where
-	//   defaultEpochLength = 200; see consensus/parlia/parlia.go:58). Aligning
-	//   M to an epoch boundary guarantees the first Luban-form epoch block is
-	//   block M itself, with the correct 437-byte extraData layout
-	//   (32B vanity + 5×68B validators + 65B seal).
-	//   CheckConfigForkOrder permits all 14 forks at the same height; no need
-	//   to spread them. See devnet-upgrade-plan.md "13 个 BSC block forks +
-	//   LondonBlock 全设同一块高 M" for the rationale.
+	// Pre-PGB Clique-only baseline. Post-PGB forks (London + 13 BSC block forks,
+	// Shanghai/Cancun/Prague timestamps, Kepler/Feynman/etc.) are added incrementally
+	// per docs/ops/devnet-upgrade-plan.md. The previous v0.2.0/v0.3.0 schedule is
+	// recorded in §10 of that document; the live devnet was reset and ParliaGenesisBlock
+	// is rescheduled to align all downstream forks to the Parlia 200-block epoch grid.
 	ABCoreDevnetChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(17140),
 		HomesteadBlock:      big.NewInt(0),
@@ -483,34 +445,41 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// LondonBlock and 13 BSC block forks scheduled at block 165400 for
-		// Phase 3 (v0.3.0) cutover. See the chain-config doc above for
-		// the rationale, calculation basis, and runbook reference.
-		LondonBlock:     big.NewInt(165400),
-		RamanujanBlock:  big.NewInt(165400),
-		NielsBlock:      big.NewInt(165400),
-		MirrorSyncBlock: big.NewInt(165400),
-		BrunoBlock:      big.NewInt(165400),
-		EulerBlock:      big.NewInt(165400),
-		GibbsBlock:      big.NewInt(165400),
-		NanoBlock:       big.NewInt(165400),
-		MoranBlock:      big.NewInt(165400),
-		PlanckBlock:     big.NewInt(165400),
-		LubanBlock:      big.NewInt(165400),
-		PlatoBlock:      big.NewInt(165400),
-		HertzBlock:      big.NewInt(165400),
-		HertzfixBlock:   big.NewInt(165400),
-		// Timestamp-based forks (Shanghai, Cancun, Prague) remain nil until
-		// Phase 4+ (v0.4.0 onwards) explicitly schedule them.
-		ShanghaiTime: nil,
-		CancunTime:   nil,
-		PragueTime:   nil,
-		// Phase 2 cutover scheduled at block 50000 (target activation
-		// 2026-05-14 ~08:00 UTC). See the chain-config doc above for the
-		// rationale and the runbook reference.
-		ParliaGenesisBlock: big.NewInt(50000),
+		// Post-PGB forks (London + 13 BSC block forks, Shanghai/Cancun/Prague time,
+		// and all Kepler/Feynman/Haber/Bohr/Pascal/Lorentz/Maxwell/Fermi/Osaka/Mendel
+		// time-based forks) are nil until the corresponding upgrade step schedules them.
+		LondonBlock:     nil,
+		RamanujanBlock:  nil,
+		NielsBlock:      nil,
+		MirrorSyncBlock: nil,
+		BrunoBlock:      nil,
+		EulerBlock:      nil,
+		GibbsBlock:      nil,
+		NanoBlock:       nil,
+		MoranBlock:      nil,
+		PlanckBlock:     nil,
+		LubanBlock:      nil,
+		PlatoBlock:      nil,
+		HertzBlock:      nil,
+		HertzfixBlock:   nil,
+		ShanghaiTime:    nil,
+		CancunTime:      nil,
+		PragueTime:      nil,
+		// TODO: fill PGB block height before merge. Pick N such that the target
+		// activation timestamp aligns with the next Parlia epoch boundary (N % 200 == 0).
+		// See docs/ops/fork-cutover-runbook.md §3.2 for the N selection formula.
+		// The placeholder 999_999_800 keeps CheckCompatible passing pre-cutover
+		// (head will be well below this) AND satisfies % 200 == 0, so a forgotten
+		// placeholder still produces a well-formed first Luban epoch block instead
+		// of a 97B-extraData repeat of the v0.3.0 retro.
+		ParliaGenesisBlock: big.NewInt(64709),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
-		Parlia:             &ParliaConfig{},
+		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
+		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in
+		// consensus/parlia/snapshot.go). Pre-reset devnet inherited Clique.Epoch
+		// (30000) at PGB, which is why fork block 165400 produced 97B extraData
+		// instead of the Luban-form 438B — see §10 of devnet-upgrade-plan.md.
+		Parlia: &ParliaConfig{Epoch: 200},
 	}
 
 	// used to test hard fork upgrade, following https://github.com/bnb-chain/bsc-genesis-contract/blob/master/genesis.json
@@ -1001,11 +970,19 @@ func (c CliqueConfig) String() string {
 
 // ParliaConfig is the consensus engine configs for proof-of-staked-authority based sealing.
 type ParliaConfig struct {
+	// Epoch length used by Parlia after ParliaGenesisBlock. When zero, the snapshot reseed at
+	// PGB falls back to defaultEpochLength (200) — see consensus/parlia/parlia.go. Set explicitly
+	// to keep Clique.Epoch (a separate, much larger value used for v1 Clique snapshots) from
+	// leaking into Parlia's epoch alignment.
+	Epoch uint64 `json:"epoch,omitempty"`
 }
 
 // String implements the stringer interface, returning the consensus engine details.
 func (b *ParliaConfig) String() string {
-	return "parlia"
+	if b == nil {
+		return "parlia"
+	}
+	return fmt.Sprintf("parlia(epoch: %d)", b.Epoch)
 }
 
 func (c *ChainConfig) Description() string {
