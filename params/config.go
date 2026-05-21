@@ -472,7 +472,7 @@ var (
 		// (head will be well below this) AND satisfies % 200 == 0, so a forgotten
 		// placeholder still produces a well-formed first Luban epoch block instead
 		// of a 97B-extraData repeat of the v0.3.0 retro.
-		ParliaGenesisBlock: big.NewInt(999_999_800),
+		ParliaGenesisBlock: big.NewInt(64709),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
 		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in
