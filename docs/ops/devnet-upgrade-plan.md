@@ -1283,6 +1283,78 @@ v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的**实际**根因（精�
 
 修复 PR：本文档与代码改动在同一 PR 中；合并后 devnet 数据重置 → 重新部署 binary → 重打 v0.2.0 tag。
 
+---
+
+### Devnet reset (2026-05-21) — Second rehearsal pass
+
+为彻底验证 EpochLength misalignment 修复，2026-05-21 重置整个 devnet（清空 chaindata + 重打 v0.2.0/v0.3.0 tag），重新走 v0.2.0 → v0.3.0 升级路径。这一轮 Parlia.Epoch=200 从 PGB 起就正确写入 snapshot；M=6000 选在 epoch boundary，**激活块自身就是 Luban-form 438B**，避免了首轮 165400=97B 的可观察性延迟。
+
+#### v0.2.0-rerun — Phase 2: Clique → Parlia cutover
+
+| 项 | 值 |
+|---|---|
+| Devnet reset | 2026-05-21 07:34 UTC (block 1 ts=1779348908) |
+| Target activation | 2026-05-21 ~08:49 UTC (+1h from PR #104 measurement) |
+| Actual cutover ts | **2026-05-21 ~08:55 UTC** (block 1600 sealed, +6.4 min from target as planned) |
+| Cutover block (N) | **1600** |
+| Calculation basis | head=#273 @ 2026-05-21T07:49:35Z, period=3.000 s/block, raw=1473 → aligned 1600 (% 200 == 0), safety=+6.4 min |
+| Image tag | v0.2.0 (覆盖发布，digest sha256:2a7381616cb9616a785ebea61cf24aca859d09e4bcb6ec0a90f5836b4e3455ec) |
+| Activation PR | [#104](https://github.com/ABFoundationGlobal/abcore-v2/pull/104) — `ParliaGenesisBlock: 1600`, drops the 200-grid invariant on PGB (not protocol-required after `IsOnParliaGenesis` clarification) |
+| 配套 PR | [#103](https://github.com/ABFoundationGlobal/abcore-v2/pull/103) — `ParliaConfig.Epoch` field + PGB reseed reads `Parlia.Epoch` (no longer Clique.Epoch carry-over) |
+| 配套 devnet-ops PRs | [devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10) — Jenkinsfile force-pull (resolves stale-image rolling upgrade) |
+
+**踩到的问题 + 修复**：
+
+1. **`Jenkinsfile.rolling` grep-skip 跳过 `docker pull`**（2026-05-21 cutover 前发现）—— rolling upgrade 用旧本地缓存 image。
+   - 现象：image tag v0.2.0 被重新推到 Docker Hub (digest sha256:2a7381...)，但 ab-d1/ab-d4 节点跑的还是 5/13 版本的旧 image (sha256:b66467...)。
+   - 根因：Jenkinsfile.rolling 用 `docker images | grep -q '^TAG$'` 判断"已存在跳过"，tag 重新打到新 image 时本地 grep 仍命中。
+   - 修复：[devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10) 去掉 grep-skip，永远 `docker pull`。配套加 SSH `set -e`、shell quoting、newchain tarball trap-cleanup。
+
+2. **Explorer reset 路径不对**（2026-05-21 操作时发现）—— bind mount 实际位置 `services/*-data` 不是 docker-compose 顶层。
+   - 现象：第一次按 RUNBOOK 跑 `docker volume prune` 没清掉 Blockscout 旧链 db，total_blocks 仍是 5/13 链的 24w。
+   - 修复：手动 `rm -rf docker-compose/services/{blockscout-db-data,redis-data,stats-db-data}` + 清空 `services/dets` 才真正重置。
+   - 教训：RUNBOOK 应更新指出 bind mount 在 `services/` 子目录而非顶层。
+
+3. **占位 `ParliaGenesisBlock` 与 % 200 == 0 invariant** —— PR #103 merge 时 PGB 被填成 64709（违反 200 grid），PR #104 修正为 1600 并明确"PGB 不要求 200 grid（IsOnParliaGenesis 接管），但后续 fork block 要求"。
+
+**Verification 结果**：✓ block 1600 (PGB) extraData=197B (pre-Luban epoch, IsOnParliaGenesis 路径) ✓ 后续每 200 块都是 epoch block ✓ Parlia round-robin 健康 ✓ 6/6 节点 head 同步差 ≤ 9 块 ✓ Explorer total_blocks 追上 RPC head。
+
+#### v0.3.0-rerun — Phase 3: London + 13 BSC block forks
+
+| 项 | 值 |
+|---|---|
+| Target activation | 2026-05-21 ~12:42 UTC (+3h from PR #105 measurement) |
+| Actual cutover ts | **2026-05-21 12:52:34 UTC** (block 6000 sealed, +10.1 min from target as planned, only 4 s off model) |
+| Cutover block (M) | **6000** (LondonBlock + 13 BSC forks all at 6000; 6000 % 200 == 0) |
+| Calculation basis | head=#2198 @ 2026-05-21T09:42:24Z, period=3.000 s/block, raw=5798 → aligned 6000 (+200 buffer for PR review) |
+| Image tag | v0.3.0 (digest sha256:3b610cff8650fe0c2de759ef28dd30a5db2c2df4c6c5743f6f81cb13b20e1abb) |
+| Activation PR | [#105](https://github.com/ABFoundationGlobal/abcore-v2/pull/105) — 14 fork fields all at 6000; adds `LubanBlock % Parlia.Epoch == 0` test invariant; cleans up stale epoch=30000 references throughout docs |
+| Observation window | 4400 blocks (~3h40) from PGB=1600，**deliberately shorter** than the ≥24h runbook recommendation — devnet rehearsal pacing, **do not copy to testnet/mainnet** |
+
+**激活效果实测**（block 6000 = 2026-05-21T12:52:34Z, hash 0x96008b...ab5cef）：
+
+| Block | extraData length | baseFeePerGas | 含义 |
+|---|---|---|---|
+| 5800 | 197B | nil | pre-London epoch (pre-Luban form: 32 vanity + 5×20 addr + 65 seal) ✓ |
+| 5999 | 97B | nil | 非 epoch block，无 validator list（vanity + seal only）✓ |
+| **6000** | **438B** | **0** | **Luban-form epoch block + EIP-1559 启用**（32 + 1 count + 5×(20 addr + 48 BLS pubkey) + 65 seal）✓ |
+| 6200 | 438B | 0 | 持续 Luban-form ✓ |
+
+**关键差异（vs. 首轮 v0.3.0=165400 retro）**：M=6000 自己**就是**第一个 Luban-form epoch block，无延迟。直接验证 PR #105 的"对齐 200 grid → 激活块即首个 Luban-form epoch block"的设计目标。
+
+**踩到的问题 + 修复**：
+
+1. **首轮 v0.3.0 description 中关于"4400 blocks gap well above v0.2.0 observation window"的说法不实**（copilot review 抓住）—— 4400 远 < 28800 (≥24h)。
+   - 修复：commit 58eccb87 重写为"deliberately shorter than runbook recommendation, do not copy to higher environments"。
+
+2. **Explorer 显示 block 6000 `extra_data: null`**（小问题，不阻塞）—— Blockscout API 对 Parlia Luban-form extraData 解析似乎不完整。RPC 实际返回 438B，但 explorer JSON 返回 null。
+   - 影响：低；block height/hash/timestamp/baseFee 都正确，主功能不受影响。
+   - 跟进：未来单独排查 Blockscout 对 Parlia post-Luban 的支持情况。
+
+**Verification 结果**：✓ block 6000 extraData=438B (Luban-form, BLS pubkey 槽 5×48=240B 已就位) ✓ baseFeePerGas=0 (EIP-1559 启用, BSC `InitialBaseFeeForBSC=0`) ✓ chainConfig 启动日志正确打印 14 个 fork = 6000 ✓ Parlia round-robin 健康 ✓ 6/6 节点同步差 ≤ 9 块 ✓ image 全部升级到 v0.3.0 (sha256:3b610cff..., 验证 devnet-ops#10 image-pull 修复生效)。**v0.3.0-rerun 升级完全成功**。
+
 ### v0.4.0+ — 后续 upgrades（待执行）
 
 模板待 v0.4.0（Shanghai + Kepler + Feynman + FeynmanFix）实际执行时按 v0.2.0/v0.3.0 同样格式补全。
+
+**v0.4.0 特别注意**：Feynman 激活时**必须**保证 StakeHub 已有 ≥1 个 validator 注册——v0.3.0-rerun 后修正了 §3 Feynman 章节的"0 个注册 → 链卡住"故障路径分析（合约 `_forceMaintainingValidatorsExit` 在空入参时数组越界 revert，system tx 失败，block 无法 finalize）。所有 5 个 Parlia validator 应在 T3 后第一个 Go 层 breathe block 之前完成 `createValidator`。
