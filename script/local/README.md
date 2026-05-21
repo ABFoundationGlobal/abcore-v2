@@ -152,18 +152,18 @@ The script is self-contained. If `data/validator-1` does not yet exist it calls 
 
 ### Configuration
 
-Edit `BREATHE_INTERVAL` at the top of the script (default: `30`):
+Edit `BREATHE_INTERVAL` at the top of the script (default: `60`):
 
 ```bash
 # Breathe block interval in seconds (override; default production value: 86400).
-BREATHE_INTERVAL=30
+BREATHE_INTERVAL=60
 ```
 
-With 3 s block time, 30 s → one breathe block every ~10 blocks. The script waits `2 × BREATHE_INTERVAL + 10 s` before scanning, ensuring at least two trigger boundaries are crossed.
+With 3 s block time, 60 s → one breathe block every ~20 blocks. The script waits `BREATHE_INTERVAL + 10 s` before scanning.
 
 ### How it verifies
 
-The script scans the 30 most recent blocks via `geth attach --exec` and looks for system transactions to the ValidatorContract:
+The script scans the 50 most recent blocks via `geth attach --exec` and looks for system transactions to the ValidatorContract:
 
 - `tx.to == 0x0000000000000000000000000000000000001000` (ValidatorContract)
 - `tx.input.length > 10` (ABI-encoded call, not a plain ETH transfer)
@@ -172,12 +172,18 @@ The script scans the 30 most recent blocks via `geth attach --exec` and looks fo
 
 ```
 ==> Running 01-setup.sh (1 validator)...
-==> Starting validator-1 (breatheBlockInterval=30s)...
+==> Starting validator-1 (breatheBlockInterval=60s)...
 ==> Waiting for RPC on http://127.0.0.1:8545...
-==> Waiting 70s for breathe blocks ...
-==> Scanning last 30 blocks for updateValidatorSetV2 system calls...
+==> Precomputing function selectors...
+==> Waiting for StakeHub initialization (minSelfDelegationBNB > 0)...
+  StakeHub ready — LOCK=1000000000000000000 wei  minSelfDel=2000000000000000000000 wei
+==> Registering validator-1 in StakeHub (createValidator + delegate)...
+  PASS  createValidator  (tx=0x…)
+  PASS  delegate  (tx=0x…)
+==> Waiting 70s for breathe block (interval=60s, expect ~every 20 blocks)...
+==> Scanning last 50 blocks for updateValidatorSetV2 system calls...
 
-PASS  updateValidatorSetV2 breathe blocks found: #52@ts=1748050262, #42@ts=1748050232
+PASS  updateValidatorSetV2 breathe blocks found: #30@ts=…, #10@ts=…
 ```
 
 ## Test: StakeHub Partial Registration

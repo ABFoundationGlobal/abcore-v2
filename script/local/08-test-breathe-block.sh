@@ -11,8 +11,8 @@ set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 # Breathe block interval in seconds (override; default production value: 86400).
-# With 3 s block time, 30 s → one breathe block every ~10 blocks.
-BREATHE_INTERVAL=30
+# With 3 s block time, 60 s → one breathe block every ~20 blocks.
+BREATHE_INTERVAL=60
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +50,10 @@ cleanup() {
         done
         kill -9 "$pid" 2>/dev/null || true
         rm -f "$pid_file"
+    fi
+    if [ "${KEEP_LOG:-0}" = "1" ] && [ -f "$VAL_DIR/geth.log" ]; then
+        cp "$VAL_DIR/geth.log" /tmp/08-breathe-block-geth.log 2>/dev/null || true
+        echo -e "${YELLOW}==> geth.log saved to /tmp/08-breathe-block-geth.log${NC}"
     fi
     echo -e "${YELLOW}==> Removing generated data...${NC}"
     rm -rf "$DATA_DIR" "$SCRIPT_DIR/genesis.json" \
@@ -187,34 +191,46 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# ── Step 5: Wait for Feynman init, then register validator-1 in StakeHub ──────
+# ── Step 5: Precompute selectors (IPC ready alongside RPC) ────────────────────
 echo ""
-echo -e "${YELLOW}==> Waiting for Feynman contracts to initialize (block ≥ 9)...${NC}"
-for i in $(seq 1 30); do
-    BN=$(_attach "eth.blockNumber" | grep -o '[0-9]*' | head -1) || true
-    [ "${BN:-0}" -ge 9 ] && break
-    [ $i -eq 30 ] && { echo -e "${RED}Block 9 not reached after 30 s${NC}"; exit 1; }
+echo -e "${YELLOW}==> Precomputing function selectors...${NC}"
+CREATE_SEL=""
+for i in $(seq 1 20); do
+    CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)") || true
+    [ ${#CREATE_SEL} -eq 8 ] && break
     sleep 1
 done
-echo -e "  ${GREEN}At block $BN — Feynman contracts initialized.${NC}"
-
-echo -e "${YELLOW}==> Querying StakeHub constants...${NC}"
-CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)") || true
-DEL_SEL=$(_attach "web3.sha3('delegate(address,bool)').slice(2,10)") || true
-
+[ ${#CREATE_SEL} -eq 8 ] || { echo -e "${RED}IPC not available after 20 s${NC}"; exit 1; }
+DEL_SEL=$(_attach  "web3.sha3('delegate(address,bool)').slice(2,10)") || true
 LOCK_SEL=$(_attach "web3.sha3('LOCK_AMOUNT()').slice(2,10)") || true
+MIN_SEL=$(_attach  "web3.sha3('minSelfDelegationBNB()').slice(2,10)") || true
+echo -e "  ${GREEN}Selectors ready.${NC}"
+
+# ── Step 6: Wait for StakeHub to initialize (fires when block 8 is mined) ─────
+# initializeFeynmanContract at block 8 calls StakeHub.initialize(), which sets
+# minSelfDelegationBNB (a state variable).  LOCK_AMOUNT is a bytecode constant
+# so it is always non-zero; polling minSelfDelegationBNB > 0 is the reliable
+# signal that initialize() has been called.
+echo ""
+echo -e "${YELLOW}==> Waiting for StakeHub initialization (minSelfDelegationBNB > 0)...${NC}"
+MIN_WEI=0
+for i in $(seq 1 60); do
+    MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})") || true
+    MIN_WEI=$(python3 -c "print(int('${MIN_RAW}'.replace('0x','') or '0',16))" 2>/dev/null || echo 0)
+    [ "${MIN_WEI:-0}" != "0" ] && break
+    [ $i -eq 60 ] && { echo -e "${RED}StakeHub not initialized after 60 s${NC}"; exit 1; }
+    sleep 1
+done
 LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})") || true
 LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x',''),16))")
-
-MIN_SEL=$(_attach "web3.sha3('minSelfDelegationBNB()').slice(2,10)") || true
-MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})") || true
-MIN_WEI=$(python3 -c "print(int('${MIN_RAW}'.replace('0x',''),16))")
-
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_WEI}+${LOCK_WEI}))")
-echo "  LOCK_AMOUNT:           ${LOCK_WEI} wei"
-echo "  minSelfDelegationBNB:  ${MIN_WEI} wei"
-echo "  createValidator value: ${TX_VALUE_HEX}"
+echo -e "  ${GREEN}StakeHub ready — LOCK=${LOCK_WEI} wei  minSelfDel=${MIN_WEI} wei${NC}"
 
+# ── Step 7: Register validator-1 — send both txs immediately, then wait ───────
+# Build calldata before sending so that createValidator and delegate are both
+# in the mempool for the same block.  Even if that block is a breathe block,
+# user txs execute before Finalize(), so the validator is registered in time.
+echo ""
 echo -e "${YELLOW}==> Registering validator-1 in StakeHub (createValidator + delegate)...${NC}"
 
 CALLBODY=$(python3 - <<PY
@@ -250,36 +266,38 @@ print(head+vote_enc+bls_enc+desc_enc)
 PY
 )
 
+PADDED_ADDR=$(printf '%064s' "${VAL_ADDR_LOWER#0x}" | tr ' ' '0')
+
 CREATE_TX=$("$GETH" attach --exec \
     "eth.sendTransaction({from:'${VAL_ADDR_LOWER}',to:'${STAKEHUB}',value:'${TX_VALUE_HEX}',gas:2000000,data:'0x${CREATE_SEL}${CALLBODY}'})" \
     "$VAL_DIR/geth.ipc" 2>/dev/null | tr -d '"')
 [[ "$CREATE_TX" =~ ^0x[0-9a-fA-F]{64}$ ]] \
     || { echo -e "${RED}createValidator tx rejected (got: '${CREATE_TX}')${NC}"; exit 1; }
-_wait_mined "$CREATE_TX" "createValidator"
 
-PADDED_ADDR=$(printf '%064s' "${VAL_ADDR_LOWER#0x}" | tr ' ' '0')
 DEL_TX=$("$GETH" attach --exec \
     "eth.sendTransaction({from:'${VAL_ADDR_LOWER}',to:'${STAKEHUB}',value:'0xde0b6b3a7640000',gas:300000,data:'0x${DEL_SEL}${PADDED_ADDR}$(printf '%064x' 1)'})" \
     "$VAL_DIR/geth.ipc" 2>/dev/null | tr -d '"')
 [[ "$DEL_TX" =~ ^0x[0-9a-fA-F]{64}$ ]] \
     || { echo -e "${RED}delegate tx rejected (got: '${DEL_TX}')${NC}"; exit 1; }
+
+_wait_mined "$CREATE_TX" "createValidator"
 _wait_mined "$DEL_TX" "delegate"
 
-# ── Step 6: Wait for breathe blocks ───────────────────────────────────────────
+# ── Step 8: Wait for breathe blocks ───────────────────────────────────────────
 WAIT=$((BREATHE_INTERVAL + 10))
 echo ""
-echo -e "${YELLOW}==> Waiting ${WAIT}s for breathe block (interval=${BREATHE_INTERVAL}s, expect ~every 10 blocks)...${NC}"
+echo -e "${YELLOW}==> Waiting ${WAIT}s for breathe block (interval=${BREATHE_INTERVAL}s, expect ~every 20 blocks)...${NC}"
 sleep "$WAIT"
 
-# ── Step 7: Scan recent blocks ────────────────────────────────────────────────
-echo -e "${YELLOW}==> Scanning last 30 blocks for updateValidatorSetV2 system calls...${NC}"
+# ── Step 9: Scan recent blocks ────────────────────────────────────────────────
+echo -e "${YELLOW}==> Scanning last 50 blocks for updateValidatorSetV2 system calls...${NC}"
 
 SCAN_RESULT=$("$GETH" attach --exec \
-    'var n=eth.blockNumber,hits=[];for(var i=n;i>n-30&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==="0x0000000000000000000000000000000000001000"&&tx.input&&tx.input.length>10;}))hits.push("#"+i+"@ts="+b.timestamp);}hits.join(",")' \
+    'var n=eth.blockNumber,hits=[];for(var i=n;i>n-50&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==="0x0000000000000000000000000000000000001000"&&tx.input&&tx.input.length>10;}))hits.push("#"+i+"@ts="+b.timestamp);}hits.join(",")' \
     "$VAL_DIR/geth.ipc" \
     2>/dev/null | tr -d '"') || true
 
-# ── Step 8: Report ─────────────────────────────────────────────────────────────
+# ── Step 10: Report ────────────────────────────────────────────────────────────
 echo ""
 if [ -n "$SCAN_RESULT" ]; then
     echo -e "${GREEN}PASS  updateValidatorSetV2 breathe blocks found: ${SCAN_RESULT}${NC}"
@@ -287,7 +305,7 @@ if [ -n "$SCAN_RESULT" ]; then
 else
     TIP_BLOCK=$(rpc_call '{"jsonrpc":"2.0","method":"eth_blockNumber","id":1}' \
         | grep -o '"result":"0x[^"]*"' | grep -o '0x[^"]*' || echo "?")
-    echo -e "${RED}FAIL  no breathe block in last 30 blocks (tip ${TIP_BLOCK}).${NC}"
+    echo -e "${RED}FAIL  no breathe block in last 50 blocks (tip ${TIP_BLOCK}).${NC}"
     echo "  Tip:  check $VAL_DIR/geth.log"
     EXIT_CODE=1
 fi
