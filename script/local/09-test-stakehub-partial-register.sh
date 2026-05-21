@@ -85,8 +85,8 @@ BLS_PW="blspassword"
 (cd "$REPO_ROOT" && go build -o "$BLS_PROOF_BIN" "$BLS_PROOF_SRC")
 log "  bls_proof compiled: $BLS_PROOF_BIN"
 
-declare -A BLS_PUBKEY=()
-declare -A BLS_PROOF=()
+declare -a BLS_PUBKEY=()
+declare -a BLS_PROOF=()
 
 for n in 1 2 3; do
     addr=$(cat "$DATA_DIR/validator-$n/address.txt" | tr '[:upper:]' '[:lower:]')
@@ -153,7 +153,7 @@ _start_validator() {
         --gcmode "archive" \
         --verbosity 3 \
         --override.breatheblockinterval "$BREATHE_INTERVAL" \
-        "${extra_flags[@]}" \
+        ${extra_flags[@]+"${extra_flags[@]}"} \
         > "$vdir/geth.log" 2>&1 &
 
     local pid=$!
@@ -280,20 +280,27 @@ print(int(d[192:256],16) if len(d)>=256 else 0)
 " 2>/dev/null || echo 0
 }
 
-# ── Query StakeHub constants once ─────────────────────────────────────────────
-log "Querying StakeHub contract constants..."
+# ── Query StakeHub constants (poll until StakeHub.initialize() completes) ─────
+# LOCK_AMOUNT is a bytecode constant and is non-zero before initialize().
+# minSelfDelegationBNB is a state variable set by initialize() at block 8;
+# polling it until non-zero is the reliable signal that StakeHub is ready.
+log "Precomputing function selectors..."
+CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)") || true
+DEL_SEL=$(_attach  "web3.sha3('delegate(address,bool)').slice(2,10)") || true
+LOCK_SEL=$(_attach "web3.sha3('LOCK_AMOUNT()').slice(2,10)") || true
+MIN_SEL=$(_attach  "web3.sha3('minSelfDelegationBNB()').slice(2,10)") || true
 
-CREATE_SEL=$(_attach "web3.sha3('createValidator(address,bytes,bytes,(uint64,uint64,uint64),(string,string,string,string))').slice(2,10)")
-DEL_SEL=$(_attach "web3.sha3('delegate(address,bool)').slice(2,10)")
-
-LOCK_SEL=$(_attach "web3.sha3('LOCK_AMOUNT()').slice(2,10)")
-LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})")
+log "Waiting for StakeHub initialization (minSelfDelegationBNB > 0)..."
+MIN_WEI=0
+for i in $(seq 1 60); do
+    MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})") || true
+    MIN_WEI=$(python3 -c "print(int('${MIN_RAW}'.replace('0x','') or '0',16))" 2>/dev/null || echo 0)
+    [ "${MIN_WEI:-0}" != "0" ] && break
+    [ $i -eq 60 ] && { echo -e "${RED}StakeHub not initialized after 60 s${NC}"; exit 1; }
+    sleep 1
+done
+LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})") || true
 LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x',''),16))")
-
-MIN_SEL=$(_attach "web3.sha3('minSelfDelegationBNB()').slice(2,10)")
-MIN_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${MIN_SEL}'})")
-MIN_WEI=$(python3 -c "print(int('${MIN_RAW}'.replace('0x',''),16))")
-
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_WEI}+${LOCK_WEI}))")
 log "  LOCK_AMOUNT:           ${LOCK_WEI} wei"
 log "  minSelfDelegationBNB:  ${MIN_WEI} wei"
