@@ -472,12 +472,21 @@ var (
 		//   - measured period: 3.000 s/block (Clique)
 		//   - target activation window: ~1h from measurement = 2026-05-21 08:49 UTC
 		//   - raw N estimate: 273 + 1200 = 1473
-		//   - N chosen: 1600 (next Parlia epoch boundary, 1600 % 200 == 0)
+		//   - N chosen: 1600 (next 200-block boundary above the raw estimate)
 		//   - estimated arrival of #1600: 2026-05-21 ~08:55:56 UTC
 		//   - safety margin from +1h target: +6.4 min (127 blocks)
-		// 1600 % 200 == 0 ensures the first post-PGB Parlia epoch block is exactly
-		// block 1600, with the correct extraData layout. Required to avoid the
-		// v0.3.0 retro (where 165400 % 30000 != 0 produced 97B extraData).
+		//
+		// Note on 200-block alignment: this is an operational convention, not a
+		// protocol requirement for PGB. consensus/parlia/parlia.go treats the PGB
+		// block itself as an epoch boundary regardless of `PGB % epochLength`
+		// (see IsOnParliaGenesis branches in getValidatorBytesFromHeader at
+		// parlia.go:393 and the isEpoch check at parlia.go:606). The validator
+		// list lands in PGB's extraData via that branch. The 200-grid alignment
+		// matters for *subsequent* fork blocks scheduled at the same height
+		// (e.g. LubanBlock in v0.3.0) — those go through the normal
+		// `number % epochLength == 0` path and only get a validator list when
+		// they fall on an epoch boundary. Aligning PGB to the grid keeps every
+		// downstream fork-block scheduling easy.
 		ParliaGenesisBlock: big.NewInt(1600),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
