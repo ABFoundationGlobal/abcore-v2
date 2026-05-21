@@ -166,11 +166,12 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
 	// Phase 2 cutover scheduled at block 1600 (target activation 2026-05-21
 	// ~08:55 UTC). PGB itself is treated as an epoch boundary by Parlia
-	// regardless of `PGB % epochLength` (see IsOnParliaGenesis in
-	// consensus/parlia/parlia.go), so 200-grid alignment is an operational
-	// convention, not a protocol invariant — and not asserted here. Future
-	// non-PGB fork blocks (LubanBlock etc.) do need to land on epoch
-	// boundaries; those should be guarded when they are scheduled.
+	// regardless of `PGB % epochLength` — see `IsOnParliaGenesis` branches
+	// in `getValidatorBytesFromHeader` / `verifyHeader` in
+	// consensus/parlia/parlia.go. So 200-grid alignment for PGB is an
+	// operational convention, not a protocol invariant, and not asserted
+	// here. Future non-PGB fork blocks (LubanBlock etc.) do need to land
+	// on epoch boundaries; those should be guarded when they are scheduled.
 	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock must be scheduled")
 	require.Equal(t, int64(1600), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 1600 (Phase 2 cutover)")
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
