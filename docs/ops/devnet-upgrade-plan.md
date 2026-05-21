@@ -621,7 +621,7 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 
 - **窗口起点**：T3 激活的那一刻
 - **窗口终点**：第一个 Go 层 breathe block（最坏接近 0 秒，取决于 T3 落在 UTC 0 点前后多远）
-- **建议**：T3 选在 UTC 边界 (HH:00:00) 之后 3-5 分钟，给注册操作留出至少 7 分钟缓冲
+- **建议**：T3 选在 UTC 边界 (HH:00:00) 之后 3-5 分钟，能有一天的注册时间
 
 **错过窗口的真实后果**（修正以前文档的 Parlia BFT 阈值误解 — Parlia 是轮值出块，1 个 validator 就能持续出块，无 N/2 阈值）：
 
