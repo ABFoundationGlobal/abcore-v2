@@ -136,6 +136,119 @@ When updating to a newer version of BSC system contracts, replace `genesis-contr
 
 Validator address for node N is in `data/validator-N/address.txt` after setup.
 
+## Test: Breathe Block / `updateValidatorSetV2` Timing
+
+Parlia calls `updateValidatorSetV2` on the ValidatorContract (`0x1000`) at each **breathe block** — the first block whose timestamp crosses a multiple of `BreatheBlockInterval` (default: 86400 s, once per UTC day). The `--override.breatheblockinterval` flag shrinks this to any value for local testing.
+
+`08-test-breathe-block.sh` automates the full cycle: setup → start → wait → verify → cleanup.
+
+### Run
+
+```bash
+./08-test-breathe-block.sh
+```
+
+The script is self-contained. If `data/validator-1` does not yet exist it calls `./01-setup.sh 1` automatically.
+
+### Configuration
+
+Edit `BREATHE_INTERVAL` at the top of the script (default: `30`):
+
+```bash
+# Breathe block interval in seconds (override; default production value: 86400).
+BREATHE_INTERVAL=30
+```
+
+With 3 s block time, 30 s → one breathe block every ~10 blocks. The script waits `2 × BREATHE_INTERVAL + 10 s` before scanning, ensuring at least two trigger boundaries are crossed.
+
+### How it verifies
+
+The script scans the 30 most recent blocks via `geth attach --exec` and looks for system transactions to the ValidatorContract:
+
+- `tx.to == 0x0000000000000000000000000000000000001000` (ValidatorContract)
+- `tx.input.length > 10` (ABI-encoded call, not a plain ETH transfer)
+
+### Expected output
+
+```
+==> Running 01-setup.sh (1 validator)...
+==> Starting validator-1 (breatheBlockInterval=30s)...
+==> Waiting for RPC on http://127.0.0.1:8545...
+==> Waiting 70s for breathe blocks ...
+==> Scanning last 30 blocks for updateValidatorSetV2 system calls...
+
+PASS  updateValidatorSetV2 breathe blocks found: #52@ts=1748050262, #42@ts=1748050232
+```
+
+## Test: StakeHub Partial Registration
+
+Verifies that the network stays live when validators register with StakeHub in two stages, and that `updateValidatorSetV2` reflects the correct election set after each stage.
+
+**Phase 1** — validator-1 registers (`createValidator` + `delegate`); validators 2 and 3 do not. A breathe block fires and `updateValidatorSetV2` is called with only validator-1's election data. Consensus continues because the Parlia epoch headers still carry the original 3-node signing set.
+
+**Phase 2** — validators 2 and 3 also register. The next breathe block calls `updateValidatorSetV2` with all three validators; the StakeHub election set grows to 3.
+
+### Run
+
+```bash
+./09-test-stakehub-partial-register.sh
+```
+
+The script is self-contained: setup, BLS key generation, start, register, verify, cleanup — no manual steps.
+
+### Configuration
+
+Edit `BREATHE_INTERVAL` at the top of the script (default: `30` s):
+
+```bash
+BREATHE_INTERVAL=30
+```
+
+### Prerequisites
+
+In addition to the normal `make geth` requirement, Go toolchain must be available in `PATH` (the script compiles the `bls_proof` helper on first run; subsequent runs use the cached binary).
+
+### What it checks
+
+| Phase | Check |
+|-------|-------|
+| 1 | Block height advances after validator-1 registers alone |
+| 1 | Breathe block fires (`updateValidatorSetV2` system tx detected) |
+| 1 | StakeHub election set = 1 validator |
+| 2 | Block height advances after validators 2 and 3 register |
+| 2 | Breathe block fires again |
+| 2 | StakeHub election set = 3 validators |
+
+### Expected output
+
+```
+══════════════════════════════════════════════════════
+  PHASE 1 — validator-1 registers; 2 and 3 do not
+══════════════════════════════════════════════════════
+
+  PASS  validator-1 createValidator  (tx=0x3a1b2c…)
+  PASS  validator-1 delegate  (tx=0x7d4e5f…)
+  PASS  Network live after partial registration: #8 → #21
+  PASS  Breathe block fired (updateValidatorSetV2 called)
+  PASS  StakeHub election set = 1 validator (validator-1 only)
+
+══════════════════════════════════════════════════════
+  PHASE 2 — validators 2 and 3 also register
+══════════════════════════════════════════════════════
+
+  PASS  validator-2 createValidator  (tx=0xa1b2c3…)
+  PASS  validator-2 delegate  (tx=0xd4e5f6…)
+  PASS  validator-3 createValidator  (tx=0xe7f8a9…)
+  PASS  validator-3 delegate  (tx=0x1b2c3d…)
+  PASS  Network live after full registration: #21 → #35
+  PASS  Breathe block fired (updateValidatorSetV2 called with all validators)
+  PASS  StakeHub election set = 3 validators
+
+ALL TESTS PASSED
+```
+
+---
+
 ## Relation to the Real Upgrade
 
 This local network is for **testing only** (Chain ID 7140). The production ABCore chain (Chain ID 36888) cannot change its genesis — the Parlia migration there is a hard fork at a future block number, with system contracts deployed via a system transaction at the switch block, not in genesis.
