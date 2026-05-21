@@ -182,21 +182,27 @@ for n in 2 3; do
     sleep 2
 done
 
-# Wire full mesh.
-sleep 8
+# Wire full mesh — retry until all IPC sockets are ready.
 log "Wiring full peer mesh..."
 ENODES=()
 for n in 1 2 3; do
-    e=$("$GETH" attach --exec "admin.nodeInfo.enode" \
-        "$DATA_DIR/validator-$n/geth.ipc" 2>/dev/null \
-        | tr -d '"' | sed 's/?.*$//')
+    e=""
+    for attempt in $(seq 1 20); do
+        e=$("$GETH" attach --exec "admin.nodeInfo.enode" \
+            "$DATA_DIR/validator-$n/geth.ipc" 2>/dev/null \
+            | tr -d '"' | sed 's/?.*$//') || true
+        [ -n "$e" ] && break
+        sleep 2
+    done
+    [ -n "$e" ] || { echo -e "${RED}validator-$n enode not available after 40 s${NC}"; exit 1; }
     ENODES+=("$e")
+    log "  validator-$n enode: ${e:0:40}..."
 done
 for i in 1 2 3; do
     for j in 1 2 3; do
         [ $i -eq $j ] && continue
         "$GETH" attach --exec "admin.addPeer(\"${ENODES[$((j-1))]}\") + ''" \
-            "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null >/dev/null
+            "$DATA_DIR/validator-$i/geth.ipc" 2>/dev/null >/dev/null || true
     done
     log "  validator-$i connected to 2 peers"
 done
