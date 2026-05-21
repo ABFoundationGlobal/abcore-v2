@@ -182,28 +182,39 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	// Parlia epoch boundary (6000 % 200 == 0) so the LubanBlock-form validator
 	// list is written into header.Extra exactly at block 6000 (avoids the
 	// v0.3.0 retro on the old 165400 schedule). Asserting each field
-	// explicitly prevents accidental partial schedules.
-	require.NotNil(t, devCfg.LondonBlock, "devnet LondonBlock is scheduled for v0.3.0")
-	require.Equal(t, int64(6000), devCfg.LondonBlock.Int64(), "devnet LondonBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.RamanujanBlock.Int64(), "devnet RamanujanBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.NielsBlock.Int64(), "devnet NielsBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.MirrorSyncBlock.Int64(), "devnet MirrorSyncBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.BrunoBlock.Int64(), "devnet BrunoBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.EulerBlock.Int64(), "devnet EulerBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.GibbsBlock.Int64(), "devnet GibbsBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.NanoBlock.Int64(), "devnet NanoBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.MoranBlock.Int64(), "devnet MoranBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.PlanckBlock.Int64(), "devnet PlanckBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.LubanBlock.Int64(), "devnet LubanBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.PlatoBlock.Int64(), "devnet PlatoBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.HertzBlock.Int64(), "devnet HertzBlock = 6000")
-	require.Equal(t, int64(6000), devCfg.HertzfixBlock.Int64(), "devnet HertzfixBlock = 6000")
+	// explicitly prevents accidental partial schedules. NotNil-check each
+	// pointer before .Int64() so a missing schedule produces a clean test
+	// failure instead of a nil-deref panic.
+	v030Forks := []struct {
+		name string
+		val  *big.Int
+	}{
+		{"LondonBlock", devCfg.LondonBlock},
+		{"RamanujanBlock", devCfg.RamanujanBlock},
+		{"NielsBlock", devCfg.NielsBlock},
+		{"MirrorSyncBlock", devCfg.MirrorSyncBlock},
+		{"BrunoBlock", devCfg.BrunoBlock},
+		{"EulerBlock", devCfg.EulerBlock},
+		{"GibbsBlock", devCfg.GibbsBlock},
+		{"NanoBlock", devCfg.NanoBlock},
+		{"MoranBlock", devCfg.MoranBlock},
+		{"PlanckBlock", devCfg.PlanckBlock},
+		{"LubanBlock", devCfg.LubanBlock},
+		{"PlatoBlock", devCfg.PlatoBlock},
+		{"HertzBlock", devCfg.HertzBlock},
+		{"HertzfixBlock", devCfg.HertzfixBlock},
+	}
+	for _, f := range v030Forks {
+		require.NotNilf(t, f.val, "devnet %s must be scheduled for v0.3.0", f.name)
+		require.Equalf(t, int64(6000), f.val.Int64(), "devnet %s = 6000", f.name)
+	}
 
 	// LubanBlock-form validator list requires the fork block to be on the
 	// 200-block Parlia epoch grid. This is the real protocol-relevant invariant
 	// that the v0.3.0 retro footgun (165400 % 30000 = 5400 ≠ 0 under the broken
 	// EpochLength=30000 carry-over) was supposed to prevent. Assert it here so
 	// future LondonBlock reschedules cannot regress.
+	require.NotNil(t, devCfg.LubanBlock, "devnet LubanBlock must be scheduled to assert epoch alignment")
 	require.Equal(t, int64(0), devCfg.LubanBlock.Int64()%int64(devCfg.Parlia.Epoch),
 		"devnet LubanBlock must align to Parlia epoch grid (LubanBlock %% Parlia.Epoch == 0) for first Luban-form epoch block to land at the activation height")
 

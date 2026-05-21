@@ -457,8 +457,12 @@ var (
 		//     for PR review/merge latency; 6000 % 200 == 0)
 		//   - estimated arrival of #6000: 2026-05-21 ~12:52:30 UTC
 		//   - safety margin from +3h target: +10.1 min (202 blocks)
-		// Gap from PGB=1600: 4400 blocks = 220 min (22 full Parlia epochs), well
-		// above the v0.2.0 observation window.
+		// Gap from PGB=1600: 4400 blocks = 220 min ≈ 3h40 (22 full Parlia epochs).
+		// This is **deliberately shorter** than the runbook's documented ≥24h
+		// observation window (≈28800 blocks @ 3s) — this is a devnet rehearsal
+		// pacing demo, not the testnet/mainnet schedule. Don't copy this gap
+		// to higher environments. See docs/ops/devnet-upgrade-plan.md §3 for
+		// the recommended gap and §6 for the mainnet推进 guidance.
 		//
 		// Why 200-grid alignment matters here (unlike PGB): LubanBlock changes
 		// validator extraData layout from 20B/validator to 68B/validator (BLS pubkey

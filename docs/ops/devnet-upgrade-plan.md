@@ -517,7 +517,9 @@ eth.getBlock(0).hash
 
 **params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M 满足：(a) ≥ N + 28800 块（≥ 24h 观察窗口 @ 3s），(b) M mod 200 = 0（epoch boundary），这样 Luban extraData 变更在 M 自己生效）：**
 ```go
-// M = 6000（示例值，= N(1600) + 4400，满足 ≥ 24h 观察窗口 @ 3s；6000 mod 200 = 0）
+// M = 6000（devnet 实测值，2026-05-21 设定；= N(1600) + 4400 ≈ 3h40，
+// **故意短于 ≥24h 推荐窗口**，这是 devnet rehearsal pacing demo，testnet/mainnet
+// 不要复制这个 gap。6000 mod 200 = 0 满足 epoch boundary 要求）
 // 实际值须在执行前根据当前链高度重新设定
 LondonBlock:     big.NewInt(6000),
 RamanujanBlock:  big.NewInt(6000),
