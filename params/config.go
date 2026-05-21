@@ -465,14 +465,20 @@ var (
 		ShanghaiTime:    nil,
 		CancunTime:      nil,
 		PragueTime:      nil,
-		// TODO: fill PGB block height before merge. Pick N such that the target
-		// activation timestamp aligns with the next Parlia epoch boundary (N % 200 == 0).
-		// See docs/ops/fork-cutover-runbook.md §3.2 for the N selection formula.
-		// The placeholder 999_999_800 keeps CheckCompatible passing pre-cutover
-		// (head will be well below this) AND satisfies % 200 == 0, so a forgotten
-		// placeholder still produces a well-formed first Luban epoch block instead
-		// of a 97B-extraData repeat of the v0.3.0 retro.
-		ParliaGenesisBlock: big.NewInt(64709),
+		// Phase 2 cutover scheduled at block 1600 (target activation
+		// 2026-05-21 ~08:56 UTC, +1h22 from devnet reset 2026-05-21 07:34 UTC).
+		// Calculation basis (measured 2026-05-21 07:49:35 UTC):
+		//   - head=#273 at ts=1779349775
+		//   - measured period: 3.000 s/block (Clique)
+		//   - target activation window: ~1h from measurement = 2026-05-21 08:49 UTC
+		//   - raw N estimate: 273 + 1200 = 1473
+		//   - N chosen: 1600 (next Parlia epoch boundary, 1600 % 200 == 0)
+		//   - estimated arrival of #1600: 2026-05-21 ~08:55:56 UTC
+		//   - safety margin from +1h target: +6.4 min (127 blocks)
+		// 1600 % 200 == 0 ensures the first post-PGB Parlia epoch block is exactly
+		// block 1600, with the correct extraData layout. Required to avoid the
+		// v0.3.0 retro (where 165400 % 30000 != 0 produced 97B extraData).
+		ParliaGenesisBlock: big.NewInt(1600),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
 		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in
