@@ -509,13 +509,18 @@ if [[ "$FAIL" -gt 0 ]]; then
 fi
 
 # ── T-6.b through T-6.h: whitelist tests (stateDiff + full governance path) ──
-log ""
-log "Running T-6.b through T-6.g whitelist tests..."
-GETH="${GETH}" bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
+# Skip when called from 99-run-all.sh (which runs T-6 as a separate block after
+# U-3, so that T-6~T-13 all run in a controlled sequence).  Set
+# SKIP_WHITELIST_TESTS=1 to suppress the tail; run standalone to include them.
+if [[ "${SKIP_WHITELIST_TESTS:-0}" -ne 1 ]]; then
+  log ""
+  log "Running T-6.b through T-6.g whitelist tests..."
+  GETH="${GETH}" bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
 
-log ""
-log "Running T-6.h full governance whitelist test (≈ 1 min: 10-block vote + 3-s timelock)..."
-GETH="${GETH}" bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
+  log ""
+  log "Running T-6.h full governance whitelist test (≈ 1 min: 10-block vote + 3-s timelock)..."
+  GETH="${GETH}" bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
+fi
 
 if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
   echo "PASS (U-3). Nodes remain running. Run 07-snapshot.sh before U-4."

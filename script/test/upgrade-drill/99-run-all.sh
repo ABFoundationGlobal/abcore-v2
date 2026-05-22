@@ -110,8 +110,12 @@ run bash "${SCRIPT_DIR}/81-run-u2-london-forks.sh"
 # Nodes are still running from U-2; 82-run-u3 patches genesis.json with
 # timestamp forks and does a rolling genesis reinit, then registers all 3
 # validators with StakeHub (FORK_TIME_OFFSET defaults to 120s from now).
+# SKIP_WHITELIST_TESTS=1 prevents 82 from running T-6 tests inline; they are
+# executed as an explicit separate block below (T-6 ~ T-13).
 
+export SKIP_WHITELIST_TESTS=1
 run bash "${SCRIPT_DIR}/82-run-u3-shanghai-feynman.sh"
+unset SKIP_WHITELIST_TESTS
 
 # ── T-6 ~ T-13: system-contract scenario tests ───────────────────────────────
 # Nodes remain running from U-3.  Tests are grouped by contract area; each
