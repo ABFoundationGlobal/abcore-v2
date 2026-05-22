@@ -247,7 +247,7 @@ BREATHE_INTERVAL=30
 
 ### Prerequisites
 
-In addition to the normal `make geth` requirement, Go toolchain must be available in `PATH` (the script compiles the `bls_proof` helper on first run; subsequent runs use the cached binary).
+In addition to the normal `make geth` requirement, Go toolchain must be available in `PATH` (the script compiles the `bls_proof` helper into a temporary directory on each run and removes it on exit).
 
 ### What it checks
 

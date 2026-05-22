@@ -256,9 +256,9 @@ _has_breathe() {
     local window="${1:-25}"
     local count
     count=$(_attach \
-"(function(){var n=eth.blockNumber,c=0;for(var i=n;i>n-${window}&&i>=0;i--){
+"(function(){var sel=web3.sha3('updateValidatorSetV2(address[],uint64[],bytes[])').slice(2,10);var n=eth.blockNumber,c=0;for(var i=n;i>n-${window}&&i>=0;i--){
 var b=eth.getBlock(i,true);
-if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='${VALCONTRACT}'&&tx.input&&tx.input.length>10;}))c++;}
+if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='${VALCONTRACT}'&&tx.input&&tx.input.slice(2,10)===sel;}))c++;}
 return c;})()")
     [ "${count:-0}" -gt 0 ]
 }
@@ -300,7 +300,8 @@ for i in $(seq 1 60); do
     sleep 1
 done
 LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})") || true
-LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x',''),16))")
+LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x','') or '0',16))" 2>/dev/null || echo 0)
+[ "${LOCK_WEI:-0}" != "0" ] || { echo -e "${RED}LOCK_AMOUNT query returned empty — StakeHub may not be deployed${NC}"; exit 1; }
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_WEI}+${LOCK_WEI}))")
 log "  LOCK_AMOUNT:           ${LOCK_WEI} wei"
 log "  minSelfDelegationBNB:  ${MIN_WEI} wei"

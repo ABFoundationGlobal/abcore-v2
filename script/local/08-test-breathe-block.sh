@@ -222,7 +222,8 @@ for i in $(seq 1 60); do
     sleep 1
 done
 LOCK_RAW=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${LOCK_SEL}'})") || true
-LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x',''),16))")
+LOCK_WEI=$(python3 -c "print(int('${LOCK_RAW}'.replace('0x','') or '0',16))" 2>/dev/null || echo 0)
+[ "${LOCK_WEI:-0}" != "0" ] || { echo -e "${RED}LOCK_AMOUNT query returned empty — StakeHub may not be deployed${NC}"; exit 1; }
 TX_VALUE_HEX=$(python3 -c "print(hex(${MIN_WEI}+${LOCK_WEI}))")
 echo -e "  ${GREEN}StakeHub ready — LOCK=${LOCK_WEI} wei  minSelfDel=${MIN_WEI} wei${NC}"
 
@@ -293,7 +294,7 @@ sleep "$WAIT"
 echo -e "${YELLOW}==> Scanning last 50 blocks for updateValidatorSetV2 system calls...${NC}"
 
 SCAN_RESULT=$("$GETH" attach --exec \
-    'var n=eth.blockNumber,hits=[];for(var i=n;i>n-50&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==="0x0000000000000000000000000000000000001000"&&tx.input&&tx.input.length>10;}))hits.push("#"+i+"@ts="+b.timestamp);}hits.join(",")' \
+    'var sel=web3.sha3("updateValidatorSetV2(address[],uint64[],bytes[])").slice(2,10);var n=eth.blockNumber,hits=[];for(var i=n;i>n-50&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==="0x0000000000000000000000000000000000001000"&&tx.input&&tx.input.slice(2,10)===sel;}))hits.push("#"+i+"@ts="+b.timestamp);}hits.join(",")' \
     "$VAL_DIR/geth.ipc" \
     2>/dev/null | tr -d '"') || true
 

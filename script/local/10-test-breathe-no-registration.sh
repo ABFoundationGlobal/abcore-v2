@@ -162,6 +162,14 @@ echo -e "  ${GREEN}Block $BN ≥ 9 — Feynman contracts initialized, breathe pe
 echo ""
 echo -e "${YELLOW}==> Scanning last 50 blocks for updateValidatorSetV2 (selector-specific)...${NC}"
 
+# Verify IPC socket exists before scanning so an attach failure is not
+# mistaken for "selector absent" (which would be a false PASS).
+if [ ! -S "$VAL_DIR/geth.ipc" ]; then
+    echo -e "${RED}FAIL  geth.ipc socket not found — validator process may have crashed${NC}"
+    echo "  Tip: check $VAL_DIR/geth.log"
+    exit 1
+fi
+
 SCAN_RESULT=$(_attach \
     'var sel=web3.sha3("updateValidatorSetV2(address[],uint64[],bytes[])").slice(2,10);
      var n=eth.blockNumber,hits=[];
