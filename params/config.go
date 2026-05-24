@@ -517,8 +517,12 @@ var (
 		//     election at breathe blocks
 		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
 		//     non-mainnet networks (mainnet split them by ~14 days)
-		// CheckConfigForkOrder permits all four times at T3; ordering check
-		// is satisfied because Shanghai ≤ Kepler ≤ Feynman ≤ FeynmanFix.
+		// CheckConfigForkOrder permits all four times at T3; its enforced
+		// timestamp-ordering check covers `keplerTime → feynmanTime →
+		// feynmanFixTime` (see params/config.go::CheckConfigForkOrder list,
+		// which starts at keplerTime — ShanghaiTime is not part of this
+		// ordering chain and is validated by the EVM ruleset selection only).
+		// Kepler ≤ Feynman ≤ FeynmanFix is satisfied trivially at T3 == T3 == T3.
 		ShanghaiTime:   newUint64(1779696000),
 		KeplerTime:     newUint64(1779696000),
 		FeynmanTime:    newUint64(1779696000),
