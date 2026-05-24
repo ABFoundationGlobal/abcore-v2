@@ -853,7 +853,7 @@ BlobScheduleConfig: &BlobScheduleConfig{
 |---|------|-----------|----------|----------|---------|
 | 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 1600，PR #103/#104）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
 | 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 计划值 6000）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 ≤10 分钟内 5 个 validator 注册 StakeHub + delegate govAB | ≥ 48h |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察；出块速度不变 | ≥ 9 天 |
 | 6 | v0.7.0 | Fermi + Osaka + Mendel = T6 | 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
@@ -1018,7 +1018,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |---|------|---------|------------|------|
 | 1 | v0.2.0 Parlia | 块高（自动）| ≥ 24h（≈ 28800 块 @ 3s）| 覆盖至少一个完整 Go 层 breathe block 周期；Parlia epoch=200 块 (≈ 10 min) 已经在 PGB 自身 + 后续每 200 块验证过 |
 | 2 | v0.3.0 London+BSC forks | 块高（自动）| ≥ 48h | London baseFee 和 Luban extraData 须专项验证 |
-| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后约 10 分钟内须完成 5 个 validator StakeHub 注册 + delegate govAB |
+| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后须在**下一个 Go 层 breathe block 之前**完成 5 个 validator StakeHub 注册 + delegate govAB（窗口最长 24h，由 T3 落点决定；详见 §3） |
 | 4 | v0.5.0 Cancun | 时间戳 | ≥ 48h | — |
 | 5 | v0.6.0 Prague + Pascal + Lorentz + Maxwell + Bohr | 时间戳 | ≥ 9 天 | Lorentz = T5+1d；Maxwell = T5+7d（协议配置固定）；Maxwell 激活后再观察 ≥ 48h；Bohr 在 ABCore 上为 no-op |
 | 6 | v0.7.0 Fermi + Osaka + Mendel | 时间戳 | ≥ 48h | Fermi 在 ABCore 上为 no-op（出块速度不变）；Osaka 需要 blobSchedule.osaka 配置 |
@@ -1046,7 +1046,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |------|---------|---------|
 | Upgrade 1（Parlia）| 出块间隔不变（3s）；共识引擎对用户透明 | 无需操作 |
 | Upgrade 2（London+BSC forks）| 手续费模型变化：钱包开始展示 base fee + priority fee；Gas 更可预测；旧式 gasPrice 交易仍可提交 | 确认所使用的钱包已适配 EIP-1559 fee 展示 |
-| Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 对普通转账透明；StakeHub 注册在激活后约 10 分钟内完成，链正常出块。极端情形（≥ 2 个 validator 漏注册）可能出现短时出块抖动（概率极低，有 DevNet/Testnet 演练保障） | 无需操作；可关注官方状态页 |
+| Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 对普通转账透明；StakeHub 注册在激活后下一个 Go 层 breathe block 之前完成（窗口最长 24h），链正常出块。极端情形（≥ 2 个 validator 漏注册）可能出现短时出块抖动（概率极低，有 DevNet/Testnet 演练保障） | 无需操作；可关注官方状态页 |
 | Upgrade 4（Cancun）| 引入 blob 交易（type-3）；通常情况下普通用户不会直接发送 blob 交易；区块头新增 blob 相关字段 | 无需操作 |
 | Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| EIP-7702：EOA 可通过 type-4 set-code 交易将其账户委托给合约实现；**委托状态写入账户，持续有效直到主动撤销**；普通 ETH 和 ERC-20 转账不受影响。Lorentz/Maxwell：Parlia epoch 长度变化（200→500→1000），对普通转账透明。Bohr 在 ABCore 上为 no-op | 无需操作；如有账户抽象需求可在此升级后评估 |
 | Upgrade 6（Fermi + Osaka + Mendel）| 在 ABCore 上**出块速度仍为 3s**（不变）；Fermi 上游本应降至 450ms，已在 params override；Osaka 引入新 blob schedule，普通用户不感知 | 无需操作 |

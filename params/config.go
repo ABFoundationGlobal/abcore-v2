@@ -486,11 +486,45 @@ var (
 		PlatoBlock:      big.NewInt(6000),
 		HertzBlock:      big.NewInt(6000),
 		HertzfixBlock:   big.NewInt(6000),
-		// Timestamp-based forks (Shanghai, Cancun, Prague, Kepler, Feynman, etc.)
-		// remain nil until v0.4.0+ explicitly schedules them.
-		ShanghaiTime: nil,
-		CancunTime:   nil,
-		PragueTime:   nil,
+		// Timestamp-based forks: v0.4.0 (T3) schedules Shanghai + Kepler + Feynman +
+		// FeynmanFix at the same timestamp (BSC convention). Cancun and Prague stay
+		// nil until later upgrades (v0.5.0+ per devnet-upgrade-plan.md §3).
+		//
+		// T3 = 2026-05-25 08:00:00 UTC = unix 1779696000
+		//
+		// Calculation basis (measured 2026-05-24 19:49:04 UTC):
+		//   - head=#100730 at ts=1779652144
+		//   - measured period: 3.000 s/block (post-PGB Parlia)
+		//   - gap from measurement to T3: 43856 s ≈ 12.18 h ≈ 14619 blocks
+		//   - gap from v0.3.0 cutover (2026-05-21 ~12:52 UTC) to T3: ~91 h
+		//     ≫ the §3 ≥48h-on-mainnet floor (devnet rehearsal can run tighter,
+		//     but this gap is conservative even by mainnet rules)
+		//
+		// Why this T3 is safe (breathe-block alignment check):
+		//   BreatheBlockInterval = 24h (params/protocol_params.go:211).
+		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-25 00:00 UTC
+		//   breathe boundary, and 16h BEFORE the 2026-05-26 00:00 UTC boundary.
+		//   This gives operators a ~16h window after Feynman activation to
+		//   complete `createValidator` + `delegate` on all 5 validators before
+		//   the first Go-layer breathe block fires `updateValidatorSetV2`.
+		//   See devnet-upgrade-plan.md §3 "Validator 注册流程与活动窗口".
+		//
+		// Why all four times equal T3:
+		//   - ShanghaiTime: EIP-3855 (PUSH0), EIP-3860 (initcode size limit),
+		//     EIP-4895 BSC-adapted staking withdrawal semantics
+		//   - KeplerTime: BSC convention pairs Kepler with Shanghai
+		//   - FeynmanTime: enables `updateValidatorSetV2` + StakeHub validator
+		//     election at breathe blocks
+		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
+		//     non-mainnet networks (mainnet split them by ~14 days)
+		// CheckConfigForkOrder permits all four times at T3; ordering check
+		// is satisfied because Shanghai ≤ Kepler ≤ Feynman ≤ FeynmanFix.
+		ShanghaiTime:   newUint64(1779696000),
+		KeplerTime:     newUint64(1779696000),
+		FeynmanTime:    newUint64(1779696000),
+		FeynmanFixTime: newUint64(1779696000),
+		CancunTime:     nil,
+		PragueTime:     nil,
 		// Phase 2 cutover scheduled at block 1600 (target activation
 		// 2026-05-21 ~08:56 UTC, +1h22 from devnet reset 2026-05-21 07:34 UTC).
 		// Calculation basis (measured 2026-05-21 07:49:35 UTC):
