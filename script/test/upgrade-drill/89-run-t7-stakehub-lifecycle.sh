@@ -167,7 +167,7 @@ SEL_GET_CONSENSUS=$(selector "getValidatorConsensusAddress(address)")
 SEL_GET_VOTE_ADDR=$(selector "getValidatorVoteAddress(address)")
 SEL_ADD_NODE_IDS=$(selector "addNodeIDs(bytes32[])")
 SEL_REMOVE_NODE_IDS=$(selector "removeNodeIDs(bytes32[])")
-SEL_GET_NODE_IDS=$(selector "getNodeIDs(address)")
+SEL_GET_NODE_IDS=$(selector "getNodeIDs(address[])")
 
 TOPIC_NODE_ID_ADDED=$(attach_exec "$GETH" "$IPC1" \
   "web3.sha3('NodeIDAdded(address,bytes32)')" 2>/dev/null)
@@ -294,19 +294,34 @@ blk_after=$(attach_exec "$GETH" "$IPC1" \
   "(function(){var r=eth.getTransactionReceipt('${add_node_tx}');return r?r.blockNumber:0;})()" \
   2>/dev/null || echo "0")
 
-# Verify getNodeIDs contains the added node
-get_node_data="0x${SEL_GET_NODE_IDS}${VAL1_PAD}"
+# Verify getNodeIDs contains the added node.
+# getNodeIDs(address[]) takes an address array and returns (address[], bytes32[][]).
+# Encode [val1] as address[]: offset(32) + length(1) + padded_addr.
+get_node_data=$(python3 -c "
+sel = '${SEL_GET_NODE_IDS}'
+def p32(n): return format(n,'064x')
+addr = '${VAL1}'.replace('0x','').lower().zfill(64)
+print('0x' + sel + p32(32) + p32(1) + addr)
+")
 raw=$(eth_call_raw "$STAKE_HUB" "$get_node_data")
 node_found=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 10: print('false'); exit()
 data = bytes.fromhex(raw[2:])
 try:
-    off = int.from_bytes(data[0:32], 'big')
-    count = int.from_bytes(data[off:off+32], 'big')
+    # Return layout: (address[], bytes32[][])
+    # data[0:32]  = offset to consensusAddresses array
+    # data[32:64] = offset to nodeIDsList (bytes32[][]) array
+    nids_off = int.from_bytes(data[32:64], 'big')
+    outer_len = int.from_bytes(data[nids_off:nids_off+32], 'big')
+    if outer_len == 0: print('false'); exit()
+    # Offset to inner array 0 (relative to start of outer array head, i.e. nids_off+32)
+    inner0_rel = int.from_bytes(data[nids_off+32:nids_off+64], 'big')
+    inner0_abs = nids_off + 32 + inner0_rel
+    inner0_len = int.from_bytes(data[inner0_abs:inner0_abs+32], 'big')
     target = '${TEST_NODE_ID}'.replace('0x','').lower().zfill(64)
-    for i in range(count):
-        elem = data[off+32+i*32:off+64+i*32].hex().lower()
+    for i in range(inner0_len):
+        elem = data[inner0_abs+32+i*32:inner0_abs+64+i*32].hex().lower()
         if elem == target:
             print('true'); exit()
     print('false')
@@ -359,8 +374,12 @@ raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 10: print(0); exit()
 data = bytes.fromhex(raw[2:])
 try:
-    off = int.from_bytes(data[0:32], 'big')
-    print(int.from_bytes(data[off:off+32], 'big'))
+    nids_off = int.from_bytes(data[32:64], 'big')
+    outer_len = int.from_bytes(data[nids_off:nids_off+32], 'big')
+    if outer_len == 0: print(0); exit()
+    inner0_rel = int.from_bytes(data[nids_off+32:nids_off+64], 'big')
+    inner0_abs = nids_off + 32 + inner0_rel
+    print(int.from_bytes(data[inner0_abs:inner0_abs+32], 'big'))
 except Exception:
     print(0)
 " 2>/dev/null || echo "0")
