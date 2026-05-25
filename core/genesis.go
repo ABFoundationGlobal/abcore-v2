@@ -748,16 +748,15 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 // operationally pre-placed on each validator host under /data/devnet/val-N/keystore/
 // — they are persistent infrastructure keys, not fixtures.
 //
-// The sixth alloc entry is a well-known Foundry/Anvil funder account (anvil[0])
-// whose private key is public knowledge. It exists so that DevNet governance
-// rehearsals can fund delegator accounts to test propose / vote / quorum
-// boundaries that the validator self-stakes alone cannot cross. This funder is
-// **DevNet-only**; testnet has its own dedicated funder and mainnet uses the
-// Foundation distribution flow.
-//
-//	funder address     = 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266
-//	funder private key = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-//	                     (Foundry "test test ... junk" mnemonic[0])
+// The sixth alloc entry is the well-known Foundry / Anvil default account #0
+// (the first account derived from the public "test test ... junk" mnemonic).
+// It exists so that DevNet governance rehearsals can fund delegator accounts
+// to test propose / vote / quorum boundaries that the validator self-stakes
+// alone cannot cross. This funder is **DevNet-only**; testnet has its own
+// dedicated funder and mainnet uses the Foundation distribution flow. The
+// private key is intentionally NOT recorded in-tree to discourage accidental
+// reuse on higher environments — see docs/ops/devnet-upgrade-plan.md §3
+// "DevNet funder 账户使用说明" for the operator-facing reference.
 //
 // extraData layout matches Clique:
 //
@@ -771,14 +770,18 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 // genesis-contract PR #11 mainnet-aligned staking thresholds:
 // min_self_delegation = 2_000_000_000 ether, propose_start_threshold =
 // 30_000_000_000 ether):
-//   - each validator: 100 × 10^8 ether = 10^10 ether  (== 0x33b2e3c9fd0803ce8000000 wei)
-//   - funder: 10^11 ether                              (== 0x204fce5e3e25026110000000 wei)
+//   - each validator: 10^10 ether (= 10^28 wei)
+//   - funder:         10^11 ether (= 10^29 wei)
 //
 // (block #0 hash is pinned by TestDefaultABCoreDevnetGenesisBlockHash in
 // core/genesis_test.go and exposed as params.ABCoreDevnetGenesisHash.)
 func DefaultABCoreDevnetGenesisBlock() *Genesis {
-	validatorBalance, _ := new(big.Int).SetString("0x33b2e3c9fd0803ce8000000", 0) // 10^10 ether
-	funderBalance, _ := new(big.Int).SetString("0x204fce5e3e25026110000000", 0)   // 10^11 ether
+	// 10^10 ether and 10^11 ether respectively. Computed as 10^(exp+18) to
+	// keep the wei magnitude self-explanatory and avoid silent failures from
+	// the (*big.Int).SetString boolean being dropped.
+	wei := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	validatorBalance := new(big.Int).Mul(new(big.Int).Exp(big.NewInt(10), big.NewInt(10), nil), wei)
+	funderBalance := new(big.Int).Mul(new(big.Int).Exp(big.NewInt(10), big.NewInt(11), nil), wei)
 	return &Genesis{
 		Config:     params.ABCoreDevnetChainConfig,
 		Timestamp:  0,

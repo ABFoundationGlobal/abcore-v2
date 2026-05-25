@@ -54,7 +54,7 @@ var (
 	// DefaultABCoreDevnetGenesisBlock in core/genesis.go for the full doc and why.
 	// Stable across geth init re-runs as long as the validator keystore set does not change.
 	// Pinned by TestDefaultABCoreDevnetGenesisBlockHash (core/genesis_test.go).
-	ABCoreDevnetGenesisHash = common.HexToHash("0x6cfe65231b8b2b6d0cf9a2c58a1995fba4b35e661a7dd73790607e419bb6ab06")
+	ABCoreDevnetGenesisHash = common.HexToHash("0x2f73871f16c2eab50b60624dec65620c9777b9cfb4d5242e902cfd1a73b00791")
 )
 
 func newUint64(val uint64) *uint64 { return &val }

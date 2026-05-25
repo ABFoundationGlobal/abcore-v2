@@ -184,7 +184,7 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	// Asserting each field explicitly prevents accidental partial schedules.
 	// NotNil-check each pointer before .Int64() so a missing schedule produces
 	// a clean test failure instead of a nil-deref panic.
-	v030Forks := []struct {
+	t2Forks := []struct {
 		name string
 		val  *big.Int
 	}{
@@ -203,7 +203,7 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 		{"HertzBlock", devCfg.HertzBlock},
 		{"HertzfixBlock", devCfg.HertzfixBlock},
 	}
-	for _, f := range v030Forks {
+	for _, f := range t2Forks {
 		require.NotNilf(t, f.val, "devnet %s must be scheduled", f.name)
 		require.Equalf(t, int64(3600), f.val.Int64(), "devnet %s = 3600 (T2 after 2026-05-26 reset)", f.name)
 	}
