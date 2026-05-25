@@ -650,7 +650,7 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 STAKE_HUB="0x0000000000000000000000000000000000002002"
 
 # coordinator 使用各 validator 的 operator key 依次代执行（需持有全部 operator key）
-# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额 (20亿 ether)
+# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额（详见下方预检）
 cast send $STAKE_HUB \
   "createValidator(address,bytes,bytes,uint64,(string,string,string,string,string))" \
   <consensus_address> \
@@ -674,13 +674,19 @@ eth.getCode("0x0000000000000000000000000000000000002002")  # 非 0x
 # 2. 确认每个 validator 的 operator 账户（签名 createValidator 的账户）有足够余额
 # operator key 由 coordinator 持有，费用从 operator 地址扣除（非 consensus 地址）
 #
-# 余额要求（AB 正式环境 / 测试环境 / DevNet 三档一致）：
-#   createValidator 初始自委托质押  min_self_delegation   = 2_000_000_000 = 20亿 ether
-#   delegate()      govAB 投票权抵押 min_delegation_change = 100_000_000   = 1亿  ether
-#   gas（两笔交易合计）                                                    ≈ 0.01 ether
+# 余额要求（由 generate.py 统一注入；AB mainnet / testnet / devnet 当前 staking 阈值一致）：
+#   createValidator 初始自委托质押  min_self_delegation     = 2_000_000_000 = 20亿 ether
+#   createValidator LOCK_AMOUNT     （StakeCredit 锁仓）      = 1 ether
+#   delegate()      govAB 投票权抵押 min_delegation_change   = 100_000_000   = 1亿  ether
+#   gas（两笔交易合计）                                                      ≈ 0.01 ether
 #   ──────────────────────────────────────────────────────────────────────────────────
-#   仅做 createValidator          → 每个 operator 账户建议余额 > 21亿 ether
-#   注：质押金额均打入质押池，不销毁
+#   合计每个 operator 账户最低建议余额：> 21.0001亿 ether（20亿 + 1亿 + 1 + 0.01）
+#   注：质押金额均打入质押池，不销毁；LOCK_AMOUNT 锁在 StakeCredit 合约
+#
+# DevNet 实际起步余额（2026-05-26 reset 后）：
+#   每个 validator: 100亿 ether（足够多次 stake/unstake 演练）
+#   funder 账户 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266: 1000亿 ether
+#   （funder 私钥 = Foundry/Anvil anvil[0]，公开，仅用于 DevNet）
 cast balance <operator_address> --rpc-url http://rpc-0:8545
 
 # 3. 提前测试 createValidator 调用（在 DevNet 上模拟）
@@ -717,11 +723,12 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 GOV_TOKEN="0x0000000000000000000000000000000000002005"
 
 # 每个 validator 执行一次（--private-key 使用对应 operator key）
+# --value 必须 ≥ minDelegationBNBChange = 1亿 ether
 cast send $STAKE_HUB \
   "delegate(address,bool)" \
   <operator_address> \
   true \
-  --value 1ether \
+  --value 100000000ether \
   --private-key <operator_key> \
   --rpc-url http://rpc-0:8545
 
@@ -731,6 +738,17 @@ cast call $GOV_TOKEN \
   <operator_address> \
   --rpc-url http://rpc-0:8545
 ```
+
+**DevNet funder 账户使用说明（2026-05-26 reset 后）：**
+
+reset 后，DevNet 在 genesis alloc 中包含一个 well-known funder 账户（Foundry/Anvil 默认账户 #0）以便后续 governance fund：
+
+- 地址：`0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266`
+- 私钥：`0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`（Foundry "test test ... junk" mnemonic[0]，**公开**）
+- 起步余额：1000亿 ether
+- 用途：governance 演练中给 delegator 账户 transfer，提升某个 validator 的 govAB 持仓以测试 propose / quorum 阈值边界（5 个 validator × 20亿 self-stake = 100亿 govAB，距离 propose_start_threshold = 300亿 还差 200亿；可由 funder transfer 给 validator 后再 `StakeHub.delegate(operator, ...)`）
+
+> **仅限 DevNet**：该私钥**公开**，绝不可在 Testnet / Mainnet 使用。Testnet 已有专用 funder（`0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3`），Mainnet 走 Foundation 分发流程。
 
 **验证清单：**
 ```bash
