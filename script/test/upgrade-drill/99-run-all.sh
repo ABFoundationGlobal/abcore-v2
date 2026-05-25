@@ -16,13 +16,6 @@
 # contract state is exercised on a freshly-initialised Feynman chain.
 #
 # Known side-effects of T-tests on subsequent upgrade rounds:
-#   T-7.c  editConsensusAddress(val1, 0x000...cafe): on-chain consensus address
-#          for val1 is changed.  The running node continues to sign with the
-#          original key; Parlia keeps producing blocks with val2+val3 (2/3
-#          quorum) until the next epoch election, at which point the new
-#          consensus address 0x000...cafe would enter the set.  U-4~U-7 rolling
-#          restarts do not touch the keystore, so block production is unaffected
-#          as long as the test completes well before a breathe-block epoch end.
 #   T-13.a removeFromValidatorWhitelist(val1): val1 was already removed by
 #          T-6.i (in 88); the governance execute is idempotent (no revert) and
 #          the verify check validatorWhitelist(val1)==false still passes.
