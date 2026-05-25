@@ -741,14 +741,19 @@ cast call $GOV_TOKEN \
 
 **DevNet funder 账户使用说明（2026-05-26 reset 后）：**
 
-reset 后，DevNet 在 genesis alloc 中包含一个 well-known funder 账户（Foundry/Anvil 默认账户 #0）以便后续 governance fund：
+reset 后，DevNet 在 genesis alloc 中包含一个 well-known funder 账户：Foundry / Anvil 默认账户 #0，由公开 mnemonic `"test test test test test test test test test test test junk"` 派生的第一个账户。
 
 - 地址：`0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266`
-- 私钥：`0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`（Foundry "test test ... junk" mnemonic[0]，**公开**）
-- 起步余额：1000亿 ether
-- 用途：governance 演练中给 delegator 账户 transfer，提升某个 validator 的 govAB 持仓以测试 propose / quorum 阈值边界（5 个 validator × 20亿 self-stake = 100亿 govAB，距离 propose_start_threshold = 300亿 还差 200亿；可由 funder transfer 给 validator 后再 `StakeHub.delegate(operator, ...)`）
+- 起步余额：10^11 ether（10^29 wei）
+- 私钥获取：任意 Foundry/Hardhat 安装本地导出 `cast wallet derive-private-key "test test test test test test test test test test test junk" 0` 或参考 [Foundry book - test accounts](https://book.getfoundry.sh/anvil/)。该私钥为业界公开（已记录在 Foundry / Hardhat / Anvil 默认文档中）。
+- 用途：governance 演练中给 delegator 账户 transfer，提升某个 validator 的 govAB 持仓以测试 propose / quorum 阈值边界（5 个 validator × 20亿 self-stake = 100亿 govAB，距离 propose_start_threshold = 300亿 还差 200亿；可由 funder transfer 给 validator 后再 `StakeHub.delegate(operator, ...)`）。
 
-> **仅限 DevNet**：该私钥**公开**，绝不可在 Testnet / Mainnet 使用。Testnet 已有专用 funder（`0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3`），Mainnet 走 Foundation 分发流程。
+> ⚠️ **严格仅限 DevNet**：该 mnemonic / 私钥**全球公开**，任何人都可以签名该地址的交易。绝不可：
+> - 在 Testnet / Mainnet 部署该地址或类似账户
+> - 把该地址作为任何 production 合约的 admin / owner / multisig signer
+> - 把演练脚本（含该私钥）直接复用到 Testnet / Mainnet 流程（必须替换 funder）
+>
+> 对照参考：Testnet 已有专用 funder（`0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3`，私钥仅 ops 团队持有），Mainnet 走 Foundation 分发流程，不存在 well-known funder。
 
 **验证清单：**
 ```bash
