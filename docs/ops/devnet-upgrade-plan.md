@@ -649,6 +649,15 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 ```bash
 STAKE_HUB="0x0000000000000000000000000000000000002002"
 
+# 动态查询 createValidator 所需的 msg.value（min_self_delegation + LOCK_AMOUNT）。
+# 这两个值都来自部署时的 generate.py 默认值，不要硬编码——一旦未来通过
+# governance 改了 minSelfDelegationBNB，硬编码值就过期。
+MIN_SELF_WEI=$(cast call $STAKE_HUB "minSelfDelegationBNB()(uint256)" --rpc-url http://rpc-0:8545)
+LOCK_WEI=$(cast call    $STAKE_HUB "LOCK_AMOUNT()(uint256)"          --rpc-url http://rpc-0:8545)
+TX_VALUE_WEI=$(python3 -c "print(${MIN_SELF_WEI} + ${LOCK_WEI})")
+# 健全性检查（避免合约未初始化导致发空 tx）
+[ "${MIN_SELF_WEI}" -gt 0 ] || { echo "ERROR: minSelfDelegationBNB() == 0, StakeHub not initialized?"; exit 1; }
+
 # coordinator 使用各 validator 的 operator key 依次代执行（需持有全部 operator key）
 # gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额（详见下方预检）
 cast send $STAKE_HUB \
@@ -658,6 +667,7 @@ cast send $STAKE_HUB \
   <bls_proof_bytes> \
   <commission_rate_bps> \
   "(<moniker>,<identity>,<website>,<security_contact>,<details>)" \
+  --value "${TX_VALUE_WEI}" \
   --private-key <operator_key> \
   --rpc-url http://rpc-0:8545
 
@@ -715,20 +725,25 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 
 **（可选）激活 govAB 治理投票权：**
 
-`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（合约默认值 1亿 BNB），该 BNB 同样进入质押池，不被销毁。
+`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（mainnet/testnet/devnet 部署当前默认值 = `100_000_000 ether` = 1亿 BNB；abchain-local drill 不一样，详见下方"环境差异"），该 BNB 同样进入质押池，不被销毁。
 
 > **设计原因**：投票委托与质押故意解耦，允许 operator 把 govAB 投票权委托给独立的治理代理地址（而非只能自委托）。
+
+> **环境差异提醒**：`script/test/upgrade-drill/` 跑的是 `abchain-local` 模式（in-PR forge 单元测试 + 多节点演练），它的 `minDelegationBNBChange = 1 ether`（drill README:246 + `82-run-u3-shanghai-feynman.sh:395-397` 硬编码 0xde0b6b3a7640000 = 1 ether 是对的）。本节是 mainnet/testnet/devnet **production 部署**后的 ops，由 `abchain-main/test/dev` 模式生成 bytecode，默认值是 `1亿 ether`。两者**不冲突**——是两个不同的 generate.py 子命令注入的不同默认值。下方 bash 用 `cast call` 动态查询而非硬编码，避免读者把 production 数字误用到 drill 或反之。
 
 ```bash
 GOV_TOKEN="0x0000000000000000000000000000000000002005"
 
+# 动态查询当前 chain 的 minDelegationBNBChange，避免硬编码与实际部署值不一致
+MIN_DELEG_WEI=$(cast call $STAKE_HUB "minDelegationBNBChange()(uint256)" --rpc-url http://rpc-0:8545)
+[ "${MIN_DELEG_WEI}" -gt 0 ] || { echo "ERROR: minDelegationBNBChange() == 0, StakeHub not initialized?"; exit 1; }
+
 # 每个 validator 执行一次（--private-key 使用对应 operator key）
-# --value 必须 ≥ minDelegationBNBChange = 1亿 ether
 cast send $STAKE_HUB \
   "delegate(address,bool)" \
   <operator_address> \
   true \
-  --value 100000000ether \
+  --value "${MIN_DELEG_WEI}" \
   --private-key <operator_key> \
   --rpc-url http://rpc-0:8545
 
