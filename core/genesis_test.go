@@ -387,9 +387,12 @@ func TestVerkleGenesisCommit(t *testing.T) {
 // changed any of those, the live devnet's block #0 hash also changed, and
 // params.ABCoreDevnetGenesisHash must be updated in lockstep.
 //
-// Live hash captured 2026-05-11 from ab-d4:19545:
-//
-//	0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
+// 2026-05-26 reset: pre-reset hash 0x3da80...1b43 was captured 2026-05-11
+// from ab-d4:19545 (5 validators, each 10^7 ether). The post-reset hash
+// reflects the new alloc (each validator 10^10 ether + funder 10^11 ether
+// at 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266) and is recomputed below;
+// once the live devnet has been reset, it can also be verified via
+// `cast block 0 --rpc-url http://rpc-0:19545 | grep hash`.
 func TestDefaultABCoreDevnetGenesisBlockHash(t *testing.T) {
 	got := DefaultABCoreDevnetGenesisBlock().ToBlock().Hash()
 	want := params.ABCoreDevnetGenesisHash

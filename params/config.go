@@ -48,9 +48,13 @@ var (
 	// addresses on ab-d{1,2,3} servers (val-0..val-4 docker container keystores; the
 	// actual Clique signers verifiable via clique_getSigners on any live RPC node),
 	// sorted lexicographically into Clique extraData with clique{period:3, epoch:30000},
-	// gasLimit 0x1C9C380, timestamp 0x0, difficulty 0x1.
+	// gasLimit 0x1C9C380, timestamp 0x0, difficulty 0x1. The alloc contains the 5
+	// validator addresses (each 10^10 ether) plus a well-known Foundry/Anvil funder
+	// 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266 (10^11 ether) — see
+	// DefaultABCoreDevnetGenesisBlock in core/genesis.go for the full doc and why.
 	// Stable across geth init re-runs as long as the validator keystore set does not change.
-	ABCoreDevnetGenesisHash = common.HexToHash("0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43")
+	// Pinned by TestDefaultABCoreDevnetGenesisBlockHash (core/genesis_test.go).
+	ABCoreDevnetGenesisHash = common.HexToHash("0x6cfe65231b8b2b6d0cf9a2c58a1995fba4b35e661a7dd73790607e419bb6ab06")
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -445,65 +449,67 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// Phase 3 cutover scheduled at block 6000 (target activation
-		// 2026-05-21 ~12:52 UTC, +3h10 from measurement). LondonBlock + 13 BSC
-		// block forks (Ramanujan through Hertzfix) all activate at the same height.
-		// Calculation basis (measured 2026-05-21 09:42:24 UTC):
-		//   - head=#2198 at ts=1779356544
-		//   - measured period: 3.000 s/block (Parlia, post-PGB)
-		//   - target activation window: ~3h from measurement = 2026-05-21 12:42 UTC
-		//   - raw M estimate: 2198 + 3600 = 5798
-		//   - M chosen: 6000 (next 200-block boundary above raw + 200-block buffer
-		//     for PR review/merge latency; 6000 % 200 == 0)
-		//   - estimated arrival of #6000: 2026-05-21 ~12:52:30 UTC
-		//   - safety margin from +3h target: +10.1 min (202 blocks)
-		// Gap from PGB=1600: 4400 blocks = 220 min ≈ 3h40 (22 full Parlia epochs).
-		// This is **deliberately shorter** than the runbook's documented ≥24h
-		// observation window (≈28800 blocks @ 3s) — this is a devnet rehearsal
-		// pacing demo, not the testnet/mainnet schedule. Don't copy this gap
-		// to higher environments. See docs/ops/devnet-upgrade-plan.md §3 for
-		// the recommended gap and §6 for the mainnet推进 guidance.
+		// === DevNet reset 2026-05-26: compressed T1 / T2 / T3 schedule ===
 		//
-		// Why 200-grid alignment matters here (unlike PGB): LubanBlock changes
-		// validator extraData layout from 20B/validator to 68B/validator (BLS pubkey
-		// gets appended). The Luban-form list is only written at epoch boundaries
-		// (number % epochLength == 0). If M is off-grid the Luban-form list won't
-		// appear at the activation block — it lands at the next epoch block. Putting
-		// M on the grid makes M itself the first verifiable Luban-form epoch block.
-		// CheckConfigForkOrder permits all 14 forks at the same height; no need
-		// to spread them.
-		LondonBlock:     big.NewInt(6000),
-		RamanujanBlock:  big.NewInt(6000),
-		NielsBlock:      big.NewInt(6000),
-		MirrorSyncBlock: big.NewInt(6000),
-		BrunoBlock:      big.NewInt(6000),
-		EulerBlock:      big.NewInt(6000),
-		GibbsBlock:      big.NewInt(6000),
-		NanoBlock:       big.NewInt(6000),
-		MoranBlock:      big.NewInt(6000),
-		PlanckBlock:     big.NewInt(6000),
-		LubanBlock:      big.NewInt(6000),
-		PlatoBlock:      big.NewInt(6000),
-		HertzBlock:      big.NewInt(6000),
-		HertzfixBlock:   big.NewInt(6000),
-		// Timestamp-based forks: v0.4.0 (T3) schedules Shanghai + Kepler + Feynman +
-		// FeynmanFix at the same timestamp (BSC convention). Cancun and Prague stay
-		// nil until later upgrades (v0.5.0+ per devnet-upgrade-plan.md §3).
+		// The devnet was reset on 2026-05-26 (≤ 04:00 UTC) with a new genesis
+		// alloc (each validator 10^10 ether + a well-known funder 10^11 ether)
+		// to support the mainnet-aligned staking thresholds shipped in
+		// abcore-v2-genesis-contract PR #11 (min_self_delegation = 2_000_000_000
+		// ether, propose_start_threshold = 30_000_000_000 ether). The pre-reset
+		// PGB=1600 / T2=6000 / T3=2026-05-25 schedule is preserved in §10 of
+		// devnet-upgrade-plan.md as historical record.
 		//
-		// T3 = 2026-05-25 08:00:00 UTC = unix 1779696000
+		// New schedule (block_interval = 3 s):
 		//
-		// Calculation basis (measured 2026-05-24 19:49:04 UTC):
-		//   - head=#100730 at ts=1779652144
-		//   - measured period: 3.000 s/block (post-PGB Parlia)
-		//   - gap from measurement to T3: 43856 s ≈ 12.18 h ≈ 14619 blocks
-		//   - gap from v0.3.0 cutover (2026-05-21 ~12:52 UTC) to T3: ~91 h
-		//     ≫ the §3 ≥48h-on-mainnet floor (devnet rehearsal can run tighter,
-		//     but this gap is conservative even by mainnet rules)
+		//   T1 = block 2400 (ParliaGenesisBlock, Clique → Parlia)
+		//   T2 = block 3600 (London + 13 BSC block forks)
+		//   T3 = 2026-05-26 08:00:00 UTC = unix 1779782400
+		//        (Shanghai + Kepler + Feynman + FeynmanFix, timestamp-based)
+		//
+		// Wall-clock layout assuming reset at 04:00 UTC (worst-case latest reset):
+		//   reset:  04:00 UTC (block 0)
+		//   T1:     06:00 UTC (block 2400 = reset + 2h)
+		//   T2:     07:00 UTC (block 3600 = reset + 3h)
+		//   T3:     08:00 UTC (hard deadline, timestamp-based)
+		//
+		// Constraint: reset must complete no later than 2026-05-26 04:00 UTC so
+		// T2 (block 3600 = reset + 3h) lands strictly before T3 (08:00 UTC).
+		// Earlier reset is fine — T3 stays anchored to wall-clock, T1/T2 just
+		// trigger earlier in real time.
+		//
+		// 200-grid alignment for T2 (LubanBlock and friends): 3600 % 200 == 0.
+		// This matters because LubanBlock changes validator extraData layout from
+		// 20B/validator to 68B/validator (BLS pubkey appended), but the
+		// Luban-form list is only written at epoch boundaries
+		// (block.Number % Parlia.Epoch == 0). Aligning T2 to the grid makes T2
+		// itself the first verifiable Luban-form epoch block.
+		//
+		// PGB (T1) does not need 200-grid alignment for protocol reasons —
+		// consensus/parlia/parlia.go treats the PGB block as an epoch boundary
+		// regardless of `PGB % epochLength` (see the IsOnParliaGenesis branches
+		// in getValidatorBytesFromHeader and verifyHeader). 2400 % 200 == 0 is
+		// kept for operational tidiness only.
+		LondonBlock:     big.NewInt(3600),
+		RamanujanBlock:  big.NewInt(3600),
+		NielsBlock:      big.NewInt(3600),
+		MirrorSyncBlock: big.NewInt(3600),
+		BrunoBlock:      big.NewInt(3600),
+		EulerBlock:      big.NewInt(3600),
+		GibbsBlock:      big.NewInt(3600),
+		NanoBlock:       big.NewInt(3600),
+		MoranBlock:      big.NewInt(3600),
+		PlanckBlock:     big.NewInt(3600),
+		LubanBlock:      big.NewInt(3600),
+		PlatoBlock:      big.NewInt(3600),
+		HertzBlock:      big.NewInt(3600),
+		HertzfixBlock:   big.NewInt(3600),
+		// Timestamp-based T3 forks. Cancun and Prague stay nil until later
+		// upgrades (v0.5.0+).
 		//
 		// Why this T3 is safe (breathe-block alignment check):
 		//   BreatheBlockInterval = 24h (params/protocol_params.go:211).
-		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-25 00:00 UTC
-		//   breathe boundary, and 16h BEFORE the 2026-05-26 00:00 UTC boundary.
+		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-26 00:00 UTC
+		//   breathe boundary, and 16h BEFORE the 2026-05-27 00:00 UTC boundary.
 		//   This gives operators a ~16h window after Feynman activation to
 		//   complete `createValidator` + `delegate` on all 5 validators before
 		//   the first Go-layer breathe block fires `updateValidatorSetV2`.
@@ -517,41 +523,14 @@ var (
 		//     election at breathe blocks
 		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
 		//     non-mainnet networks (mainnet split them by ~14 days)
-		// CheckConfigForkOrder permits all four times at T3; its enforced
-		// timestamp-ordering check covers `keplerTime → feynmanTime →
-		// feynmanFixTime` (see params/config.go::CheckConfigForkOrder list,
-		// which starts at keplerTime — ShanghaiTime is not part of this
-		// ordering chain and is validated by the EVM ruleset selection only).
-		// Kepler ≤ Feynman ≤ FeynmanFix is satisfied trivially at T3 == T3 == T3.
-		ShanghaiTime:   newUint64(1779696000),
-		KeplerTime:     newUint64(1779696000),
-		FeynmanTime:    newUint64(1779696000),
-		FeynmanFixTime: newUint64(1779696000),
+		// CheckConfigForkOrder permits all four times at T3.
+		ShanghaiTime:   newUint64(1779782400), // 2026-05-26 08:00:00 UTC
+		KeplerTime:     newUint64(1779782400),
+		FeynmanTime:    newUint64(1779782400),
+		FeynmanFixTime: newUint64(1779782400),
 		CancunTime:     nil,
 		PragueTime:     nil,
-		// Phase 2 cutover scheduled at block 1600 (target activation
-		// 2026-05-21 ~08:56 UTC, +1h22 from devnet reset 2026-05-21 07:34 UTC).
-		// Calculation basis (measured 2026-05-21 07:49:35 UTC):
-		//   - head=#273 at ts=1779349775
-		//   - measured period: 3.000 s/block (Clique)
-		//   - target activation window: ~1h from measurement = 2026-05-21 08:49 UTC
-		//   - raw N estimate: 273 + 1200 = 1473
-		//   - N chosen: 1600 (next 200-block boundary above the raw estimate)
-		//   - estimated arrival of #1600: 2026-05-21 ~08:55:56 UTC
-		//   - safety margin from +1h target: +6.4 min (127 blocks)
-		//
-		// Note on 200-block alignment: this is an operational convention, not a
-		// protocol requirement for PGB. consensus/parlia/parlia.go treats the
-		// PGB block itself as an epoch boundary regardless of `PGB % epochLength`
-		// — see the `IsOnParliaGenesis` branches in `getValidatorBytesFromHeader`
-		// and the `isEpoch` check in `verifyHeader`. The validator list lands in
-		// PGB's extraData via that path. The 200-grid alignment matters for
-		// *subsequent* fork blocks scheduled at the same height (e.g. LubanBlock
-		// in v0.3.0) — those go through the normal `number % epochLength == 0`
-		// path and only get a validator list when they fall on an epoch
-		// boundary. Aligning PGB to the grid keeps downstream fork-block
-		// scheduling easy.
-		ParliaGenesisBlock: big.NewInt(1600),
+		ParliaGenesisBlock: big.NewInt(2400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
 		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in

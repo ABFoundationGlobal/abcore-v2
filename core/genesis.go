@@ -743,26 +743,42 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 // DefaultABCoreDevnetGenesisBlock returns the ABCore devnet genesis block (chain ID 17140).
 //
 // Mirrors the block #0 produced by devnet-ops/jenkins/Jenkinsfile.init when it
-// initializes the live 5-validator devnet (server-1/2/3 validators + server-4 RPC).
-// The five signer addresses below are the keystore addresses operationally
-// pre-placed on each validator host under /data/devnet/val-N/keystore/ — they
-// are persistent infrastructure keys, not fixtures.
+// initializes the live 5-validator + 1 funder devnet (server-1/2/3 validators +
+// server-4 RPC). The five signer addresses below are the keystore addresses
+// operationally pre-placed on each validator host under /data/devnet/val-N/keystore/
+// — they are persistent infrastructure keys, not fixtures.
+//
+// The sixth alloc entry is a well-known Foundry/Anvil funder account (anvil[0])
+// whose private key is public knowledge. It exists so that DevNet governance
+// rehearsals can fund delegator accounts to test propose / vote / quorum
+// boundaries that the validator self-stakes alone cannot cross. This funder is
+// **DevNet-only**; testnet has its own dedicated funder and mainnet uses the
+// Foundation distribution flow.
+//
+//	funder address     = 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266
+//	funder private key = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+//	                     (Foundry "test test ... junk" mnemonic[0])
 //
 // extraData layout matches Clique:
 //
 //	32 bytes vanity (zero) + 5×20 bytes sorted signer addresses + 65 bytes seal (zero)
 //
-// Sorting is ascending by hex byte representation, exactly what
-// Jenkinsfile.init's inline python emits.
+// The funder is NOT a Clique signer and does NOT appear in extraData — it only
+// gets an alloc entry. Sorting of signer addresses is ascending by hex byte
+// representation, exactly what Jenkinsfile.init's inline python emits.
 //
-// Verified against live: block #0 hash on ab-d4 RPC node =
+// Per-account balances (set during the 2026-05-26 reset to support the
+// genesis-contract PR #11 mainnet-aligned staking thresholds:
+// min_self_delegation = 2_000_000_000 ether, propose_start_threshold =
+// 30_000_000_000 ether):
+//   - each validator: 100 × 10^8 ether = 10^10 ether  (== 0x33b2e3c9fd0803ce8000000 wei)
+//   - funder: 10^11 ether                              (== 0x204fce5e3e25026110000000 wei)
 //
-//	0x3da802986c108be098e01bddaa9754806d01a68a766c17663eb98f83b2cc1b43
-//
-// (equal to params.ABCoreDevnetGenesisHash; pinned by
-// TestDefaultABCoreDevnetGenesisBlockHash in core/genesis_test.go).
+// (block #0 hash is pinned by TestDefaultABCoreDevnetGenesisBlockHash in
+// core/genesis_test.go and exposed as params.ABCoreDevnetGenesisHash.)
 func DefaultABCoreDevnetGenesisBlock() *Genesis {
-	balance, _ := new(big.Int).SetString("0x84595161401484a000000", 0)
+	validatorBalance, _ := new(big.Int).SetString("0x33b2e3c9fd0803ce8000000", 0) // 10^10 ether
+	funderBalance, _ := new(big.Int).SetString("0x204fce5e3e25026110000000", 0)   // 10^11 ether
 	return &Genesis{
 		Config:     params.ABCoreDevnetChainConfig,
 		Timestamp:  0,
@@ -777,11 +793,13 @@ func DefaultABCoreDevnetGenesisBlock() *Genesis {
 			"ae418d3a3e225a12d9014a201152dc54f8064823" +
 			"0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		Alloc: GenesisAlloc{
-			common.HexToAddress("0x0c4bc1f8c69f4308e3d21c7982be944fa8afbfed"): {Balance: balance},
-			common.HexToAddress("0x243253a045f23dd8c4ccedbb6f75a18c201dda09"): {Balance: balance},
-			common.HexToAddress("0x2f342dada01c242d08fd4d2ac1afa2af5657e55e"): {Balance: balance},
-			common.HexToAddress("0x8907d13b612e1b014adb9df7175702501d55e0a4"): {Balance: balance},
-			common.HexToAddress("0xae418d3a3e225a12d9014a201152dc54f8064823"): {Balance: balance},
+			common.HexToAddress("0x0c4bc1f8c69f4308e3d21c7982be944fa8afbfed"): {Balance: validatorBalance},
+			common.HexToAddress("0x243253a045f23dd8c4ccedbb6f75a18c201dda09"): {Balance: validatorBalance},
+			common.HexToAddress("0x2f342dada01c242d08fd4d2ac1afa2af5657e55e"): {Balance: validatorBalance},
+			common.HexToAddress("0x8907d13b612e1b014adb9df7175702501d55e0a4"): {Balance: validatorBalance},
+			common.HexToAddress("0xae418d3a3e225a12d9014a201152dc54f8064823"): {Balance: validatorBalance},
+			// Foundry anvil[0] — DevNet-only funder, private key is public.
+			common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266"): {Balance: funderBalance},
 		},
 	}
 }
