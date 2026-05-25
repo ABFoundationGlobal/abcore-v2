@@ -650,7 +650,7 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 STAKE_HUB="0x0000000000000000000000000000000000002002"
 
 # coordinator 使用各 validator 的 operator key 依次代执行（需持有全部 operator key）
-# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额
+# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额 (20亿 ether)
 cast send $STAKE_HUB \
   "createValidator(address,bytes,bytes,uint64,(string,string,string,string,string))" \
   <consensus_address> \
@@ -671,8 +671,16 @@ cast call $STAKE_HUB "getValidatorBasicInfo(address)" \
 # 1. 验证 StakeHub 合约地址（与 release notes 中一致）
 eth.getCode("0x0000000000000000000000000000000000002002")  # 非 0x
 
-# 2. 确认每个 validator 的 operator 账户（签名 createValidator 的账户）有足够余额支付 gas
-# operator key 由 coordinator 持有，gas 从 operator 地址扣除（非 consensus 地址）
+# 2. 确认每个 validator 的 operator 账户（签名 createValidator 的账户）有足够余额
+# operator key 由 coordinator 持有，费用从 operator 地址扣除（非 consensus 地址）
+#
+# 余额要求（AB 正式环境 / 测试环境 / DevNet 三档一致）：
+#   createValidator 初始自委托质押  min_self_delegation   = 2_000_000_000 = 20亿 ether
+#   delegate()      govAB 投票权抵押 min_delegation_change = 100_000_000   = 1亿  ether
+#   gas（两笔交易合计）                                                    ≈ 0.01 ether
+#   ──────────────────────────────────────────────────────────────────────────────────
+#   仅做 createValidator          → 每个 operator 账户建议余额 > 21亿 ether
+#   注：质押金额均打入质押池，不销毁
 cast balance <operator_address> --rpc-url http://rpc-0:8545
 
 # 3. 提前测试 createValidator 调用（在 DevNet 上模拟）
@@ -701,7 +709,7 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 
 **（可选）激活 govAB 治理投票权：**
 
-`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（合约默认值 1 BNB），该 BNB 同样进入质押池，不被销毁。
+`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（合约默认值 1亿 BNB），该 BNB 同样进入质押池，不被销毁。
 
 > **设计原因**：投票委托与质押故意解耦，允许 operator 把 govAB 投票权委托给独立的治理代理地址（而非只能自委托）。
 
