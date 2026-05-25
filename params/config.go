@@ -524,12 +524,12 @@ var (
 		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
 		//     non-mainnet networks (mainnet split them by ~14 days)
 		// CheckConfigForkOrder permits all four times at T3.
-		ShanghaiTime:   newUint64(1779782400), // 2026-05-26 08:00:00 UTC
-		KeplerTime:     newUint64(1779782400),
-		FeynmanTime:    newUint64(1779782400),
-		FeynmanFixTime: newUint64(1779782400),
-		CancunTime:     nil,
-		PragueTime:     nil,
+		ShanghaiTime:       newUint64(1779782400), // 2026-05-26 08:00:00 UTC
+		KeplerTime:         newUint64(1779782400),
+		FeynmanTime:        newUint64(1779782400),
+		FeynmanFixTime:     newUint64(1779782400),
+		CancunTime:         nil,
+		PragueTime:         nil,
 		ParliaGenesisBlock: big.NewInt(2400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
