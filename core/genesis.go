@@ -766,8 +766,8 @@ func DefaultABCoreTestGenesisBlock() *Genesis {
 // gets an alloc entry. Sorting of signer addresses is ascending by hex byte
 // representation, exactly what Jenkinsfile.init's inline python emits.
 //
-// Per-account balances (set during the 2026-05-26 reset to support the
-// genesis-contract PR #11 mainnet-aligned staking thresholds:
+// Per-account balances (scheduled for the 2026-05-26 reset, sized to support
+// the genesis-contract PR #11 mainnet-aligned staking thresholds:
 // min_self_delegation = 2_000_000_000 ether, propose_start_threshold =
 // 30_000_000_000 ether):
 //   - each validator: 10^10 ether (= 10^28 wei)

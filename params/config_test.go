@@ -164,16 +164,17 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Clique, "devnet Clique config must be set")
 	require.Equal(t, uint64(3), devCfg.Clique.Period, "devnet Clique period")
 	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
-	// Phase 2 cutover scheduled at block 1600 (target activation 2026-05-21
-	// ~08:55 UTC). PGB itself is treated as an epoch boundary by Parlia
-	// regardless of `PGB % epochLength` — see `IsOnParliaGenesis` branches
-	// in `getValidatorBytesFromHeader` / `verifyHeader` in
-	// consensus/parlia/parlia.go. So 200-grid alignment for PGB is an
-	// operational convention, not a protocol invariant, and not asserted
-	// here. Future non-PGB fork blocks (LubanBlock etc.) do need to land
-	// on epoch boundaries; those should be guarded when they are scheduled.
+	// T1 (Clique → Parlia) scheduled at block 2400 for the 2026-05-26 reset
+	// (= reset wall-clock + 2h at 3 s/block). PGB itself is treated as an
+	// epoch boundary by Parlia regardless of `PGB % epochLength` — see
+	// `IsOnParliaGenesis` branches in `getValidatorBytesFromHeader` /
+	// `verifyHeader` in consensus/parlia/parlia.go. So 200-grid alignment
+	// for PGB is an operational convention, not a protocol invariant, and
+	// not asserted here. Future non-PGB fork blocks (LubanBlock etc.) do
+	// need to land on epoch boundaries; those are asserted separately
+	// further down (LubanBlock % Parlia.Epoch == 0).
 	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock must be scheduled")
-	require.Equal(t, int64(2400), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 2400 (T1 after 2026-05-26 reset)")
+	require.Equal(t, int64(2400), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 2400 (T1 in 2026-05-26 reset schedule)")
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
 	require.Equal(t, uint64(200), devCfg.Parlia.Epoch, "devnet Parlia.Epoch = 200 (BSC defaultEpochLength)")
 

@@ -451,13 +451,17 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		// === DevNet reset 2026-05-26: compressed T1 / T2 / T3 schedule ===
 		//
-		// The devnet was reset on 2026-05-26 (≤ 04:00 UTC) with a new genesis
-		// alloc (each validator 10^10 ether + a well-known funder 10^11 ether)
-		// to support the mainnet-aligned staking thresholds shipped in
-		// abcore-v2-genesis-contract PR #11 (min_self_delegation = 2_000_000_000
-		// ether, propose_start_threshold = 30_000_000_000 ether). The pre-reset
+		// The devnet is scheduled for reset on 2026-05-26 (no later than
+		// 04:00 UTC) with a new genesis alloc (each validator 10^10 ether
+		// plus a well-known funder at 10^11 ether) to support the mainnet-
+		// aligned staking thresholds shipped in abcore-v2-genesis-contract
+		// PR #11 (min_self_delegation = 2_000_000_000 ether,
+		// propose_start_threshold = 30_000_000_000 ether). The pre-reset
 		// PGB=1600 / T2=6000 / T3=2026-05-25 schedule is preserved in §10 of
-		// devnet-upgrade-plan.md as historical record.
+		// devnet-upgrade-plan.md as historical record. This file is being
+		// merged ahead of the reset window so v2 binaries built from master
+		// pick up the new ABCoreDevnetChainConfig automatically when the
+		// rolling-upgrade step (Jenkinsfile.rolling) runs after init.
 		//
 		// New schedule (block_interval = 3 s):
 		//
