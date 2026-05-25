@@ -251,11 +251,15 @@ log "  Dry-run delegate(val2, false) with 3 BNB..."
 eth_call_debug "$STAKE_HUB" "$delegate_data" "$VAL1"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
+delegate_tx=""
 delegate_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "$THREE_BNB" 300000 "$delegate_data" "T-8.a:delegate") || {
   fail "T-8.a: delegate tx failed"; }
-blk_after=$(attach_exec "$GETH" "$IPC1" \
-  "(function(){var r=eth.getTransactionReceipt('${delegate_tx}');return r?r.blockNumber:0;})()" \
-  2>/dev/null || echo "0")
+blk_after="0"
+if [[ "${delegate_tx}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  blk_after=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var r=eth.getTransactionReceipt('${delegate_tx}');return r?r.blockNumber:0;})()" \
+    2>/dev/null || echo "0")
+fi
 
 # Verify pooled BNB increased by ~3 BNB
 raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_POOLED_BNB}${VAL1_PAD}")
@@ -330,11 +334,15 @@ log "  Dry-run undelegate(val2, ${undelegate_shares} shares)..."
 eth_call_debug "$STAKE_HUB" "$undelegate_data" "$VAL1"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
-undelegate_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 300000 "$undelegate_data" "T-8.b:undelegate") || {
+undelegate_tx=""
+undelegate_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 1000000 "$undelegate_data" "T-8.b:undelegate") || {
   fail "T-8.b: undelegate tx failed"; }
-blk_after=$(attach_exec "$GETH" "$IPC1" \
-  "(function(){var r=eth.getTransactionReceipt('${undelegate_tx}');return r?r.blockNumber:0;})()" \
-  2>/dev/null || echo "0")
+blk_after="0"
+if [[ "${undelegate_tx}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  blk_after=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var r=eth.getTransactionReceipt('${undelegate_tx}');return r?r.blockNumber:0;})()" \
+    2>/dev/null || echo "0")
+fi
 
 # Verify pending unbond request count == 1
 raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_PENDING_UNBOND}${VAL1_PAD}")
@@ -400,11 +408,15 @@ print('0x' + sel + val2 + val3 + shares + vote_power)
   eth_call_debug "$STAKE_HUB" "$redeleg_data" "$VAL1"
 
   blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
-  redeleg_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 500000 "$redeleg_data" "T-8.c:redelegate") || {
+  redeleg_tx=""
+  redeleg_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 1000000 "$redeleg_data" "T-8.c:redelegate") || {
     fail "T-8.c: redelegate tx failed"; }
-  blk_after=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var r=eth.getTransactionReceipt('${redeleg_tx}');return r?r.blockNumber:0;})()" \
-    2>/dev/null || echo "0")
+  blk_after="0"
+  if [[ "${redeleg_tx}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    blk_after=$(attach_exec "$GETH" "$IPC1" \
+      "(function(){var r=eth.getTransactionReceipt('${redeleg_tx}');return r?r.blockNumber:0;})()" \
+      2>/dev/null || echo "0")
+  fi
 
   # Verify val2 balance is now 0 (or dust)
   raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_BALANCE_OF}${VAL1_PAD}")
