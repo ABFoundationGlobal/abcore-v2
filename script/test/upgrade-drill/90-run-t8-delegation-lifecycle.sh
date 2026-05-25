@@ -2,10 +2,10 @@
 #
 # 90-run-t8-delegation-lifecycle.sh — T-8: StakeHub + StakeCredit delegation lifecycle
 #
-# T-8.a  additional delegate (no vote-power activation): delegate 1 BNB from
+# T-8.a  additional delegate (no vote-power activation): delegate 3 BNB from
 #         val1 to val2's pool; confirm pooled BNB increases.
-# T-8.b  undelegate: unbond half of val1's shares in val2's pool; confirm pending
-#         unbond request is queued.
+# T-8.b  undelegate: unbond 1 BNB worth of val1's shares in val2's pool;
+#         confirm pending unbond request is queued.
 # T-8.c  redelegate: move val1's remaining val2 shares to val3's pool.
 # T-8.d  claim after unbond period (state-override): use eth_call stateDiff to
 #         simulate lockTime elapsed and verify claimBatch dry-run succeeds.
@@ -14,7 +14,7 @@
 #
 # Prerequisites:
 #   - U-3 completed; validators registered and self-delegated.
-#   - Val1 has balance >= 1 BNB for the additional delegation.
+#   - Val1 has balance >= 3 BNB for the additional delegation.
 #
 # Usage:
 #   GETH=./build/bin/geth bash script/test/upgrade-drill/90-run-t8-delegation-lifecycle.sh
@@ -245,19 +245,19 @@ print(int(raw, 16))
 log "  initial val1 pooled BNB in val2's pool: ${initial_pooled} wei"
 
 # delegate(val2_operator, false) — delegateVotePower=false
-ONE_BNB="0xde0b6b3a7640000"  # 1e18 in hex
+THREE_BNB="0x29a2241af62c0000"  # 3e18 in hex (>= minDelegationBNBChange * 3)
 delegate_data="0x${SEL_DELEGATE}${VAL2_PAD}$(printf '%064x' 0)"
-log "  Dry-run delegate(val2, false) with 1 BNB..."
+log "  Dry-run delegate(val2, false) with 3 BNB..."
 eth_call_debug "$STAKE_HUB" "$delegate_data" "$VAL1"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
-delegate_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "$ONE_BNB" 300000 "$delegate_data" "T-8.a:delegate") || {
+delegate_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "$THREE_BNB" 300000 "$delegate_data" "T-8.a:delegate") || {
   fail "T-8.a: delegate tx failed"; }
 blk_after=$(attach_exec "$GETH" "$IPC1" \
   "(function(){var r=eth.getTransactionReceipt('${delegate_tx}');return r?r.blockNumber:0;})()" \
   2>/dev/null || echo "0")
 
-# Verify pooled BNB increased by ~1 BNB
+# Verify pooled BNB increased by ~3 BNB
 raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_POOLED_BNB}${VAL1_PAD}")
 new_pooled=$(python3 -c "
 raw = '${raw}'
@@ -266,28 +266,19 @@ print(int(raw, 16))
 " 2>/dev/null || echo "0")
 log "  new val1 pooled BNB in val2's pool: ${new_pooled} wei"
 
-pooled_ok=$(python3 -c "
-initial = int('${initial_pooled}')
-new = int('${new_pooled}')
-one_bnb = 10**18
-# allow small rounding
-sys.exit(0 if new >= initial + one_bnb * 99 // 100 else 1)
-import sys
-" 2>/dev/null; echo $?)
-# Re-run properly:
 pooled_ok=0
 python3 -c "
 import sys
 initial = int('${initial_pooled}')
 new = int('${new_pooled}')
-one_bnb = 10**18
-sys.exit(0 if new >= initial + one_bnb * 99 // 100 else 1)
+three_bnb = 3 * 10**18
+sys.exit(0 if new >= initial + three_bnb * 99 // 100 else 1)
 " 2>/dev/null || pooled_ok=1
 
 if [[ "$pooled_ok" -eq 0 ]]; then
-  ok "T-8.a: val1 pooled BNB in val2's pool increased by ~1 BNB (${initial_pooled} → ${new_pooled})"
+  ok "T-8.a: val1 pooled BNB in val2's pool increased by ~3 BNB (${initial_pooled} → ${new_pooled})"
 else
-  fail "T-8.a: expected pooled BNB ~+1e18, got ${initial_pooled} → ${new_pooled}"
+  fail "T-8.a: expected pooled BNB ~+3e18, got ${initial_pooled} → ${new_pooled}"
 fi
 
 blk_before_hex=$(printf '0x%x' "$blk_before")
@@ -313,7 +304,6 @@ log "── T-8.b: undelegate ────────────────�
 
 # Get val1's shares in val2's pool
 raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_BALANCE_OF}${VAL1_PAD}")
-shares_hex="$raw"
 shares=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x': print(0); exit()
@@ -323,10 +313,20 @@ log "  val1 shares in val2's pool: ${shares}"
 
 [[ "$shares" -gt 0 ]] || die "val1 has no shares in val2's pool; delegation may have failed"
 
-# Undelegate half the shares
-half_shares=$(python3 -c "print(int('${shares}') // 2)")
-undelegate_data="0x${SEL_UNDELEGATE}${VAL2_PAD}$(python3 -c "print(format(int('${half_shares}'), '064x'))")"
-log "  Dry-run undelegate(val2, ${half_shares} shares)..."
+# Undelegate exactly 1 BNB worth of shares (= minDelegationBNBChange).
+# Query getSharesByPooledBNB(1 ether) from val2's credit contract so the share
+# count respects the pool's current exchange rate.
+ONE_BNB_HEX_64=$(python3 -c "print(format(10**18, '064x'))")
+raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_SHARES_BY_POOLED}${ONE_BNB_HEX_64}")
+undelegate_shares=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x': print(10**18); exit()
+v = int(raw, 16)
+print(v if v > 0 else 10**18)
+" 2>/dev/null || echo "1000000000000000000")
+log "  Undelegating 1 BNB worth of shares (${undelegate_shares}) from val2's pool..."
+undelegate_data="0x${SEL_UNDELEGATE}${VAL2_PAD}$(python3 -c "print(format(int('${undelegate_shares}'), '064x'))")"
+log "  Dry-run undelegate(val2, ${undelegate_shares} shares)..."
 eth_call_debug "$STAKE_HUB" "$undelegate_data" "$VAL1"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
