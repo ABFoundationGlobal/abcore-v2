@@ -164,28 +164,28 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Clique, "devnet Clique config must be set")
 	require.Equal(t, uint64(3), devCfg.Clique.Period, "devnet Clique period")
 	require.Equal(t, uint64(30000), devCfg.Clique.Epoch, "devnet Clique epoch")
-	// Phase 2 cutover scheduled at block 1600 (target activation 2026-05-21
-	// ~08:55 UTC). PGB itself is treated as an epoch boundary by Parlia
-	// regardless of `PGB % epochLength` — see `IsOnParliaGenesis` branches
-	// in `getValidatorBytesFromHeader` / `verifyHeader` in
-	// consensus/parlia/parlia.go. So 200-grid alignment for PGB is an
-	// operational convention, not a protocol invariant, and not asserted
-	// here. Future non-PGB fork blocks (LubanBlock etc.) do need to land
-	// on epoch boundaries; those should be guarded when they are scheduled.
+	// T1 (Clique → Parlia) scheduled at block 2400 for the 2026-05-26 reset
+	// (= reset wall-clock + 2h at 3 s/block). PGB itself is treated as an
+	// epoch boundary by Parlia regardless of `PGB % epochLength` — see
+	// `IsOnParliaGenesis` branches in `getValidatorBytesFromHeader` /
+	// `verifyHeader` in consensus/parlia/parlia.go. So 200-grid alignment
+	// for PGB is an operational convention, not a protocol invariant, and
+	// not asserted here. Future non-PGB fork blocks (LubanBlock etc.) do
+	// need to land on epoch boundaries; those are asserted separately
+	// further down (LubanBlock % Parlia.Epoch == 0).
 	require.NotNil(t, devCfg.ParliaGenesisBlock, "devnet ParliaGenesisBlock must be scheduled")
-	require.Equal(t, int64(1600), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 1600 (Phase 2 cutover)")
+	require.Equal(t, int64(2400), devCfg.ParliaGenesisBlock.Int64(), "devnet ParliaGenesisBlock = 2400 (T1 in 2026-05-26 reset schedule)")
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
 	require.Equal(t, uint64(200), devCfg.Parlia.Epoch, "devnet Parlia.Epoch = 200 (BSC defaultEpochLength)")
 
-	// Phase 3 (v0.3.0): LondonBlock + 13 BSC block forks all scheduled at the
-	// same block 6000 (target activation 2026-05-21 ~12:52 UTC). 6000 is a
-	// Parlia epoch boundary (6000 % 200 == 0) so the LubanBlock-form validator
-	// list is written into header.Extra exactly at block 6000 (avoids the
-	// v0.3.0 retro on the old 165400 schedule). Asserting each field
-	// explicitly prevents accidental partial schedules. NotNil-check each
-	// pointer before .Int64() so a missing schedule produces a clean test
-	// failure instead of a nil-deref panic.
-	v030Forks := []struct {
+	// T2 (2026-05-26 reset schedule): LondonBlock + 13 BSC block forks all
+	// scheduled at the same block 3600 (T1 + 1200 blocks = reset + 3h). 3600 is
+	// a Parlia epoch boundary (3600 % 200 == 0) so the LubanBlock-form
+	// validator list is written into header.Extra exactly at block 3600.
+	// Asserting each field explicitly prevents accidental partial schedules.
+	// NotNil-check each pointer before .Int64() so a missing schedule produces
+	// a clean test failure instead of a nil-deref panic.
+	t2Forks := []struct {
 		name string
 		val  *big.Int
 	}{
@@ -204,9 +204,9 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 		{"HertzBlock", devCfg.HertzBlock},
 		{"HertzfixBlock", devCfg.HertzfixBlock},
 	}
-	for _, f := range v030Forks {
-		require.NotNilf(t, f.val, "devnet %s must be scheduled for v0.3.0", f.name)
-		require.Equalf(t, int64(6000), f.val.Int64(), "devnet %s = 6000", f.name)
+	for _, f := range t2Forks {
+		require.NotNilf(t, f.val, "devnet %s must be scheduled", f.name)
+		require.Equalf(t, int64(3600), f.val.Int64(), "devnet %s = 3600 (T2 after 2026-05-26 reset)", f.name)
 	}
 
 	// LubanBlock-form validator list requires the fork block to be on the
@@ -236,10 +236,12 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 // contract: any future change to ABCoreDevnetChainConfig that would break
 // this rolling upgrade path must fail this test.
 //
-// Note: This test mirrors the post-reset state. The previous v0.2.0/v0.3.0
-// schedules (PGB=50000 and LondonBlock+13 BSC forks=165400) were retired with
-// the devnet reset; new schedules are added to ABCoreDevnetChainConfig per
-// docs/ops/devnet-upgrade-plan.md and validated here once filled in.
+// Note: This test mirrors the post-reset state (2026-05-26 reset:
+// T1/PGB=2400, T2/London+13BSC=3600, T3 timestamp-based). The previous
+// schedules (v0.2.0 PGB=50000 / v0.3.0=165400 / pre-reset PGB=1600 / T2=6000)
+// were retired with each reset; new schedules are added to
+// ABCoreDevnetChainConfig per docs/ops/devnet-upgrade-plan.md and validated
+// here.
 func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	storedCfg := &ChainConfig{
 		ChainID:             big.NewInt(17140),
@@ -259,41 +261,38 @@ func TestABCoreDevnetCompatWithLiveGenesis(t *testing.T) {
 	// shortcut on block-zero handling — this is the regime a real rolling
 	// upgrade hits, where the chain has been producing blocks for hours.
 	//
-	// head=500 < ParliaGenesisBlock=1600 simulates "rolling upgrade happens
+	// head=500 < ParliaGenesisBlock=2400 simulates "rolling upgrade happens
 	// well before the scheduled PGB". storedCfg has no ParliaGenesisBlock
 	// field (omitempty in v1.13.15 genesis.json) — that's the forward-
 	// scheduling case where the new config adds a fork ahead of head.
-	// CheckCompatible must report no error: stored=nil → new=1600 with
-	// head=500 < 1600 means the fork hasn't been crossed yet, so adding
+	// CheckCompatible must report no error: stored=nil → new=2400 with
+	// head=500 < 2400 means the fork hasn't been crossed yet, so adding
 	// the field is always safe.
 	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 500, 1_700_000_000); err != nil {
 		t.Fatalf("ABCoreDevnetChainConfig is not backward-compatible with the "+
 			"stored config produced by devnet-ops/Jenkinsfile.init (post-reset): %v", err)
 	}
 
-	// Sanity: also verify head=1500 (just before PGB=1600) produces no error.
-	// This is the realistic state during rolling-upgrade just before the
-	// cutover — Layer A test scripts + Layer B runbook + Layer C engine
-	// check all gate on this exact moment.
-	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 1500, 1_700_000_000); err != nil {
-		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=1500 (just before PGB=1600): %v", err)
+	// Sanity: also verify head=2300 (just before PGB=2400) produces no error.
+	// This is the realistic state during rolling-upgrade just before the T1
+	// cutover (= reset + ~1h55m at 3 s/block).
+	if err := storedCfg.CheckCompatible(ABCoreDevnetChainConfig, 2300, 1_700_000_000); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=2300 (just before PGB=2400): %v", err)
 	}
 
-	// Phase 3 (v0.3.0) just-before-fork case: head=5800 is the realistic
-	// rolling-upgrade window for the LondonBlock + 13 BSC forks cutover at
-	// block 6000. The stored config here mirrors what's actually on disk
-	// after the live devnet crossed PGB=1600 on 2026-05-21: the prior V2
-	// binary already wrote ParliaGenesisBlock=1600 + Parlia.Epoch=200 into
-	// the persisted chain config. A new V2 binary booting at head=5800 sees
-	// that stored config and must accept the additional LondonBlock+13 BSC
-	// forks as a forward-scheduled compatible change (head < 6000).
-	// Timestamp is set to ~2026-05-21 12:42 UTC, a few minutes before the
-	// projected fork arrival, so the compat check sees a current post-PGB clock.
+	// T2 just-before-fork case: head=3500 is the realistic post-PGB window for
+	// the LondonBlock + 13 BSC forks cutover at block 3600. The stored config
+	// here mirrors what's on disk just after PGB=2400: the V2 binary wrote
+	// ParliaGenesisBlock=2400 + Parlia.Epoch=200 into the persisted chain
+	// config. A new V2 binary booting at head=3500 sees that stored config and
+	// must accept the additional LondonBlock+13 BSC forks as a forward-
+	// scheduled compatible change (head < 3600). Timestamp is set to
+	// ~2026-05-26 06:55 UTC (between T1 and T2 in the 04:00 reset scenario).
 	storedCfgPostPGB := *storedCfg
-	storedCfgPostPGB.ParliaGenesisBlock = big.NewInt(1600)
+	storedCfgPostPGB.ParliaGenesisBlock = big.NewInt(2400)
 	storedCfgPostPGB.Parlia = &ParliaConfig{Epoch: 200}
-	if err := storedCfgPostPGB.CheckCompatible(ABCoreDevnetChainConfig, 5800, 1_779_374_544); err != nil {
-		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=5800 (just before LondonBlock=6000, post-PGB stored config): %v", err)
+	if err := storedCfgPostPGB.CheckCompatible(ABCoreDevnetChainConfig, 3500, 1_779_778_500); err != nil {
+		t.Fatalf("ABCoreDevnetChainConfig must remain compatible at head=3500 (just before LondonBlock=3600, post-PGB stored config): %v", err)
 	}
 }
 
