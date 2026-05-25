@@ -350,11 +350,8 @@ PY
   REG_TX+=("$_tx")
 done
 
-# Wait for registration txs to be mined (1-block latency on 1s blocks).
-log "Waiting for registration transactions to be mined (5s)..."
-sleep 5
-
-# Verify receipt status for each registration.
+# Wait for registration txs to be mined (poll up to 30s each).
+log "Waiting for registration transactions to be mined..."
 for i in 0 1 2; do
   n=$(( i + 1 ))
   tx="${REG_TX[$i]:-}"
@@ -362,9 +359,14 @@ for i in 0 1 2; do
     fail "validator-${n}: registration tx not sent"
     continue
   fi
-  _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
-    "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:null;})()" \
-    2>/dev/null || echo "null")
+  _status="p"
+  for _try in $(seq 1 30); do
+    _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+      "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+      2>/dev/null || echo "p")
+    [[ "$_status" == "p" ]] || break
+    sleep 1
+  done
   if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
     pass "validator-${n}: StakeHub registration confirmed (tx=${tx:0:14}…)"
   else
@@ -403,15 +405,18 @@ for n in 1 2 3; do
   DEL_TX+=("$_del_tx")
 done
 
-log "Waiting for delegation transactions to be mined (5s)..."
-sleep 5
-
+log "Waiting for delegation transactions to be mined..."
 for i in 0 1 2; do
   n=$(( i + 1 ))
   tx="${DEL_TX[$i]:-}"
-  _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
-    "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:null;})()" \
-    2>/dev/null || echo "null")
+  _status="p"
+  for _try in $(seq 1 30); do
+    _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+      "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+      2>/dev/null || echo "p")
+    [[ "$_status" == "p" ]] || break
+    sleep 1
+  done
   if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
     pass "validator-${n}: govAB voting power delegated (tx=${tx:0:14}…)"
   else
