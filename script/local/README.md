@@ -163,10 +163,7 @@ With 3 s block time, 60 s → one breathe block every ~20 blocks. The script wai
 
 ### How it verifies
 
-The script scans the 50 most recent blocks via `geth attach --exec` and looks for system transactions to the ValidatorContract:
-
-- `tx.to == 0x0000000000000000000000000000000000001000` (ValidatorContract)
-- `tx.input.length > 10` (ABI-encoded call, not a plain ETH transfer)
+The script scans the 50 most recent blocks via `geth attach --exec` and looks for transactions to ValidatorContract (`0x1000`) whose 4-byte input selector matches `keccak256("updateValidatorSetV2(address[],uint64[],bytes[])").slice(0,4)`. Exact selector matching avoids false positives from other system calls to `0x1000`.
 
 ### Expected output
 

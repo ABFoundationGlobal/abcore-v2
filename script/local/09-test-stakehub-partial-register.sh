@@ -406,7 +406,7 @@ else
 fi
 
 # 1b. Breathe block fired
-if _has_breathe 25; then
+if _has_breathe 50; then
     pass "Breathe block fired (updateValidatorSetV2 called)"
 else
     fail "No breathe block detected in last 25 blocks"
@@ -451,7 +451,7 @@ else
 fi
 
 # 2b. Breathe block fired
-if _has_breathe 25; then
+if _has_breathe 50; then
     pass "Breathe block fired (updateValidatorSetV2 called with all validators)"
 else
     fail "No breathe block detected in last 25 blocks"
