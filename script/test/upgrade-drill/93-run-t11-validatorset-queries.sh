@@ -273,7 +273,7 @@ log ""
 log "Computing selectors..."
 SEL_GET_LIVING=$(selector "getLivingValidators()")
 SEL_GET_MINING=$(selector "getMiningValidators()")
-SEL_IS_WORKING=$(selector "isWorkingValidator(address)")
+SEL_IS_WORKING=$(selector "isCurrentValidator(address)")
 SEL_GET_WORKING_COUNT=$(selector "getWorkingValidatorCount()")
 SEL_GET_INCOMING=$(selector "getIncoming(address)")
 SEL_GET_CURR_IDX=$(selector "getCurrentValidatorIndex(address)")
@@ -354,26 +354,26 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-11.c — isWorkingValidator
+# T-11.c — isCurrentValidator (address-based working-validator check)
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-11.c: isWorkingValidator ───────────────────────────────────────────────"
+log "── T-11.c: isCurrentValidator ───────────────────────────────────────────────"
 
-# val1 should be working
+# val1 should be a current working validator
 raw=$(eth_call_raw "$VALIDATOR_SET" "0x${SEL_IS_WORKING}${VAL1_PAD}")
 if [[ "${raw: -2}" == "01" ]]; then
-  ok "T-11.c: isWorkingValidator(val1) == true"
+  ok "T-11.c: isCurrentValidator(val1) == true"
 else
-  fail "T-11.c: isWorkingValidator(val1) expected true, got ${raw}"
+  fail "T-11.c: isCurrentValidator(val1) expected true, got ${raw}"
 fi
 
-# dead address should not be working
+# dead address should not be a current validator
 DEAD_PAD="000000000000000000000000000000000000000000000000000000000000dead"
 raw=$(eth_call_raw "$VALIDATOR_SET" "0x${SEL_IS_WORKING}${DEAD_PAD}")
 if [[ "${raw: -2}" != "01" ]]; then
-  ok "T-11.c: isWorkingValidator(0x...dead) == false"
+  ok "T-11.c: isCurrentValidator(0x...dead) == false"
 else
-  fail "T-11.c: isWorkingValidator(0x...dead) expected false, got ${raw}"
+  fail "T-11.c: isCurrentValidator(0x...dead) expected false, got ${raw}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
