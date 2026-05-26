@@ -106,7 +106,7 @@ server-1 升级示例：
 | 共识（初始）| Clique PoA |
 | Clique Period | 3s（与 mainnet 一致）|
 | Clique Epoch | 30000 |
-| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 1600（2026-05-21 reset 后）|
+| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 2400（2026-05-26 reset 后）|
 
 ### 系统合约字节码路由
 
@@ -271,7 +271,7 @@ FermiTime + OsakaTime + MendelTime                        — v0.7.0 (T6)
 **关于 Parlia epoch 长度**（PR #103 后已对齐 BSC 上游）：
 ABCore Parlia `Parlia.Epoch = 200`（与 BSC mainnet `defaultEpochLength` 一致）。PGB reseed 时 `Parlia.snapshot()` 读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength=200`，**不再从 `Clique.Epoch=30000` 拷贝**。Lorentz/Maxwell 激活时 200→500→1000 的自动 promotion（`snapshot.go` 的 `apply()`）现在可以正确触发。
 
-**实测验证**（devnet post-reset 2026-05-21）：PGB=1600 (197B, IsOnParliaGenesis 路径)、block 1800/2000/... 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)，epoch interval = 200 块。
+**实测验证**（devnet post-reset 2026-05-26）：PGB=2400 (197B, IsOnParliaGenesis 路径)、block 2600/2800/... 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)，epoch interval = 200 块。
 
 **v0.3.0 升级真正验证什么**：
 - ✓ EIP-1559 header schema（block M 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
@@ -430,11 +430,11 @@ DevNet 2026-05-14 cutover 验证过这套补救流程，约 1 分钟完成 2400 
 
 **params/config.go 修改：**
 ```go
-// N = 1600（devnet 实测值，2026-05-21 reset 后）
+// N = 2400（devnet 实测值，2026-05-26 reset 后）
 // 选址要求：(a) head + ≥1h safety margin；(b) 200 grid 对齐属运维约定（非协议要求），
 // 因为 PGB 通过 IsOnParliaGenesis 路径已被强制视为 epoch boundary。
 // 实际值须在执行前根据当前链高度重新设定。
-ABCoreDevnetChainConfig.ParliaGenesisBlock = big.NewInt(1600)
+ABCoreDevnetChainConfig.ParliaGenesisBlock = big.NewInt(2400)
 ABCoreMainChainConfig.ParliaGenesisBlock   = big.NewInt(N_mainnet)
 ABCoreTestChainConfig.ParliaGenesisBlock   = big.NewInt(N_testnet)
 ```
@@ -517,24 +517,24 @@ eth.getBlock(0).hash
 
 **params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M 满足：(a) ≥ N + 28800 块（≥ 24h 观察窗口 @ 3s），(b) M mod 200 = 0（epoch boundary），这样 Luban extraData 变更在 M 自己生效）：**
 ```go
-// M = 6000（devnet 实测值，2026-05-21 设定；= N(1600) + 4400 ≈ 3h40，
+// M = 3600（devnet 实测值，2026-05-26 reset 设定；= N(2400) + 1200 = reset + 3h，
 // **故意短于 ≥24h 推荐窗口**，这是 devnet rehearsal pacing demo，testnet/mainnet
-// 不要复制这个 gap。6000 mod 200 = 0 满足 epoch boundary 要求）
+// 不要复制这个 gap。3600 mod 200 = 0 满足 epoch boundary 要求）
 // 实际值须在执行前根据当前链高度重新设定
-LondonBlock:     big.NewInt(6000),
-RamanujanBlock:  big.NewInt(6000),
-NielsBlock:      big.NewInt(6000),
-MirrorSyncBlock: big.NewInt(6000),
-BrunoBlock:      big.NewInt(6000),
-EulerBlock:      big.NewInt(6000),
-GibbsBlock:      big.NewInt(6000),
-NanoBlock:       big.NewInt(6000),
-MoranBlock:      big.NewInt(6000),
-PlanckBlock:     big.NewInt(6000),
-LubanBlock:      big.NewInt(6000),   // 非 no-op，需专项验证；必须落在 epoch boundary
-PlatoBlock:      big.NewInt(6000),
-HertzBlock:      big.NewInt(6000),
-HertzfixBlock:   big.NewInt(6000),
+LondonBlock:     big.NewInt(3600),
+RamanujanBlock:  big.NewInt(3600),
+NielsBlock:      big.NewInt(3600),
+MirrorSyncBlock: big.NewInt(3600),
+BrunoBlock:      big.NewInt(3600),
+EulerBlock:      big.NewInt(3600),
+GibbsBlock:      big.NewInt(3600),
+NanoBlock:       big.NewInt(3600),
+MoranBlock:      big.NewInt(3600),
+PlanckBlock:     big.NewInt(3600),
+LubanBlock:      big.NewInt(3600),   // 非 no-op，需专项验证；必须落在 epoch boundary
+PlatoBlock:      big.NewInt(3600),
+HertzBlock:      big.NewInt(3600),
+HertzfixBlock:   big.NewInt(3600),
 ```
 
 > **关于 M 与 epoch boundary 的关系**：Luban extraData 格式变更只在 Parlia epoch block 生效（epoch block 为 `Parlia.Epoch=200` 的整数倍块）。若 M 不是 epoch block，M 本身的 extraData 仍是 97B 是正确行为（不是 bug），第一个可验证 Luban-form 438B 的块为 `ceil(M/200)*200`。**推荐**将 M 直接选为 epoch boundary（M mod 200 = 0）以便在激活块即完成可观察性验证；运维上这也避免读者把 "97B 不是 438B" 误判为 bug。详见 §10 v0.3.0 retro addendum 中的 165400 复盘。
@@ -907,9 +907,9 @@ BlobScheduleConfig: &BlobScheduleConfig{
 
 | # | 版本 | Fork 内容 | 激活方式 | 特殊操作 | 观察窗口 |
 |---|------|-----------|----------|----------|---------|
-| 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 1600，PR #103/#104）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
-| 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 计划值 6000）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
+| 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 2400，2026-05-26 reset）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
+| 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 实测值 3600，2026-05-26 reset）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3（devnet 实测 T3=2026-05-26 08:00 UTC）| 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5（devnet 实测 T5=2026-06-03 08:00 UTC=1780473600）；Lorentz = T5+4h（1780488000）；Maxwell = T5+8h（1780502400）。模板偏移为 +1d/+7d，devnet 缩短为 +4h/+8h | 时间戳（binary 中硬编码）| Prague 需 BlobScheduleConfig.Prague；epoch 200→500→1000；出块速度不变 | devnet ~1 天（模板 ≥9 天）|
 | 6 | v0.7.0 | Fermi + Osaka + Mendel = T6（devnet 实测 T6=2026-06-05 08:00 UTC=1780646400）| 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
@@ -1409,8 +1409,95 @@ v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的**实际**根因（精�
 
 **Verification 结果**：✓ block 6000 extraData=438B (Luban-form, BLS pubkey 槽 5×48=240B 已就位) ✓ baseFeePerGas=0 (EIP-1559 启用, BSC `InitialBaseFeeForBSC=0`) ✓ chainConfig 启动日志正确打印 14 个 fork = 6000 ✓ Parlia round-robin 健康 ✓ 6/6 节点同步差 ≤ 9 块 ✓ image 全部升级到 v0.3.0 (sha256:3b610cff..., 验证 devnet-ops#10 image-pull 修复生效)。**v0.3.0-rerun 升级完全成功**。
 
-### v0.4.0+ — 后续 upgrades（待执行）
+### Devnet reset (2026-05-26) — Third rehearsal pass: staking-aligned alloc + v0.4.0 cutover
 
-模板待 v0.4.0（Shanghai + Kepler + Feynman + FeynmanFix）实际执行时按 v0.2.0/v0.3.0 同样格式补全。
+为支持 `abcore-v2-genesis-contract#11` 折中对齐方案（abchain-test/dev 的 5 个 staking/governance balance 阈值对齐 abchain-main，6 个时间相关参数保留 dev 短窗口），devnet 在 2026-05-26 进行第三次 reset：
 
-**v0.4.0 特别注意**：Feynman 激活时**必须**保证 StakeHub 已有 ≥1 个 validator 注册——v0.3.0-rerun 后修正了 §3 Feynman 章节的"0 个注册 → 链卡住"故障路径分析（合约 `_forceMaintainingValidatorsExit` 在空入参时数组越界 revert，system tx 失败，block 无法 finalize）。所有 5 个 Parlia validator 应在 T3 后第一个 Go 层 breathe block 之前完成 `createValidator`。
+- **driver**：partial-align 后 `min_self_delegation = 2_000_000_000 ether`，原 5 个 validator 各 10^7 ether 的 alloc 不够 createValidator self-delegation，会 `SelfDelegationNotEnough` revert。
+- **决策**：reset 时把每个 validator alloc 提到 10^10 ether（100亿）+ 新增 well-known funder（Foundry/Anvil anvil[0]，`0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266`）alloc 10^11 ether（1000亿），用于 governance 演练 propose_start_threshold = 300亿 govAB 阈值跨越。
+- **同时合并 v0.2.0 / v0.3.0 / v0.4.0 三次 cutover** 到同一个 reset 窗口，因为 chain state 整体清空，没必要拆 4 次操作。
+
+**新调度（一次 reset 跑完三段 fork）**：
+
+| 阶段 | Block / Timestamp | Wall-clock target |
+|---|---|---|
+| Reset (block 1) | block 1 ts=1779760741 | 2026-05-26 01:59:01 UTC |
+| T1 = PGB (block 2400) | reset + 2h | 2026-05-26 ~03:59 UTC |
+| T2 = London + 13 BSC forks (block 3600) | reset + 3h | 2026-05-26 ~04:59 UTC |
+| T3 = Shanghai + Kepler + Feynman + FeynmanFix | timestamp 1779782400 | **2026-05-26 08:00:00 UTC** (hard deadline) |
+
+新 `ABCoreDevnetGenesisHash` = `0x2f73871f16c2eab50b60624dec65620c9777b9cfb4d5242e902cfd1a73b00791`（hex 实测匹配 Jenkins-Python 生成的 genesis.json + Go `DefaultABCoreDevnetGenesisBlock`）。
+
+#### v0.2.0-rerun-2 — T1: Clique → Parlia cutover
+
+| 项 | 值 |
+|---|---|
+| Devnet reset | 2026-05-26 01:59:01 UTC (block 1 ts=1779760741) |
+| Actual T1 cutover | **2026-05-26 03:59:48 UTC** (block 2400 sealed) |
+| Cutover block (N) | **2400** |
+| Block 2400 hash | `0x59bae5da746b867de650a8fbf0d777de5515b4cdd63154c74decc08e884aec10` |
+| Image tag | v0.4.0 (一次 rolling 升 v1 → v2 image,包含 T1/T2/T3 三段 schedule) |
+| Activation PR | [#110](https://github.com/ABFoundationGlobal/abcore-v2/pull/110) — reset 主 PR(升 pin、改 alloc、reschedule、新 GenesisHash) |
+
+**Verification 实测**：✓ block 2400 extraData=197B (pre-Luban epoch, IsOnParliaGenesis 路径) ✓ block 2600/2800/... 每 200 块都是 epoch block ✓ Parlia round-robin 健康 ✓ 6/6 节点同步。
+
+#### v0.3.0-rerun-2 — T2: London + 13 BSC block forks
+
+| 项 | 值 |
+|---|---|
+| Actual T2 cutover | **2026-05-26 04:59:48 UTC** (block 3600 sealed, T1 + 1h) |
+| Cutover block (M) | **3600**（= T1+1200, gap 故意短于 ≥24h 推荐窗口；devnet rehearsal pacing，testnet/mainnet 不要复制）|
+| Block 3600 hash | `0x391a30705645a2d9fcd997e1382ca2b278ab6db6aef9c992dbac76cd7ccad4ba` |
+| Activation PR | 与 #110 合并（同 reset PR）|
+
+**激活效果实测**：
+
+| Block | extraData length | baseFeePerGas | 含义 |
+|---|---|---|---|
+| 2400 | 197B | nil | PGB pre-Luban epoch |
+| 3500 | 97B | nil | 非 epoch block,无 validator list |
+| 3599 | 97B | nil | 紧邻 fork 但非 epoch block |
+| **3600** | **438B** | **0** | **first Luban-form epoch block + EIP-1559 启用** |
+| 3800 | 438B | 0 | 持续 Luban-form ✓ |
+
+3600 = first Luban-form epoch block (3600 % 200 == 0)，与首次 v0.3.0-rerun 一致：M 自己即激活块。
+
+#### v0.4.0 — T3: Shanghai + Kepler + Feynman + FeynmanFix（首次执行）
+
+| 项 | 值 |
+|---|---|
+| T3 timestamp | unix 1779782400 = 2026-05-26 08:00:00 UTC |
+| Activation PR | 与 #110 合并（同 reset PR）|
+| T3 wall-clock alignment | T3 % 86400 = 28800 → 距上一个 UTC-day breathe boundary 8h，距下一个 16h，validator 注册窗口 = 16h |
+
+**Verification 实测**（T3 后 ~50 分钟，head 8282+）：
+
+- ✓ `StakeHub.minSelfDelegationBNB()` = `2_000_000_000 ether`（partial-align 后的 mainnet-aligned 值）
+- ✓ `StakeHub.minDelegationBNBChange()` = `100_000_000 ether`
+- ✓ `StakeHub.LOCK_AMOUNT()` = `1 ether`
+- ✓ Funder `0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266` 起步余额 10^29 wei（1000亿 ether）保留完整
+- ✓ 5 个 validator 全部 `createValidator` + `delegate` 成功，每个 `GovToken.getVotes()` = 23亿 govAB（20亿 self + 3亿 extra delegate）
+- ✓ 每个 validator 当前余额 ~77亿 ether（= 100亿 起 - 23亿 stake）
+- ✓ `BSCValidatorSet.getValidators()` 返回 5 个 validator（currentValidatorSet 已与 StakeHub 同步，待下一个 Go 层 breathe block 通过 `updateValidatorSetV2` 正式刷新）
+- ✓ 出块正常，5 个 validator 轮流出块
+
+**关键架构改动（vs 前两次 reset）**：
+
+1. **Genesis alloc 新增 funder**：5 validator + 1 funder。funder 不是 Clique signer，不写入 extraData，仅出现在 alloc。这是为了让 governance rehearsals 能跨过 `propose_start_threshold = 300亿 govAB`（5 × 23亿 self = 115亿 < 300亿，需 funder 再 delegate 185亿）。
+2. **Reset + rolling 一次完成 3 段 fork**：与前两次 reset（v0.2.0 后等 ≥24h 再 v0.3.0）不同，这次 T1/T2/T3 都在 reset+2h/3h/wall-clock-08:00 触发，因 chain state 整体新建，无需逐段观察窗口。仅运维流程 (`Jenkinsfile.init` → 立即 `Jenkinsfile.rolling`) 需在 T1 之前完成。
+3. **Partial-align 决策**：`abcore-v2-genesis-contract#11` 把 abchain-test/dev 的 staking 阈值对齐 main，时间参数保留 dev 短窗口。配套 PR：[abcore-v2#109](https://github.com/ABFoundationGlobal/abcore-v2/pull/109)（docs）、[devnet-ops#11](https://github.com/ABFoundationGlobal/devnet-ops/pull/11) + [#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12)（Jenkinsfile.init alloc）。
+
+**踩到的问题 + 修复**：
+
+1. **devnet-ops#11 初版 hex 字面值 off-by-one**：commit `1f450ca` 用 `0x33b2e3c9fd0803ce8000000` (= 10^27 wei = 10^9 ether) 当 validator alloc，比注释少一个数量级。若按这个 alloc reset，每个 validator 只有 10亿 ether 不够 20亿 self-delegation，createValidator 会 revert。
+   - 修复：[devnet-ops#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12) commit `423f95b` 改为 `0x204fce5e3e25026110000000` (= 10^28 wei = 100亿 ether)。abcore-v2#110 同步用 `big.Int.Exp(10, 28)` 计算，消除 hex 字面值的歧义性（Copilot review 也指出 `SetString` 的 bool 被丢弃）。
+   - 教训：alloc 用 hex 字面值容易眼花，改用 `10^Exp` 公式更安全。
+
+2. **Copilot review 抓到 doc/comment 过去时**：reset 前 merge 的代码注释用了"was reset on 2026-05-26"，应该改成"scheduled for reset"。已在 `b335879` 修复。
+
+**仍待 verification 的 checkpoint**：
+
+- 2026-05-27 00:00:00 UTC（第一个 Go 层 breathe block，预计 block ~26400）触发 `updateValidatorSetV2`，验证 StakeHub election 路径 → `BSCValidatorSet.currentValidatorSet` 刷新成功。这是 §3 反复强调的"空 StakeHub 会让链卡住"的相对路径，5 个 validator 已注册预计无问题，但需观察实际结果。
+- Governance flow end-to-end：funder transfer + delegate 200亿 ether 给某个 validator → propose → vote → execute，确认 partial-align 后短窗口（voting 1d + timelock 6h ≈ 31h）流程可跑通。
+
+
