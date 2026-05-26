@@ -653,7 +653,7 @@ if not raw or raw == '0x': print(-1); exit()
 print(int(raw, 16))
 " 2>/dev/null || echo "-1")
 log "  totalPooledBNB() on val2_credit: ${total_pooled}"
-if [[ "$total_pooled" -ge 0 ]]; then
+if [[ "$total_pooled" != "-1" ]]; then
   ok "T-8.e: totalPooledBNB() on val2_credit callable (= ${total_pooled} wei)"
 else
   fail "T-8.e: totalPooledBNB() on val2_credit call failed (no data returned)"
