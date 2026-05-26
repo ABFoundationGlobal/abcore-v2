@@ -415,7 +415,8 @@ current_felony=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 130: print(0); exit()
 data = bytes.fromhex(raw[2:])
-print(int.from_bytes(data[0:32], 'big'))
+# getSlashThresholds() returns (misdemeanorThreshold, felonyThreshold)
+print(int.from_bytes(data[32:64], 'big'))
 " 2>/dev/null || echo "0")
 log "  current felonyThreshold: ${current_felony}"
 
@@ -435,7 +436,8 @@ new_felony=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 130: print(-1); exit()
 data = bytes.fromhex(raw[2:])
-print(int.from_bytes(data[0:32], 'big'))
+# getSlashThresholds() returns (misdemeanorThreshold, felonyThreshold)
+print(int.from_bytes(data[32:64], 'big'))
 " 2>/dev/null || echo "-1")
 if [[ "$new_felony" -eq "$NEW_FELONY" ]]; then
   ok "T-13.e: felonyThreshold == ${NEW_FELONY}"

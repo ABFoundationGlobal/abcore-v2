@@ -309,9 +309,9 @@ thresholds=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 130: print('0 0'); exit()
 data = bytes.fromhex(raw[2:])
-# Returns (uint256 felonyThreshold, uint256 misdemeanorThreshold)
-felony    = int.from_bytes(data[0:32], 'big')
-misdemean = int.from_bytes(data[32:64], 'big')
+# Returns (misdemeanorThreshold, felonyThreshold) — note order in contract
+misdemean = int.from_bytes(data[0:32], 'big')
+felony    = int.from_bytes(data[32:64], 'big')
 print(felony, misdemean)
 " 2>/dev/null || echo "0 0")
 FELONY_THRESHOLD="${thresholds%% *}"
@@ -442,13 +442,13 @@ run_governance_round \
   "T-12.d" \
   || { fail "T-12.d governance round failed"; exit 1; }
 
-# Verify updated threshold
+# Verify updated threshold (returns misdemeanorThreshold at word0, felonyThreshold at word1)
 raw=$(eth_call_raw "$SLASH_INDICATOR" "0x${SEL_GET_THRESHOLDS}")
 new_felony=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 130: print(-1); exit()
 data = bytes.fromhex(raw[2:])
-print(int.from_bytes(data[0:32], 'big'))
+print(int.from_bytes(data[32:64], 'big'))
 " 2>/dev/null || echo "-1")
 log "  getSlashThresholds().felonyThreshold after governance: ${new_felony}"
 
