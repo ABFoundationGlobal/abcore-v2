@@ -414,7 +414,7 @@ print(int(raw, 16))
 " 2>/dev/null || echo "0")
 log "  getIncoming(val1) = ${incoming} wei"
 
-if [[ "$incoming" -gt 0 ]]; then
+if [[ "$incoming" != "0" ]]; then
   ok "T-11.e: getIncoming(val1) > 0 (${incoming} wei — blocks produced)"
 else
   log "  NOTE T-11.e: getIncoming(val1) == 0 (may depend on reward distribution timing)"

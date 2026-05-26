@@ -131,7 +131,7 @@ print(int(raw, 16))
 " 2>/dev/null || echo "0")
 log "  GovToken.getVotes(val1) at current block: ${current_votes}"
 
-if [[ "$current_votes" -gt 0 ]]; then
+if [[ "$current_votes" != "0" ]]; then
   ok "T-9.a pre: getVotes(val1) > 0 (${current_votes})"
 else
   fail "T-9.a pre: getVotes(val1) == 0; validator may not have self-delegated"
@@ -152,7 +152,7 @@ print(int(raw, 16))
 " 2>/dev/null || echo "-1")
 log "  getPastVotes(val1, block=${current_block}) = ${past_votes}"
 
-if [[ "$past_votes" -eq "$current_votes" ]]; then
+if [[ "$past_votes" == "$current_votes" ]]; then
   ok "T-9.a: getPastVotes(val1, ${current_block}) == ${past_votes} == current votes at snapshot"
 else
   fail "T-9.a: getPastVotes(val1, ${current_block}) = ${past_votes}, expected ${current_votes}"
@@ -173,7 +173,7 @@ print(int(raw, 16))
 " 2>/dev/null || echo "0")
 log "  GovToken.totalSupply() at block ${snapshot_block}: ${total_now}"
 
-if [[ "$total_now" -gt 0 ]]; then
+if [[ "$total_now" != "0" ]]; then
   ok "T-9.b pre: totalSupply() > 0 (${total_now})"
 else
   fail "T-9.b pre: totalSupply() == 0"
@@ -191,7 +191,7 @@ print(int(raw, 16))
 " 2>/dev/null || echo "-1")
 log "  getPastTotalSupply(block=${snapshot_block}) = ${past_total}"
 
-if [[ "$past_total" -eq "$total_now" ]]; then
+if [[ "$past_total" == "$total_now" ]]; then
   ok "T-9.b: getPastTotalSupply(${snapshot_block}) == ${past_total} == totalSupply at snapshot"
 else
   fail "T-9.b: getPastTotalSupply(${snapshot_block}) = ${past_total}, expected ${total_now}"
