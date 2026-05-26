@@ -454,31 +454,29 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-11.g — BSCValidatorSet.updateParam via governance (maxNumOfWorkingCandidates)
+# T-11.g — BSCValidatorSet.updateParam via governance (maxNumOfCandidates)
+# maxNumOfWorkingCandidates requires <= maxNumOfCandidates (which is 0 on fresh devnet),
+# so we use maxNumOfCandidates instead — it has no upper-bound validation.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-11.g: updateParam maxNumOfWorkingCandidates via governance ─────────────"
+log "── T-11.g: updateParam maxNumOfCandidates via governance ────────────────────"
 
-# Try to read current maxNumOfWorkingCandidates
-SEL_MAX_CANDIDATES=$(selector "maxNumOfWorkingCandidates()")
+SEL_MAX_CANDIDATES=$(selector "maxNumOfCandidates()")
 raw=$(eth_call_raw "$VALIDATOR_SET" "0x${SEL_MAX_CANDIDATES}")
 current_max=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x': print(0); exit()
 print(int(raw, 16))
 " 2>/dev/null || echo "0")
-log "  current maxNumOfWorkingCandidates: ${current_max}"
+log "  current maxNumOfCandidates: ${current_max}"
 
-# New value: ensure it's a safe non-zero value
-NEW_MAX=$(( current_max > 0 ? current_max + 1 : 22 ))
-# Keep it reasonable (BSC default is 21, our devnet has 3 validators)
-[[ "$NEW_MAX" -le 30 ]] || NEW_MAX=22
-log "  target maxNumOfWorkingCandidates: ${NEW_MAX}"
+NEW_MAX=$(( current_max + 50 ))
+log "  target maxNumOfCandidates: ${NEW_MAX}"
 
-# Encode GovHub.updateParam("maxNumOfWorkingCandidates", newValue, ValidatorSet)
+# Encode GovHub.updateParam("maxNumOfCandidates", newValue, ValidatorSet)
 GOVHUB_CALLDATA_MAX=$(python3 -c "
 sel = '${SEL_GOV_UPDATE}'
-key = b'maxNumOfWorkingCandidates'
+key = b'maxNumOfCandidates'
 val = int('${NEW_MAX}').to_bytes(32, 'big')
 target = '${VALIDATOR_SET}'.replace('0x','').lower().zfill(64)
 def p32(n): return format(n, '064x')
@@ -497,7 +495,7 @@ LAST_EXEC_TX=""
 LAST_EXEC_BLK_HEX=""
 run_governance_round \
   "$GOVHUB_CALLDATA_MAX" \
-  "T-11.g: update maxNumOfWorkingCandidates to ${NEW_MAX}" \
+  "T-11.g: update maxNumOfCandidates to ${NEW_MAX}" \
   "T-11.g" \
   || { fail "T-11.g governance round failed"; exit 1; }
 
@@ -508,12 +506,12 @@ raw = '${raw}'
 if not raw or raw == '0x': print(-1); exit()
 print(int(raw, 16))
 " 2>/dev/null || echo "-1")
-log "  maxNumOfWorkingCandidates after governance: ${new_max}"
+log "  maxNumOfCandidates after governance: ${new_max}"
 
 if [[ "$new_max" -eq "$NEW_MAX" ]]; then
-  ok "T-11.g: maxNumOfWorkingCandidates updated to ${NEW_MAX}"
+  ok "T-11.g: maxNumOfCandidates updated to ${NEW_MAX}"
 else
-  fail "T-11.g: expected maxNumOfWorkingCandidates ${NEW_MAX}, got ${new_max}"
+  fail "T-11.g: expected maxNumOfCandidates ${NEW_MAX}, got ${new_max}"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
