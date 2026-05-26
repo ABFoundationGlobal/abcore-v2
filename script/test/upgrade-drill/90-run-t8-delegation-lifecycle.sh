@@ -185,8 +185,8 @@ SEL_PENDING_UNBOND=$(selector "pendingUnbondRequest(address)")
 SEL_CLAIMABLE_UNBOND=$(selector "claimableUnbondRequest(address)")
 SEL_SHARES_BY_POOLED=$(selector "getSharesByPooledBNB(uint256)")
 SEL_POOLED_BY_SHARES=$(selector "getPooledBNBByShares(uint256)")
-SEL_LOCKED_BNBS=$(selector "lockedBNBs(uint256,uint256)")
-SEL_UNBOND_SEQ=$(selector "unbondSequence()")
+SEL_LOCKED_BNBS=$(selector "lockedBNBs(address,uint256)")
+SEL_UNBOND_SEQ=$(selector "unbondSequence(address)")
 SEL_TOTAL_POOLED=$(selector "totalPooledBNB()")
 
 TOPIC_DELEGATED=$(attach_exec "$GETH" "$IPC1" \
@@ -615,39 +615,47 @@ sys.exit(0 if pb >= one_ether * 99 // 100 and pb <= one_ether * 101 // 100 else 
   fi
 fi
 
-# lockedBNBs(0, 10)
-locked_data="0x${SEL_LOCKED_BNBS}$(printf '%064x' 0)$(printf '%064x' 10)"
-raw=$(eth_call_raw "$VAL1_CREDIT" "$locked_data")
-if [[ "${#raw}" -gt 2 && "$raw" != "0x" ]]; then
-  ok "T-8.e: lockedBNBs(0,10) returned data"
+# lockedBNBs(address delegator, uint256 number) — val1's locked BNBs in val2's pool.
+# number=0 means sum all requests; val1 has 1 pending unbond from T-8.b.
+locked_data="0x${SEL_LOCKED_BNBS}${VAL1_PAD}$(printf '%064x' 0)"
+raw=$(eth_call_raw "$VAL2_CREDIT" "$locked_data")
+locked_bnb=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x': print(-1); exit()
+print(int(raw, 16))
+" 2>/dev/null || echo "-1")
+if [[ "$locked_bnb" -ge 0 ]]; then
+  ok "T-8.e: lockedBNBs(val1, 0) on val2_credit = ${locked_bnb} wei (non-negative)"
 else
-  fail "T-8.e: lockedBNBs(0,10) returned empty"
+  fail "T-8.e: lockedBNBs(val1, 0) on val2_credit returned error"
 fi
 
-# unbondSequence()
-raw=$(eth_call_raw "$VAL1_CREDIT" "0x${SEL_UNBOND_SEQ}")
+# unbondSequence(address delegator) — val1 unbonded from val2's pool in T-8.b,
+# so the sequence counter should be >= 1.
+raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_UNBOND_SEQ}${VAL1_PAD}")
 unbond_seq=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x': print(-1); exit()
 print(int(raw, 16))
 " 2>/dev/null || echo "-1")
 if [[ "$unbond_seq" -ge 0 ]]; then
-  ok "T-8.e: unbondSequence() = ${unbond_seq} (non-negative)"
+  ok "T-8.e: unbondSequence(val1) on val2_credit = ${unbond_seq} (non-negative)"
 else
-  fail "T-8.e: unbondSequence() returned invalid value ${unbond_seq}"
+  fail "T-8.e: unbondSequence(val1) on val2_credit returned error"
 fi
 
-# totalPooledBNB()
-raw=$(eth_call_raw "$VAL1_CREDIT" "0x${SEL_TOTAL_POOLED}")
+# totalPooledBNB() — val2's credit has BNB from its self-delegation + val1's T-8.a deposit.
+# Some was withdrawn by T-8.b/T-8.c but the self-delegation remains.
+raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_TOTAL_POOLED}")
 total_pooled=$(python3 -c "
 raw = '${raw}'
 if not raw or raw == '0x': print(0); exit()
 print(int(raw, 16))
 " 2>/dev/null || echo "0")
 if [[ "$total_pooled" -gt 0 ]]; then
-  ok "T-8.e: totalPooledBNB() = ${total_pooled} wei (> 0)"
+  ok "T-8.e: totalPooledBNB() on val2_credit = ${total_pooled} wei (> 0)"
 else
-  fail "T-8.e: totalPooledBNB() returned 0"
+  fail "T-8.e: totalPooledBNB() on val2_credit returned 0"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
