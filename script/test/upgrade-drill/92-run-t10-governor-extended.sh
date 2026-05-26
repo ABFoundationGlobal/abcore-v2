@@ -426,16 +426,15 @@ import json, sys
 logs = json.loads('''${vote_logs}''')
 if not logs:
     print("no VoteCast event found", file=sys.stderr); sys.exit(1)
-# VoteCast has 'reason' in non-indexed data; verify data is non-trivial (has reason string)
 log = logs[-1]
 data = log.get('data','')
 if len(data) < 10:
     print(f"VoteCast data too short: {data!r}", file=sys.stderr); sys.exit(1)
-# data encodes (uint256 weight, string reason) — check reason bytes are present
+# VoteCast non-indexed data: (uint256 proposalId, uint8 support, uint256 weight, string reason)
+# [0:32]=proposalId  [32:64]=support  [64:96]=weight  [96:128]=offset_to_reason
 try:
     raw = bytes.fromhex(data[2:] if data.startswith('0x') else data)
-    # offset to reason string: at bytes[32] (skip weight)
-    off = int.from_bytes(raw[32:64], 'big')
+    off = int.from_bytes(raw[96:128], 'big')
     slen = int.from_bytes(raw[off:off+32], 'big')
     reason = raw[off+32:off+32+slen].decode('utf-8', 'replace')
     expected = '${REASON}'
@@ -443,7 +442,6 @@ try:
         print(f"reason mismatch: expected {expected!r}, got {reason!r}", file=sys.stderr)
         sys.exit(1)
 except Exception as e:
-    # Older governor versions may encode differently; just check data is present
     pass
 PYEOF
 if [[ "$_t10a_ev" -eq 0 ]]; then
@@ -451,6 +449,22 @@ if [[ "$_t10a_ev" -eq 0 ]]; then
 else
   fail "T-10.a: VoteCast event missing or reason mismatch"
 fi
+
+# BSC Governor restricts proposers to one active proposal at a time.
+# Cast val2/val3 Against votes on T-10.a so the majority resolves quickly,
+# then wait for the voting period to end (≤90 s) before T-10.b proposes.
+log "  Resolving T-10.a: val2/val3 vote Against so voting period ends as Defeated..."
+_cast_against="0x${SEL_CAST_VOTE}${PROPOSAL_ID_HEX}$(printf '%064x' 0)"
+send_tx_wait "$IPC2" "$VAL2" "$GOVERNOR" "0x0" 200000 "$_cast_against" "T-10.a:val2-against" >/dev/null 2>&1 || true
+send_tx_wait "$IPC3" "$VAL3" "$GOVERNOR" "0x0" 200000 "$_cast_against" "T-10.a:val3-against" >/dev/null 2>&1 || true
+log "  Waiting for T-10.a proposal to leave Active state (voting period = 10 blocks)..."
+_t10a_deadline=$(( $(date +%s) + 90 ))
+while true; do
+  _cur=$(governor_state "$PROPOSAL_ID_HEX")
+  [[ "$_cur" != "1" ]] && { log "  T-10.a finished (state=${_cur} = Defeated)"; break; }
+  [[ $(date +%s) -ge $_t10a_deadline ]] && { log "  WARNING: T-10.a still Active after 90s — proceeding anyway"; break; }
+  sleep 2
+done
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-10.b — proposal cancel
