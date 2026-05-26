@@ -661,18 +661,18 @@ else
   fail "T-10.d: expected votingPeriod ${NEW_VP}, got ${new_vp}"
 fi
 
-# Verify ParamChange event in GovHub
-param_logs=$(eth_get_logs "$GOV_HUB" "$TOPIC_PARAM_CHANGE" "$LAST_EXEC_BLK_HEX" "$LAST_EXEC_BLK_HEX")
+# Verify ParamChange event in BSCGovernor (ParamChange is emitted by BSCGovernor, not GovHub)
+param_logs=$(eth_get_logs "$GOVERNOR" "$TOPIC_PARAM_CHANGE" "$LAST_EXEC_BLK_HEX" "$LAST_EXEC_BLK_HEX")
 _t10d_ev=0
 python3 - <<PYEOF 2>/dev/null || _t10d_ev=$?
 import json, sys
 logs = json.loads('''${param_logs}''')
-if not logs: print("no ParamChange event in GovHub", file=sys.stderr); sys.exit(1)
+if not logs: print("no ParamChange event in BSCGovernor", file=sys.stderr); sys.exit(1)
 PYEOF
 if [[ "$_t10d_ev" -eq 0 ]]; then
-  ok "T-10.d: ParamChange event emitted in GovHub"
+  ok "T-10.d: ParamChange event emitted in BSCGovernor"
 else
-  fail "T-10.d: ParamChange event missing in GovHub"
+  fail "T-10.d: ParamChange event missing in BSCGovernor"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
