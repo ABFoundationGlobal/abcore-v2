@@ -84,7 +84,8 @@ implementation notes, and script index:
 | Node count | 5 validators + 1 RPC | 3 validators |
 | U-1 / U-2 block heights | 30001 / 60001 | 30 / head+60 (≤90 block intervals) |
 | Timestamp observation window | 24–168 hours | 2–10 minutes |
-| StakeHub registration (U-3) | All validators must register before the first breathe block | Same requirement; script sends registration txs automatically via IPC |
+| BreatheBlockInterval | 86400 s (UTC midnight) | 60 s (`--override.breatheblockinterval`; breathe block every ~20 blocks at 3 s block time) |
+| StakeHub registration (U-3) | All validators must register before the first breathe block | Same requirement; script registers automatically via IPC; breathe block fires within ~70 s at interval=60 |
 | BlobScheduleConfig (U-4) | Production config file | Inline TOML minimal config |
 | TurnLength init (U-5 Bohr) | Governance sets initial TurnLength via StakeHub before first epoch boundary | Script uses default TurnLength = 1; governance call not required for local drill |
 | U-6 layered intervals | Prague→Lorentz +1 day, Lorentz→Maxwell +7 days | +3 minutes each |

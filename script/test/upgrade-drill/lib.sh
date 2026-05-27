@@ -14,6 +14,7 @@ CHAIN_ID=${CHAIN_ID:-99988}
 NETWORK_ID=${NETWORK_ID:-$CHAIN_ID}
 CLIQUE_PERIOD=${CLIQUE_PERIOD:-1}
 CLIQUE_EPOCH=${CLIQUE_EPOCH:-30000}
+BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-60}
 
 GETH="${GETH:-${REPO_ROOT}/build/bin/geth}"
 
@@ -229,6 +230,7 @@ launch_validator() {
   if [[ -n "${TOML_CONFIG:-}" && -f "${TOML_CONFIG}" ]]; then
     extra_args+=(--config "${TOML_CONFIG}")
   fi
+  extra_args+=(--override.breatheblockinterval "$BREATHE_BLOCK_INTERVAL")
 
   log "Starting validator-${n} (p2p=${p2p}, http=${http})"
   (

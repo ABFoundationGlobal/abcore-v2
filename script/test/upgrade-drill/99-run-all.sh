@@ -56,6 +56,7 @@ export GETH
 export DATADIR_ROOT GENESIS_JSON TOML_CONFIG SNAPSHOT_DIR
 export CHAIN_ID NETWORK_ID CLIQUE_PERIOD CLIQUE_EPOCH
 export PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-30}
+export BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-60}
 # LONDON_BLOCK and FORK_TIME are intentionally not forced here: each U-N script
 # defaults to a value derived from the live chain head / current time, which
 # gives the right value when it reads a running network.
@@ -63,6 +64,7 @@ export PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK:-30}
 log "run-all: GETH=${GETH}"
 log "run-all: DATADIR_ROOT=${DATADIR_ROOT}"
 log "run-all: PARLIA_GENESIS_BLOCK=${PARLIA_GENESIS_BLOCK}"
+log "run-all: BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL}"
 
 # ── Cleanup on failure ────────────────────────────────────────────────────────
 
