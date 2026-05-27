@@ -649,8 +649,17 @@ BSCValidatorSet.currentValidatorSet (top-N，含 jailed/maintaining；mainnet ~4
 ```bash
 STAKE_HUB="0x0000000000000000000000000000000000002002"
 
+# 动态查询 createValidator 所需的 msg.value（min_self_delegation + LOCK_AMOUNT）。
+# 这两个值都来自部署时的 generate.py 默认值，不要硬编码——一旦未来通过
+# governance 改了 minSelfDelegationBNB，硬编码值就过期。
+MIN_SELF_WEI=$(cast call $STAKE_HUB "minSelfDelegationBNB()(uint256)" --rpc-url http://rpc-0:8545)
+LOCK_WEI=$(cast call    $STAKE_HUB "LOCK_AMOUNT()(uint256)"          --rpc-url http://rpc-0:8545)
+TX_VALUE_WEI=$(python3 -c "print(${MIN_SELF_WEI} + ${LOCK_WEI})")
+# 健全性检查（避免合约未初始化导致发空 tx）
+[ "${MIN_SELF_WEI}" -gt 0 ] || { echo "ERROR: minSelfDelegationBNB() == 0, StakeHub not initialized?"; exit 1; }
+
 # coordinator 使用各 validator 的 operator key 依次代执行（需持有全部 operator key）
-# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额
+# gas 由 operator 账户支付（--private-key <operator_key>），确保 operator 地址有足够余额（详见下方预检）
 cast send $STAKE_HUB \
   "createValidator(address,bytes,bytes,uint64,(string,string,string,string,string))" \
   <consensus_address> \
@@ -658,6 +667,7 @@ cast send $STAKE_HUB \
   <bls_proof_bytes> \
   <commission_rate_bps> \
   "(<moniker>,<identity>,<website>,<security_contact>,<details>)" \
+  --value "${TX_VALUE_WEI}" \
   --private-key <operator_key> \
   --rpc-url http://rpc-0:8545
 
@@ -671,8 +681,22 @@ cast call $STAKE_HUB "getValidatorBasicInfo(address)" \
 # 1. 验证 StakeHub 合约地址（与 release notes 中一致）
 eth.getCode("0x0000000000000000000000000000000000002002")  # 非 0x
 
-# 2. 确认每个 validator 的 operator 账户（签名 createValidator 的账户）有足够余额支付 gas
-# operator key 由 coordinator 持有，gas 从 operator 地址扣除（非 consensus 地址）
+# 2. 确认每个 validator 的 operator 账户（签名 createValidator 的账户）有足够余额
+# operator key 由 coordinator 持有，费用从 operator 地址扣除（非 consensus 地址）
+#
+# 余额要求（由 generate.py 统一注入；AB mainnet / testnet / devnet 当前 staking 阈值一致）：
+#   createValidator 初始自委托质押  min_self_delegation     = 2_000_000_000 = 20亿 ether
+#   createValidator LOCK_AMOUNT     （StakeCredit 锁仓）      = 1 ether
+#   delegate()      govAB 投票权抵押 min_delegation_change   = 100_000_000   = 1亿  ether
+#   gas（两笔交易合计）                                                      ≈ 0.01 ether
+#   ──────────────────────────────────────────────────────────────────────────────────
+#   合计每个 operator 账户最低建议余额：> 21.0001亿 ether（20亿 + 1亿 + 1 + 0.01）
+#   注：质押金额均打入质押池，不销毁；LOCK_AMOUNT 锁在 StakeCredit 合约
+#
+# DevNet 实际起步余额（2026-05-26 reset 后）：
+#   每个 validator: 100亿 ether（足够多次 stake/unstake 演练）
+#   funder 账户 0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266: 1000亿 ether
+#   （funder 私钥 = Foundry/Anvil anvil[0]，公开，仅用于 DevNet）
 cast balance <operator_address> --rpc-url http://rpc-0:8545
 
 # 3. 提前测试 createValidator 调用（在 DevNet 上模拟）
@@ -701,19 +725,25 @@ createValidator 是幂等的：已存在时 revert，可以安全重试，不会
 
 **（可选）激活 govAB 治理投票权：**
 
-`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（合约默认值 1 BNB），该 BNB 同样进入质押池，不被销毁。
+`createValidator()` 通过 `GovToken.sync()` 完成 govAB 余额 mint，但不写入 ERC20Votes checkpoint，因此 `getVotes(operator) == 0`。若后续需要参与 `BSCGovernor` 治理提案，还需每个 validator 额外调用一次 `StakeHub.delegate(operator, true)`。`msg.value` 须 ≥ `minDelegationBNBChange`（mainnet/testnet/devnet 部署当前默认值 = `100_000_000 ether` = 1亿 BNB；abchain-local drill 不一样，详见下方"环境差异"），该 BNB 同样进入质押池，不被销毁。
 
 > **设计原因**：投票委托与质押故意解耦，允许 operator 把 govAB 投票权委托给独立的治理代理地址（而非只能自委托）。
 
+> **环境差异提醒**：`script/test/upgrade-drill/` 跑的是 `abchain-local` 模式（in-PR forge 单元测试 + 多节点演练），它的 `minDelegationBNBChange = 1 ether`（drill README:246 + `82-run-u3-shanghai-feynman.sh:395-397` 硬编码 0xde0b6b3a7640000 = 1 ether 是对的）。本节是 mainnet/testnet/devnet **production 部署**后的 ops，由 `abchain-main/test/dev` 模式生成 bytecode，默认值是 `1亿 ether`。两者**不冲突**——是两个不同的 generate.py 子命令注入的不同默认值。下方 bash 用 `cast call` 动态查询而非硬编码，避免读者把 production 数字误用到 drill 或反之。
+
 ```bash
 GOV_TOKEN="0x0000000000000000000000000000000000002005"
+
+# 动态查询当前 chain 的 minDelegationBNBChange，避免硬编码与实际部署值不一致
+MIN_DELEG_WEI=$(cast call $STAKE_HUB "minDelegationBNBChange()(uint256)" --rpc-url http://rpc-0:8545)
+[ "${MIN_DELEG_WEI}" -gt 0 ] || { echo "ERROR: minDelegationBNBChange() == 0, StakeHub not initialized?"; exit 1; }
 
 # 每个 validator 执行一次（--private-key 使用对应 operator key）
 cast send $STAKE_HUB \
   "delegate(address,bool)" \
   <operator_address> \
   true \
-  --value 1ether \
+  --value "${MIN_DELEG_WEI}" \
   --private-key <operator_key> \
   --rpc-url http://rpc-0:8545
 
@@ -723,6 +753,22 @@ cast call $GOV_TOKEN \
   <operator_address> \
   --rpc-url http://rpc-0:8545
 ```
+
+**DevNet funder 账户使用说明（2026-05-26 reset 后）：**
+
+reset 后，DevNet 在 genesis alloc 中包含一个 well-known funder 账户：Foundry / Anvil 默认账户 #0，由公开 mnemonic `"test test test test test test test test test test test junk"` 派生的第一个账户。
+
+- 地址：`0xf39Fd6e51aad88F6F4ce6aB8827279cfFFb92266`
+- 起步余额：10^11 ether（10^29 wei）
+- 私钥获取：任意 Foundry/Hardhat 安装本地导出 `cast wallet derive-private-key "test test test test test test test test test test test junk" 0` 或参考 [Foundry book - test accounts](https://book.getfoundry.sh/anvil/)。该私钥为业界公开（已记录在 Foundry / Hardhat / Anvil 默认文档中）。
+- 用途：governance 演练中给 delegator 账户 transfer，提升某个 validator 的 govAB 持仓以测试 propose / quorum 阈值边界（5 个 validator × 20亿 self-stake = 100亿 govAB，距离 propose_start_threshold = 300亿 还差 200亿；可由 funder transfer 给 validator 后再 `StakeHub.delegate(operator, ...)`）。
+
+> ⚠️ **严格仅限 DevNet**：该 mnemonic / 私钥**全球公开**，任何人都可以签名该地址的交易。绝不可：
+> - 在 Testnet / Mainnet 部署该地址或类似账户
+> - 把该地址作为任何 production 合约的 admin / owner / multisig signer
+> - 把演练脚本（含该私钥）直接复用到 Testnet / Mainnet 流程（必须替换 funder）
+>
+> 对照参考：Testnet 已有专用 funder（`0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3`，私钥仅 ops 团队持有），Mainnet 走 Foundation 分发流程，不存在 well-known funder。
 
 **验证清单：**
 ```bash
@@ -853,7 +899,7 @@ BlobScheduleConfig: &BlobScheduleConfig{
 |---|------|-----------|----------|----------|---------|
 | 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 1600，PR #103/#104）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
 | 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 计划值 6000）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 ≤10 分钟内 5 个 validator 注册 StakeHub + delegate govAB | ≥ 48h |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察；出块速度不变 | ≥ 9 天 |
 | 6 | v0.7.0 | Fermi + Osaka + Mendel = T6 | 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
@@ -1018,7 +1064,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |---|------|---------|------------|------|
 | 1 | v0.2.0 Parlia | 块高（自动）| ≥ 24h（≈ 28800 块 @ 3s）| 覆盖至少一个完整 Go 层 breathe block 周期；Parlia epoch=200 块 (≈ 10 min) 已经在 PGB 自身 + 后续每 200 块验证过 |
 | 2 | v0.3.0 London+BSC forks | 块高（自动）| ≥ 48h | London baseFee 和 Luban extraData 须专项验证 |
-| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后约 10 分钟内须完成 5 个 validator StakeHub 注册 + delegate govAB |
+| 3 | v0.4.0 Shanghai/Feynman | 时间戳 | ≥ 48h | T3 硬编码在 binary 中；激活后须在**下一个 Go 层 breathe block 之前**完成 5 个 validator StakeHub 注册 + delegate govAB（窗口最长 24h，由 T3 落点决定；详见 §3） |
 | 4 | v0.5.0 Cancun | 时间戳 | ≥ 48h | — |
 | 5 | v0.6.0 Prague + Pascal + Lorentz + Maxwell + Bohr | 时间戳 | ≥ 9 天 | Lorentz = T5+1d；Maxwell = T5+7d（协议配置固定）；Maxwell 激活后再观察 ≥ 48h；Bohr 在 ABCore 上为 no-op |
 | 6 | v0.7.0 Fermi + Osaka + Mendel | 时间戳 | ≥ 48h | Fermi 在 ABCore 上为 no-op（出块速度不变）；Osaka 需要 blobSchedule.osaka 配置 |
@@ -1046,7 +1092,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |------|---------|---------|
 | Upgrade 1（Parlia）| 出块间隔不变（3s）；共识引擎对用户透明 | 无需操作 |
 | Upgrade 2（London+BSC forks）| 手续费模型变化：钱包开始展示 base fee + priority fee；Gas 更可预测；旧式 gasPrice 交易仍可提交 | 确认所使用的钱包已适配 EIP-1559 fee 展示 |
-| Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 对普通转账透明；StakeHub 注册在激活后约 10 分钟内完成，链正常出块。极端情形（≥ 2 个 validator 漏注册）可能出现短时出块抖动（概率极低，有 DevNet/Testnet 演练保障） | 无需操作；可关注官方状态页 |
+| Upgrade 3（Shanghai/Feynman）| PUSH0 等新 opcode 对普通转账透明；StakeHub 注册在激活后下一个 Go 层 breathe block 之前完成（窗口最长 24h），链正常出块。极端情形（≥ 2 个 validator 漏注册）可能出现短时出块抖动（概率极低，有 DevNet/Testnet 演练保障） | 无需操作；可关注官方状态页 |
 | Upgrade 4（Cancun）| 引入 blob 交易（type-3）；通常情况下普通用户不会直接发送 blob 交易；区块头新增 blob 相关字段 | 无需操作 |
 | Upgrade 5（Prague + Pascal + Lorentz + Maxwell + Bohr）| EIP-7702：EOA 可通过 type-4 set-code 交易将其账户委托给合约实现；**委托状态写入账户，持续有效直到主动撤销**；普通 ETH 和 ERC-20 转账不受影响。Lorentz/Maxwell：Parlia epoch 长度变化（200→500→1000），对普通转账透明。Bohr 在 ABCore 上为 no-op | 无需操作；如有账户抽象需求可在此升级后评估 |
 | Upgrade 6（Fermi + Osaka + Mendel）| 在 ABCore 上**出块速度仍为 3s**（不变）；Fermi 上游本应降至 450ms，已在 params override；Osaka 引入新 blob schedule，普通用户不感知 | 无需操作 |
