@@ -467,7 +467,7 @@ var (
 		//
 		//   T1 = block 2400 (ParliaGenesisBlock, Clique → Parlia)
 		//   T2 = block 3600 (London + 13 BSC block forks)
-		//   T3 = 2026-05-26 08:00:00 UTC = unix 1779782400
+		//   T3 = 2026-05-28 08:00:00 UTC = unix 1779955200
 		//        (Shanghai + Kepler + Feynman + FeynmanFix, timestamp-based)
 		//
 		// Wall-clock layout assuming reset at 04:00 UTC (worst-case latest reset):
@@ -476,7 +476,7 @@ var (
 		//   T2:     07:00 UTC (block 3600 = reset + 3h)
 		//   T3:     08:00 UTC (hard deadline, timestamp-based)
 		//
-		// Constraint: reset must complete no later than 2026-05-26 04:00 UTC so
+		// Constraint: reset must complete no later than 2026-05-28 04:00 UTC so
 		// T2 (block 3600 = reset + 3h) lands strictly before T3 (08:00 UTC).
 		// Earlier reset is fine — T3 stays anchored to wall-clock, T1/T2 just
 		// trigger earlier in real time.
@@ -512,8 +512,8 @@ var (
 		//
 		// Why this T3 is safe (breathe-block alignment check):
 		//   BreatheBlockInterval = 24h (params/protocol_params.go:211).
-		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-26 00:00 UTC
-		//   breathe boundary, and 16h BEFORE the 2026-05-27 00:00 UTC boundary.
+		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-28 00:00 UTC
+		//   breathe boundary, and 16h BEFORE the 2026-05-29 00:00 UTC boundary.
 		//   This gives operators a ~16h window after Feynman activation to
 		//   complete `createValidator` + `delegate` on all 5 validators before
 		//   the first Go-layer breathe block fires `updateValidatorSetV2`.
@@ -528,10 +528,10 @@ var (
 		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
 		//     non-mainnet networks (mainnet split them by ~14 days)
 		// CheckConfigForkOrder permits all four times at T3.
-		ShanghaiTime:       newUint64(1779782400), // 2026-05-26 08:00:00 UTC
-		KeplerTime:         newUint64(1779782400),
-		FeynmanTime:        newUint64(1779782400),
-		FeynmanFixTime:     newUint64(1779782400),
+		ShanghaiTime:       newUint64(1779955200), // 2026-05-28 08:00:00 UTC
+		KeplerTime:         newUint64(1779955200),
+		FeynmanTime:        newUint64(1779955200),
+		FeynmanFixTime:     newUint64(1779955200),
 		CancunTime:         nil,
 		PragueTime:         nil,
 		ParliaGenesisBlock: big.NewInt(2400),
