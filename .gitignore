@@ -78,3 +78,18 @@ script/transition-test/.venv
 
 # Release script runtime data (chain state, keystore, configs staged for docker)
 script/release/data/
+
+# parliagenesis top-level validators.conf — working copy staged by the Makefile
+# (`cp $(OUTDIR)/validators.conf ...`) during `make build`/`make devnet`. The
+# per-environment default/ and devnet/ validators.conf files ARE tracked; this
+# top-level one is a transient build artifact.
+core/systemcontracts/parliagenesis/validators.conf
+
+# Local devnet keystores (contain private keys — never commit)
+script/devnet/
+
+# Transition test Python venv (current path; created by the transition drill)
+script/test/transition/.venv/
+
+# Upgrade-drill runtime chain data
+script/test/upgrade-drill/data/
