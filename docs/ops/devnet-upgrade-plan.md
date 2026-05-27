@@ -1409,7 +1409,7 @@ v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的**实际**根因（精�
 
 **Verification 结果**：✓ block 6000 extraData=438B (Luban-form, BLS pubkey 槽 5×48=240B 已就位) ✓ baseFeePerGas=0 (EIP-1559 启用, BSC `InitialBaseFeeForBSC=0`) ✓ chainConfig 启动日志正确打印 14 个 fork = 6000 ✓ Parlia round-robin 健康 ✓ 6/6 节点同步差 ≤ 9 块 ✓ image 全部升级到 v0.3.0 (sha256:3b610cff..., 验证 devnet-ops#10 image-pull 修复生效)。**v0.3.0-rerun 升级完全成功**。
 
-### Devnet reset (2026-05-26) — Third rehearsal pass: staking-aligned alloc + v0.4.0 cutover
+### Devnet reset (2026-05-26) — Third pass: staking-aligned alloc + v0.4.0 cutover ❌ 卡死于首个 breathe block
 
 为支持 `abcore-v2-genesis-contract#11` 折中对齐方案（abchain-test/dev 的 5 个 staking/governance balance 阈值对齐 abchain-main，6 个时间相关参数保留 dev 短窗口），devnet 在 2026-05-26 进行第三次 reset：
 
@@ -1495,9 +1495,63 @@ v0.3.0 retro 中 165400 = 97B（非 Luban-form 438B）的**实际**根因（精�
 
 2. **Copilot review 抓到 doc/comment 过去时**：reset 前 merge 的代码注释用了"was reset on 2026-05-26"，应该改成"scheduled for reset"。已在 `b335879` 修复。
 
-**仍待 verification 的 checkpoint**：
+**结果：第一个 breathe block 卡死链 ❌**
 
-- 2026-05-27 00:00:00 UTC（第一个 Go 层 breathe block，预计 block ~26400）触发 `updateValidatorSetV2`，验证 StakeHub election 路径 → `BSCValidatorSet.currentValidatorSet` 刷新成功。这是 §3 反复强调的"空 StakeHub 会让链卡住"的相对路径，5 个 validator 已注册预计无问题，但需观察实际结果。
-- Governance flow end-to-end：funder transfer + delegate 200亿 ether 给某个 validator → propose → vote → execute，确认 partial-align 后短窗口（voting 1d + timelock 6h ≈ 31h）流程可跑通。
+2026-05-27 00:00:00 UTC（block 26403 @ 23:59:57 UTC 之后）的第一个 Go 层 breathe block 触发 `updateValidatorSetV2`，**链卡死，无法 finalize**。节点日志每 3 秒重试出 block 26404 并报 `apply message failed err="invalid opcode: INVALID"`。head 停在 26403 约 8.7 小时后被发现。
+
+**根因**：`BSCValidatorSet.init()` 填充了 `currentValidatorSet`（5 个）但**没初始化平行数组 `validatorExtraSet`**（长度停留 0）。`updateValidatorSetV2 → _forceMaintainingValidatorsExit` 按 `currentValidatorSet.length` 循环访问 `validatorExtraSet[i].isMaintaining`，越界 → Solidity 0.6.x assert → INVALID opcode → Finalize 失败。链上实测 `validatorExtraSet(0)` 直接 revert INVALID，而 `getValidators()` 返回 5 个，证实两数组长度不匹配。
+
+**为什么本地测不出来**：`updateValidatorSetV2` 缺 `initValidatorExtraSet` lazy-init 修饰符（`handleSynPackage`/`misdemeanor`/`felony`/`enterMaintenance` 都有，唯独它没有）。本地测试用 `abchain-local`（`network="dev"`），generate.py 有一段 dev-only patch 在 `init()` 里额外注入 `validatorExtraSet.push(...)` 把数组填好；而 ABCoreDevNet 用 `abchain-dev`（`network="testnet"` 模板，commit `2c1137a` 故意让它贴近生产），不含那段 patch，于是 `validatorExtraSet` 从未初始化。
+
+**修复**：[abcore-v2-genesis-contract#12](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/12)（squash merge → master `ffd4057`）把 `validatorExtraSet` 初始化从 dev-only patch 提进 `BSCValidatorSet.init()` 主体，所有环境一致生效；同时修了第二个同源坑（见 lesson learned）。
+
+**连带发现的第二个坑**：`SystemReward.doInit()` 只注册 `LIGHT_CLIENT_ADDR`/`INCENTIVIZE_ADDR` 为 operator，没注册 `0x1000`(BSCValidatorSet)/`0x1001`(SlashIndicator)。`distributeFinalityReward`/`submitDoubleSignEvidence` 调 `SystemReward.claimRewards`（`onlyOperator`）会 revert。同样是 dev-only patch 在生产模板缺失。**但 devnet 当前 `systemRewardBaseRatio = 0`，`distributeFinalityReward` 提前 return 到不了 `claimRewards`，所以这个坑当前未触发**（fast finality 奖励启用后才会爆）。#12 一并修了。
+
+### Lesson Learned（这次卡死的核心教训）
+
+**核心问题：本地测试用 `abchain-local`（network=dev）会被 dev-only patch 掩盖生产 bug。**
+
+`generate.py` 有 4 处 `network=="dev"` patch。把它们逐条按"生产模板缺它时会不会卡链"分类后发现，它们其实是两类完全不同的东西混在一个开关里：
+
+| dev-only patch | 性质 | 生产模板缺它的后果 |
+|---|---|---|
+| `validatorExtraSet` init | **正确性缺口**（误当便利） | breathe block 卡链（坑1） |
+| SystemReward 注册 0x1000/0x1001 operator | **正确性缺口**（误当便利） | finality reward 路径 revert（坑2，devnet 暂未触发） |
+| `enableMaliciousVoteSlash=true` | 功能开关 | 生产有意默认关，不影响出块 |
+| 两个 `handleSynPackage` 去 `onlyCrossChainContract` | 纯本地便利 | 生产必须保留（安全边界）；devnet 无跨链 relayer，系统 tx 不触发，不卡链 |
+
+**判据**：一个 dev-only patch 是不是"会卡链的坑"，取决于**生产模板缺它时，有没有 Parlia 自动注入的系统 tx（`onlyCoinbase`）或必经路径会 revert**。系统 tx 在 `Finalize()` 里 revert = 块产不出 = 卡链，且确定性重试永久卡死，没有链上补救空间。普通用户 tx revert 只影响那一笔，链继续出块，有补救空间。
+
+**根源是命名错位**：BSC 上游的 `network` 变量只有 `mainnet`/`testnet`/`dev` 三个值，`dev` 是"本地便利模式"（带一堆免跨链 relayer、自动开 slash、补 init 的 patch）。ABCore 复用时：`abchain-local`（本地单机）选了 `network="dev"`（要便利 patch），`abchain-dev`（多节点 DevNet）选了 `network="testnet"`（要贴近生产）。两个命令名字都带 "dev/local" 但 `network` 取值正好交叉，导致"本地测得过、DevNet 卡死"。
+
+**改进措施**：
+1. **所有系统 tx 路径必须用生产模板 bytecode（abchain-dev/test，不是 abchain-local）实测**。upgrade-drill 现在用 `abchain-local`（`parliagenesis/default/`），存在同样的掩盖风险——breathe block 验证已在 [#113](https://github.com/ABFoundationGlobal/abcore-v2/pull/113) 加入 U-3（含 negative case 证明修复前 INVALID），但 slash 真实触发路径（`slash`→`felony`→`updateValidatorSetV2`）仍未在生产模板下实跑（[#112](https://github.com/ABFoundationGlobal/abcore-v2/pull/112) T-12 明确 defer 到 cloud testnet）。
+2. **加 invariant 检查**：Feynman 激活后 / reset 后断言 `validatorExtraSet.length == currentValidatorSet.length`，以及其他"平行数组/集合成员"一致性。这类 length/membership mismatch 是这类 bug 的通用信号。
+3. **三条系统 tx 路径需在生产模板下全部验证不卡链**：breathe block（`updateValidatorSetV2`，坑1，已修+已测）、epoch finality reward（`distributeFinalityReward`→`claimRewards`，坑2，已修，fast finality 启用后需测）、slash（`felony`/`misdemeanor`，未测，T-12 已 defer）。
+
+---
+
+### Devnet reset (2026-05-28) — Fourth pass: bytecode-fix re-run
+
+第三次 reset 因 `validatorExtraSet` 坑卡死，修复（genesis-contract#12 → master `ffd4057`，pin 由 [#113](https://github.com/ABFoundationGlobal/abcore-v2/pull/113) 带入 abcore-v2 master，devnet bytecode 已重生含修复）后用**完全相同的调度和 alloc** 重跑一次。
+
+**唯一改动：T3 timestamp**（[#114](https://github.com/ABFoundationGlobal/abcore-v2/pull/114)）。旧 T3 `1779782400`（2026-05-26 08:00 UTC）已过期，重设为 `1779955200`（**2026-05-28 08:00 UTC**）。其余全部不变：
+
+| 项 | 值 | 是否变化 |
+|---|---|---|
+| T1 = ParliaGenesisBlock | 2400 | 不变 |
+| T2 = London + 13 BSC forks | 3600 | 不变 |
+| T3 = Shanghai+Kepler+Feynman+FeynmanFix | `1779955200`（2026-05-28 08:00 UTC） | **改** |
+| alloc | 5 × 10^10 ether + funder × 10^11 ether | 不变 |
+| ABCoreDevnetGenesisHash | `0x2f73871f...b00791` | **不变**（系统合约 bytecode 在 PGB 植入，不在 block 0 alloc，故 bytecode 修复 + T3 改动都不影响 block 0 hash；`TestDefaultABCoreDevnetGenesisBlockHash` 仍通过） |
+| devnet bytecode pin | `ffd4057`（含 validatorExtraSet + SystemReward 修复） | 已在 master |
+
+T3 仍保持 breathe 对齐：`T3 % 86400 = 28800`，Feynman 在 2026-05-28 00:00 UTC breathe 边界后 8h 激活、下一个边界（2026-05-29 00:00 UTC）前 16h，注册窗口 16h。**Reset 最晚 2026-05-28 04:00 UTC**（让 T2 = reset+3h 在 T3 前）。
+
+**操作**：`Jenkinsfile.init RESET=true`（v1 起 Clique，顺带 reset block explorer，见 devnet-ops#13）→ 立即 `Jenkinsfile.rolling TAG=<新 v2 image，从含 #113+#114 的 master build>`（T1 前完成）→ T3 后 `Jenkinsfile.register-validators`（16h 窗口）。
+
+**预期**：这次 2026-05-29 00:00 UTC 的第一个 breathe block **不再卡死**（`validatorExtraSet` 已在 `init()` 初始化）。这是本次 reset 的关键验证点。
+
+**待执行**：reset 后按上述验证清单确认；breathe block 通过后补充实际结果到本节。
 
 
