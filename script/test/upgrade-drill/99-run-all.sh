@@ -122,8 +122,7 @@ if [[ "${SKIP_CONTRACT_TESTS:-0}" -ne 1 ]]; then
   # toggles whitelistEnabled off/on)
   run bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
 
-  # T-7 StakeHub lifecycle edits (state-mutating: editCommissionRate,
-  # editDescription, editConsensusAddress, addNodeIDs/removeNodeIDs)
+  # T-7 StakeHub validator info queries + node ID add/remove round-trip
   run bash "${SCRIPT_DIR}/89-run-t7-stakehub-lifecycle.sh"
 
   # T-8 delegation lifecycle (state-mutating: delegate, undelegate, redelegate;
@@ -137,7 +136,7 @@ if [[ "${SKIP_CONTRACT_TESTS:-0}" -ne 1 ]]; then
   # Defeated state, votingPeriod param change)
   run bash "${SCRIPT_DIR}/92-run-t10-governor-extended.sh"
 
-  # T-11 BSCValidatorSet queries + maxNumOfWorkingCandidates governance
+  # T-11 BSCValidatorSet queries + maxNumOfCandidates governance
   run bash "${SCRIPT_DIR}/93-run-t11-validatorset-queries.sh"
 
   # T-12 SlashIndicator read-path + stateDiff + felonyThreshold governance

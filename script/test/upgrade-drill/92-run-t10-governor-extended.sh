@@ -442,7 +442,7 @@ try:
         print(f"reason mismatch: expected {expected!r}, got {reason!r}", file=sys.stderr)
         sys.exit(1)
 except Exception as e:
-    pass
+    print(f"VoteCast reason parse error: {e}", file=sys.stderr); sys.exit(1)
 PYEOF
 if [[ "$_t10a_ev" -eq 0 ]]; then
   ok "T-10.a: VoteCast event emitted with reason field"

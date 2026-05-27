@@ -4,11 +4,11 @@
 #
 # T-11.a  getLivingValidators: returns all 3 consensus addresses with vote addrs.
 # T-11.b  getMiningValidators: returns 3 addresses eligible for block production.
-# T-11.c  isWorkingValidator: true for val1, false for a dead address.
+# T-11.c  isCurrentValidator(address): true for val1, false for a dead address.
 # T-11.d  getWorkingValidatorCount: returns 3.
 # T-11.e  getIncoming: non-zero incoming BNB for val1 after blocks produced.
 # T-11.f  getCurrentValidatorIndex: distinct index in [0,2] for each validator.
-# T-11.g  BSCValidatorSet.updateParam via governance (maxNumOfWorkingCandidates).
+# T-11.g  BSCValidatorSet.updateParam via governance (maxNumOfCandidates).
 #
 # Prerequisites:
 #   - U-3 completed; all 3 validators active.
@@ -370,7 +370,9 @@ fi
 # dead address should not be a current validator
 DEAD_PAD="000000000000000000000000000000000000000000000000000000000000dead"
 raw=$(eth_call_raw "$VALIDATOR_SET" "0x${SEL_IS_WORKING}${DEAD_PAD}")
-if [[ "${raw: -2}" != "01" ]]; then
+if [[ "${#raw}" -ne 66 ]]; then
+  fail "T-11.c: isCurrentValidator(0x...dead) call failed (got: ${raw})"
+elif [[ "${raw: -2}" != "01" ]]; then
   ok "T-11.c: isCurrentValidator(0x...dead) == false"
 else
   fail "T-11.c: isCurrentValidator(0x...dead) expected false, got ${raw}"

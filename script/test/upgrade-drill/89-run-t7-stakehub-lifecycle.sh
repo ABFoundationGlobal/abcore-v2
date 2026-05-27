@@ -151,7 +151,7 @@ wait_for_ipc "$GETH" "$IPC1" 10
 code=$(attach_exec "$GETH" "$IPC1" "eth.getCode('${STAKE_HUB}','latest')" 2>/dev/null || echo "0x")
 [[ $(( (${#code} - 2) / 2 )) -gt 100 ]] || die "StakeHub not deployed at ${STAKE_HUB}. Run U-3 first."
 
-log "T-7  StakeHub validator lifecycle edits"
+log "T-7  StakeHub validator info queries and node ID management"
 log "  StakeHub: ${STAKE_HUB}"
 log "  VAL1: ${VAL1}  VAL2: ${VAL2}  VAL3: ${VAL3}"
 

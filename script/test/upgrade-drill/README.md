@@ -68,11 +68,11 @@ implementation notes, and script index:
 
 | ID | Script | Contracts | Description | Status |
 |---|---|---|---|---|
-| T-7 | `89-run-t7-stakehub-lifecycle.sh` | `StakeHub` | Validator lifecycle edits: commission, description, consensus address, node IDs, info queries | ✅ |
+| T-7 | `89-run-t7-stakehub-lifecycle.sh` | `StakeHub` | Validator info queries (basicInfo, description, commission, validators list, credit contract, consensus/vote address) + node ID add/remove round-trip | ✅ |
 | T-8 | `90-run-t8-delegation-lifecycle.sh` | `StakeHub` + `StakeCredit` | Delegation lifecycle: additional delegate, undelegate, redelegate, claim (state-override), StakeCredit reads | ✅ |
 | T-9 | `91-run-t9-govtoken.sh` | `GovToken` | Voting-power history (`getPastVotes`, `getPastTotalSupply`), transfer/approve revert, `delegates` query | ✅ |
 | T-10 | `92-run-t10-governor-extended.sh` | `BSCGovernor` | `castVoteWithReason`, proposal cancel, Defeated state, Governor `updateParam` via governance | ✅ |
-| T-11 | `93-run-t11-validatorset-queries.sh` | `BSCValidatorSet` | `getLivingValidators`, `getMiningValidators`, `isWorkingValidator`, `getIncoming`, `updateParam` via governance | ✅ |
+| T-11 | `93-run-t11-validatorset-queries.sh` | `BSCValidatorSet` | `getLivingValidators`, `getMiningValidators`, `isCurrentValidator(address)`, `getIncoming`, `updateParam(maxNumOfCandidates)` via governance | ✅ |
 | T-12 | `94-run-t12-slash-indicator.sh` | `SlashIndicator` | `getSlashThresholds`, `getSlashIndicator`, slash-counter state-override, `updateParam` via governance | ✅ |
 | T-13 | `95-run-t13-governance-param-matrix.sh` | `BSCGovernor` + `GovHub` + multi-target | Full governance pipeline for multiple system-contract parameter updates in sequence | ✅ |
 
