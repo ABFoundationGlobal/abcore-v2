@@ -101,13 +101,14 @@ if [[ "$_now" -ge "$FORK_TIME" ]]; then
   die "FORK_TIME (${FORK_TIME}) is in the past. Set FORK_TIME to a future timestamp."
 fi
 
-# Breathe block fires at the next UTC day boundary (BreatheBlockInterval = 86400s in Go code).
+# Breathe block fires at the next multiple of BREATHE_BLOCK_INTERVAL.
 # Registration must complete before then.
-_next_breathe=$(( ((_now / 86400) + 1) * 86400 ))
+_breathe_iv=${BREATHE_BLOCK_INTERVAL:-86400}
+_next_breathe=$(( ((_now / _breathe_iv) + 1) * _breathe_iv ))
 _breathe_in=$(( _next_breathe - _now ))
-log "Next breathe block (UTC midnight) in ${_breathe_in}s. Registration must complete before then."
-if [[ "$_breathe_in" -lt 300 ]]; then
-  log "WARNING: breathe block in < 5 minutes — registration window is tight"
+log "Next breathe block in ${_breathe_in}s (BREATHE_BLOCK_INTERVAL=${_breathe_iv}s). Registration must complete before then."
+if [[ "$_breathe_in" -lt 30 ]]; then
+  log "WARNING: breathe block in < 30 s — registration window is tight"
 fi
 
 # ── Phase 2: patch genesis.json while nodes are still running ────────────────
@@ -431,13 +432,15 @@ done
 for p in "${_pids[@]}"; do wait "$p"; done
 log "All nodes at or past block ${POST_OBS}. Head=$(head_number "$GETH" "$(val_ipc 1)")"
 
-log "Observing chain for 3 minutes..."
-_obs_end=$(( $(date +%s) + 180 ))
+_breathe_iv=${BREATHE_BLOCK_INTERVAL:-86400}
+_breathe_wait=$(( _breathe_iv + 10 ))
+log "Waiting ${_breathe_wait}s for breathe block (BREATHE_BLOCK_INTERVAL=${_breathe_iv}s)..."
+_obs_end=$(( $(date +%s) + _breathe_wait ))
 while [[ $(date +%s) -lt $_obs_end ]]; do
   _rem=$(( _obs_end - $(date +%s) ))
   _h=$(head_number "$GETH" "$(val_ipc 1)" 2>/dev/null || echo "?")
   log "  ${_rem}s remaining, head=${_h}"
-  sleep 30
+  sleep 10
 done
 
 # ── Phase 7: verify ──────────────────────────────────────────────────────────
@@ -494,6 +497,21 @@ if echo "$parlia_raw" | grep -q '"result"'; then
   fi
 else
   fail "parlia_getValidators HTTP call failed: ${parlia_raw}"
+fi
+
+# 6. updateValidatorSetV2 was called at a breathe block.
+#    Scan the last 50 blocks for system calls to ValidatorContract (0x1000)
+#    matching the exact 4-byte selector for updateValidatorSetV2.
+_sel=$(attach_exec "$GETH" "$IPC1" \
+  "web3.sha3('updateValidatorSetV2(address[],uint64[],bytes[])').slice(2,10)" \
+  2>/dev/null || echo "")
+_breathe_hits=$(attach_exec "$GETH" "$IPC1" \
+  "(function(){var sel='${_sel}';var n=eth.blockNumber,hits=[];for(var i=n;i>n-50&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='0x0000000000000000000000000000000000001000'&&tx.input&&tx.input.slice(2,10)===sel;}))hits.push('#'+i+'@ts='+b.timestamp);}return hits.join(',');})()" \
+  2>/dev/null || true)
+if [[ -n "$_breathe_hits" ]]; then
+  pass "updateValidatorSetV2 breathe blocks found: ${_breathe_hits}"
+else
+  fail "no updateValidatorSetV2 breathe block in last 50 blocks (BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-86400}s)"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
