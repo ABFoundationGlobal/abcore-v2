@@ -1,6 +1,6 @@
 genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-genesis_contract_commit: b2a9efd1871fb7fd1ad71a3077552ef217cfe70d
-generated_at:            2026-05-27T09:35:02Z
+genesis_contract_commit: 8b8271d079f3416f14d0703c13cd0c48a03436f0
+generated_at:            2026-05-27T09:57:50Z
 
 # Build parameters
 OUTDIR:       devnet

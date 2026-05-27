@@ -1,20 +1,20 @@
 genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-genesis_contract_commit: b2a9efd1871fb7fd1ad71a3077552ef217cfe70d
-generated_at:            2026-05-27T09:34:58Z
+genesis_contract_commit: 8b8271d079f3416f14d0703c13cd0c48a03436f0
+generated_at:            2026-05-27T09:57:46Z
 
 # Build parameters
 OUTDIR:       default
 GENERATE_CMD: abchain-local
 
 # SHA-256 checksums
-ValidatorContract                      2689f9b28b65570c149eb0b2624869e2a8e6240e7a07b90e52e9d3dffd99a249
-SlashContract                          08a54637e624156afa10e321775a28ee0299d1bccef14dcfe275ff2b66a53e66
+ValidatorContract                      e581043b6fe37bf183899d1237ebc3be67b3690af86cb8af041fbc0699e92716
+SlashContract                          d54b9e28653d4f9ca72ae4f28f8f8dc54d68a6e774a2723872a800e319d9c85e
 SystemRewardContract                   1d58a8feefa61d89756136d29ff2518d79cb5b3af9c3d34cabecf59a7a4af266
 LightClientContract                    769dca7c430fae125a1bf6eb07cc8edfd438933f2194b612886429b1e847d656
 TokenHubContract                       f7b313291d7b51c2b34e6605602d3d35ec4870451a036601eb3d5fdcf9cb27a5
 RelayerIncentivizeContract             14c86490b86ffe8158597167a95f9fb8f8d0533d8643c21a89bc7f268a7891a6
 RelayerHubContract                     408c8b8d5490694f95844b84f07b0ff61a00f9bf31f86cf6c190bfd4963ffc2f
-GovHubContract                         30faf213be39f7a75fa43c13fa400b6ae2e6638853db91ff46e1f87c54be3701
+GovHubContract                         f2e37b831e1659f40924fde91bc3fb65492c6bf7918b0f8a2d89e49e8932a465
 TokenManagerContract                   62388c8e5a130bbda260262ca84199dad9cdcbe595e89a46c008fbcf0c58f647
 CrossChainContract                     9170edceaa3097c2dca7d5a646ed63c0008d709841a96013110d9c29d0cbef3d
 StakingContract                        2182364862c220d0f67355631c7392faa0093f9c24cadca16bb46f5867129d34
