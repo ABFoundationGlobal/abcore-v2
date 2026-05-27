@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-shot upgrade drill: init → U-1 (Clique→Parlia) → U-2 (London + BSC forks)
 #                              → U-3 (Shanghai + Kepler + Feynman)
+#                              → T-6 ~ T-13 (system-contract scenario tests)
 #                              → U-4 (Cancun + Haber + HaberFix)
 #                              → U-5 (Bohr: variable TurnLength)
 #                              → U-6 (Prague + Pascal + Lorentz + Maxwell)
@@ -9,6 +10,15 @@
 # Mirrors the structure of transition-test/99-run-all.sh.
 # Each round leaves nodes running so the next round can read the current chain
 # head — no snapshot step is needed in the automated path.
+#
+# T-6 ~ T-13 run against the 3-node network left up by U-3 (all Feynman system
+# contracts deployed and initialised).  They are inserted before U-4 so that
+# contract state is exercised on a freshly-initialised Feynman chain.
+#
+# Known side-effects of T-tests on subsequent upgrade rounds:
+#   T-13.a removeFromValidatorWhitelist(val1): val1 was already removed by
+#          T-6.i (in 88); the governance execute is idempotent (no revert) and
+#          the verify check validatorWhitelist(val1)==false still passes.
 #
 # Usage:
 #   bash script/test/upgrade-drill/99-run-all.sh
@@ -20,6 +30,7 @@
 #   PARLIA_GENESIS_BLOCK  U-1 Clique→Parlia fork block height (default: 30)
 #   LONDON_BLOCK          U-2 London fork block height (default: U-1 head + 60)
 #   FORK_TIME_OFFSET      U-3 seconds from now to Shanghai/Feynman activation (default: 120)
+#   SKIP_CONTRACT_TESTS=1 skip T-6~T-13 scenario tests (run upgrade rounds only)
 #   KEEP_RUNNING=1        leave nodes running after PASS (for manual inspection)
 set -euo pipefail
 
@@ -94,12 +105,55 @@ run bash "${SCRIPT_DIR}/81-run-u2-london-forks.sh"
 # Nodes are still running from U-2; 82-run-u3 patches genesis.json with
 # timestamp forks and does a rolling genesis reinit, then registers all 3
 # validators with StakeHub (FORK_TIME_OFFSET defaults to 120s from now).
+# SKIP_WHITELIST_TESTS=1 prevents 82 from running T-6 tests inline; they are
+# executed as an explicit separate block below (T-6 ~ T-13).
 
+export SKIP_WHITELIST_TESTS=1
 run bash "${SCRIPT_DIR}/82-run-u3-shanghai-feynman.sh"
+unset SKIP_WHITELIST_TESTS
+
+# ── T-6 ~ T-13: system-contract scenario tests ───────────────────────────────
+# Nodes remain running from U-3.  Tests are grouped by contract area; each
+# script leaves the chain running for the next.  Skipped when SKIP_CONTRACT_TESTS=1.
+
+if [[ "${SKIP_CONTRACT_TESTS:-0}" -ne 1 ]]; then
+  # T-6 whitelist (read-only stateDiff phases)
+  run bash "${SCRIPT_DIR}/87-run-u3-whitelist-test.sh"
+
+  # T-6.h/i/j whitelist governance (state-mutating: removes val1 from whitelist,
+  # toggles whitelistEnabled off/on)
+  run bash "${SCRIPT_DIR}/88-run-u3-governance-whitelist.sh"
+
+  # T-7 StakeHub validator info queries + node ID add/remove round-trip
+  run bash "${SCRIPT_DIR}/89-run-t7-stakehub-lifecycle.sh"
+
+  # T-8 delegation lifecycle (state-mutating: delegate, undelegate, redelegate;
+  # T-8.d uses stateDiff for claim dry-run)
+  run bash "${SCRIPT_DIR}/90-run-t8-delegation-lifecycle.sh"
+
+  # T-9 GovToken history and transfer restrictions (read-only + block waits)
+  run bash "${SCRIPT_DIR}/91-run-t9-govtoken.sh"
+
+  # T-10 Governor extended scenarios (governance: castVoteWithReason, cancel,
+  # Defeated state, votingPeriod param change)
+  run bash "${SCRIPT_DIR}/92-run-t10-governor-extended.sh"
+
+  # T-11 BSCValidatorSet queries + maxNumOfCandidates governance
+  run bash "${SCRIPT_DIR}/93-run-t11-validatorset-queries.sh"
+
+  # T-12 SlashIndicator read-path + stateDiff + felonyThreshold governance
+  run bash "${SCRIPT_DIR}/94-run-t12-slash-indicator.sh"
+
+  # T-13 governance param matrix (6 independent proposals across 4 contracts)
+  run bash "${SCRIPT_DIR}/95-run-t13-governance-param-matrix.sh"
+else
+  log "run-all: SKIP_CONTRACT_TESTS=1 — skipping T-6~T-13"
+fi
 
 # ── U-4: Cancun + Haber + HaberFix ───────────────────────────────────────────
-# Nodes are still running from U-3; 83-run-u4 patches genesis.json with
-# cancunTime/haberTime/haberFixTime and does a rolling genesis reinit.
+# Nodes are still running from T-tests (or U-3 if tests skipped); 83-run-u4
+# patches genesis.json with cancunTime/haberTime/haberFixTime and does a rolling
+# genesis reinit.
 
 run bash "${SCRIPT_DIR}/83-run-u4-cancun-haber.sh"
 
