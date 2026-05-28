@@ -312,9 +312,27 @@ for _si in $(seq 1 30); do
 done
 log "val3 synced to block #${_v3tip:-?} (val1 at #${_v1tip:-?})"
 
+VAL3_PADDED="$(printf '%064s' "${VAL3_ADDR#0x}" | tr ' ' '0')"
+
+# felony downtimeSlash slashes downtimeSlashAmount (10 BNB) from val3's creditContract,
+# dropping self-delegation below minSelfDelegationBNB (2000 BNB).  unjail() will revert
+# with SelfDelegationNotEnough unless we self-delegate to replenish first.
+# Only the operator can delegate to a jailed validator (onlySelfDelegation guard).
+log "Self-delegating 20 BNB to val3 to cover downtimeSlash (10 BNB) before unjail..."
+DEL_SEL=$(attach_exec "$GETH" "$_ipc1" "web3.sha3('delegate(address,bool)').slice(2,10)")
+BOOL_TRUE="0000000000000000000000000000000000000000000000000000000000000001"
+DEL_DATA="0x${DEL_SEL}${VAL3_PADDED}${BOOL_TRUE}"
+# 20 ether = 0x1158E460913D00000 wei (covers 10 BNB slash + buffer; val3 has ~10^6 BNB genesis balance)
+REDELEGATE_TX=$(attach_exec "$GETH" "$_ipc3" \
+  "eth.sendTransaction({from:'${VAL3_ADDR}',to:'${STAKEHUB}',value:'0x1158E460913D00000',gas:300000,data:'${DEL_DATA}'})")
+if [[ "$REDELEGATE_TX" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  _wait_mined "$REDELEGATE_TX" "re-delegate(val3, 20 BNB)"
+else
+  fail "re-delegate tx rejected (got: '${REDELEGATE_TX}')"
+fi
+
 log "Sending unjail(val3) from validator-3..."
 UNJAIL_SEL=$(_attach "web3.sha3('unjail(address)').slice(2,10)")
-VAL3_PADDED="$(printf '%064s' "${VAL3_ADDR#0x}" | tr ' ' '0')"
 UNJAIL_TX=$(attach_exec "$GETH" "$_ipc3" \
   "eth.sendTransaction({from:'${VAL3_ADDR}',to:'${STAKEHUB}',gas:200000,data:'0x${UNJAIL_SEL}${VAL3_PADDED}'})")
 if [[ "$UNJAIL_TX" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
