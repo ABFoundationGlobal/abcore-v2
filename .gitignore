@@ -78,3 +78,9 @@ script/transition-test/.venv
 
 # Release script runtime data (chain state, keystore, configs staged for docker)
 script/release/data/
+
+# Transition test Python venv (current path; created by the transition drill)
+script/test/transition/.venv/
+
+# Upgrade-drill runtime chain data
+script/test/upgrade-drill/data/
