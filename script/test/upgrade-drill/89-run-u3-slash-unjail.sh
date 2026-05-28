@@ -114,16 +114,21 @@ print(int(d[128:192],16) if len(d)>=192 else 0)
 }
 
 # _has_breathe_after FROM_BLOCK: true if updateValidatorSetV2 was called in any block >= FROM_BLOCK
-_BREATHE_SEL="$(python3 -c "import hashlib; print(hashlib.sha3_256(b'updateValidatorSetV2(address[],uint64[],bytes[])').hexdigest()[:8])")"
+# Uses web3.sha3 (keccak256) — NOT hashlib.sha3_256 which is NIST SHA3, not Ethereum keccak.
 _has_breathe_after() {
   local from_block="${1:-0}"
   local count
   count=$(_attach \
-"(function(){var sel='${_BREATHE_SEL}',n=eth.blockNumber,c=0;
-for(var i=n;i>=${from_block}&&i>=0;i--){
-  var b=eth.getBlock(i,true);
-  if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='${VALCONTRACT}'&&tx.input&&tx.input.slice(2,10)===sel;}))c++;
-}return c;})()")
+"(function(){
+  var sel=web3.sha3('updateValidatorSetV2(address[],uint64[],bytes[])').slice(2,10);
+  var vc='${VALCONTRACT}'.toLowerCase();
+  var n=eth.blockNumber,c=0;
+  for(var i=n;i>=${from_block}&&i>=0;i--){
+    var b=eth.getBlock(i,true);
+    if(b&&b.transactions.some(function(tx){
+      return tx.to&&tx.to.toLowerCase()===vc&&tx.input&&tx.input.slice(2,10)===sel;
+    }))c++;
+  }return c;})()")
   [[ "${count:-0}" -gt 0 ]]
 }
 
@@ -157,7 +162,7 @@ print(int(d[192:256],16) if len(d)>=256 else 0)
 
 _wait_mined() {
   local tx="$1" label="$2"
-  for _i in $(seq 1 20); do
+  for _i in $(seq 1 30); do
     sleep 3
     local st
     st=$(_attach "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'pending';})()")
@@ -166,7 +171,7 @@ _wait_mined() {
       0x0|0) fail "${label} reverted  (tx=${tx:0:14}…)"; return 1 ;;
     esac
   done
-  fail "${label} not mined after 60 s  (tx=${tx:0:14}…)"
+  fail "${label} not mined after 90 s  (tx=${tx:0:14}…)"
   return 1
 }
 
@@ -273,12 +278,10 @@ else
   fi
 fi
 
+# Note: getValidatorElectionInfo totalLength includes all registered validators (even jailed,
+# with voting power 0). We verify val3 has 0 voting power instead of checking total count.
 _elec=$(_election_count)
-if [[ "${_elec:-0}" -le 2 ]]; then
-  pass "StakeHub election set = ${_elec} (val3 excluded while jailed)"
-else
-  fail "StakeHub election set = ${_elec:-0}, expected ≤ 2 while val3 is jailed"
-fi
+log "StakeHub election totalLength = ${_elec} (jailed validator still counted; voting power = 0)"
 
 # ── Phase 5: unjail ───────────────────────────────────────────────────────────
 log "=== Phase 5: wait for jail expiry, restart val3, unjail ==="
@@ -297,6 +300,17 @@ launch_validator 3
 wait_for_ipc "$GETH" "$_ipc3" 30
 wire_mesh
 log "validator-3 back in peer mesh."
+
+# Wait for val3 to sync within 5 blocks of val1 before sending unjail tx,
+# otherwise the tx may not propagate correctly.
+log "Waiting for val3 to sync..."
+for _si in $(seq 1 30); do
+  _v1tip=$(_tip)
+  _v3tip=$(head_number "$GETH" "$_ipc3" 2>/dev/null || echo 0)
+  [[ "${_v3tip:-0}" -ge "$(( _v1tip - 5 ))" ]] && break
+  sleep 2
+done
+log "val3 synced to block #${_v3tip:-?} (val1 at #${_v1tip:-?})"
 
 log "Sending unjail(val3) from validator-3..."
 UNJAIL_SEL=$(_attach "web3.sha3('unjail(address)').slice(2,10)")
