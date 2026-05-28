@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# U-3 extra: slash → misdemeanor → felony → breathe-with-jailed-validator → unjail
+#
+# Exercises the full downtime-punishment path in the empty-set bootstrap scenario:
+#   Parlia downtimeSlash → SlashIndicator.slash() → misdemeanor / felony
+#   → StakeHub.jailValidator() → breathe block → updateValidatorSetV2 (val3 excluded)
+#   → unjail → breathe block → val3 re-enters election set
+#
+# This is the critical path flagged in abcore-v2#112: an untested code path where
+# a jailed validator could stall Finalize() in updateValidatorSetV2, analogous to
+# the validatorExtraSet / SystemReward bugs fixed in genesis-contract#12.
+#
+# Thresholds come from parliagenesis/default/SlashContract (compiled with
+# test/reduce-local-slash-params at a506d97):
+#   misdemeanorThreshold = 5   (~45 s with 3 validators at 1 s/block)
+#   felonyThreshold      = 15  (~135 s)
+#   downtimeJailTime     = 60 s
+#
+# Prerequisites:
+#   - U-3 (82-run-u3-shanghai-feynman.sh) has completed:
+#     validators registered in StakeHub, breathe blocks firing, chain advancing
+#
+# What this test does:
+#   1. Verify all 3 validators are running and registered
+#   2. Stop validator-3 to simulate downtime
+#   3. Poll getSlashIndicator(val3) until misdemeanor threshold (5) is reached
+#   4. Continue polling until felony fires and val3 is jailed
+#   5. Verify no failedFelony events emitted
+#   6. Wait for a breathe block with val3 jailed (the critical path)
+#   7. Wait for downtimeJailTime (60 s) to expire, restart val3, call unjail()
+#   8. Wait for next breathe block and verify val3 re-enters election set
+#
+# Environment:
+#   MISDEMEANOR_THRESHOLD   slash count that triggers misdemeanor (default: 5)
+#   FELONY_THRESHOLD        slash count that triggers felony (default: 15)
+#   DOWNTIME_JAIL_SECS      seconds val3 remains jailed (default: 60)
+#   SLASH_POLL              seconds between getSlashIndicator polls (default: 4)
+#   KEEP_RUNNING=1          leave nodes running after PASS/FAIL
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/lib.sh"
+
+require_exe "$GETH"
+[[ -d "${DATADIR_ROOT}" ]] || die "DATADIR_ROOT not found: ${DATADIR_ROOT} — run 00-init.sh and U-1/U-2/U-3 first"
+require_file "${GENESIS_JSON}"
+
+MISDEMEANOR_THRESHOLD=${MISDEMEANOR_THRESHOLD:-5}
+FELONY_THRESHOLD=${FELONY_THRESHOLD:-15}
+DOWNTIME_JAIL_SECS=${DOWNTIME_JAIL_SECS:-60}
+SLASH_POLL=${SLASH_POLL:-4}
+
+STAKEHUB="0x0000000000000000000000000000000000002002"
+SLASHINDICATOR="0x0000000000000000000000000000000000001001"
+VALCONTRACT="0x0000000000000000000000000000000000001000"
+
+PASS=0; FAIL=0
+pass() { log "  PASS: $*"; PASS=$(( PASS + 1 )); }
+fail() { log "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
+
+cleanup_on_exit() {
+  local code=$?
+  [[ "$code" -eq 0 ]] && return
+  echo
+  if [[ "${KEEP_RUNNING:-0}" -eq 1 ]]; then
+    echo "FAILED (exit=${code}). KEEP_RUNNING=1 — nodes remain running." >&2
+  else
+    echo "FAILED (exit=${code}). Nodes left running (logs in ${DATADIR_ROOT})." >&2
+  fi
+  exit "$code"
+}
+trap cleanup_on_exit EXIT
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+_ipc1="$(val_ipc 1)"
+_ipc3="$(val_ipc 3)"
+
+_attach() { attach_exec "$GETH" "$_ipc1" "$1"; }
+
+_tip() { head_number "$GETH" "$_ipc1" 2>/dev/null || echo 0; }
+
+_slash_count() {
+  local addr="${1#0x}"
+  local sel; sel=$(_attach "web3.sha3('getSlashIndicator(address)').slice(2,10)")
+  local padded; padded="$(printf '%064s' "$addr" | tr ' ' '0')"
+  local raw; raw=$(_attach "eth.call({to:'${SLASHINDICATOR}',data:'0x${sel}${padded}'})")
+  python3 -c "
+d='${raw}'.replace('0x','').replace('\"','')
+print(int(d[64:128],16) if len(d)>=128 else 0)
+" 2>/dev/null || echo 0
+}
+
+_is_jailed() {
+  local addr="${1#0x}"
+  local sel; sel=$(_attach "web3.sha3('getValidatorBasicInfo(address)').slice(2,10)")
+  local padded; padded="$(printf '%064s' "$addr" | tr ' ' '0')"
+  local raw; raw=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${sel}${padded}'})")
+  python3 -c "
+d='${raw}'.replace('0x','').replace('\"','')
+print('true' if len(d)>=192 and int(d[64:128],16)!=0 else 'false')
+" 2>/dev/null || echo "false"
+}
+
+_jail_until() {
+  local addr="${1#0x}"
+  local sel; sel=$(_attach "web3.sha3('getValidatorBasicInfo(address)').slice(2,10)")
+  local padded; padded="$(printf '%064s' "$addr" | tr ' ' '0')"
+  local raw; raw=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${sel}${padded}'})")
+  python3 -c "
+d='${raw}'.replace('0x','').replace('\"','')
+print(int(d[128:192],16) if len(d)>=192 else 0)
+" 2>/dev/null || echo 0
+}
+
+_has_breathe() {
+  local window="${1:-50}"
+  local sel; sel="$(python3 -c "import hashlib; print(hashlib.sha3_256(b'updateValidatorSetV2(address[],uint64[],bytes[])').hexdigest()[:8])")"
+  local count
+  count=$(_attach \
+"(function(){var sel='${sel}',n=eth.blockNumber,c=0;
+for(var i=n;i>n-${window}&&i>=0;i--){
+  var b=eth.getBlock(i,true);
+  if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='${VALCONTRACT}'&&tx.input&&tx.input.slice(2,10)===sel;}))c++;
+}return c;})()")
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+_election_count() {
+  local sel; sel=$(_attach "web3.sha3('getValidatorElectionInfo(uint256,uint256)').slice(2,10)")
+  local zeros="0000000000000000000000000000000000000000000000000000000000000000"
+  local raw; raw=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${sel}${zeros}${zeros}'})")
+  python3 -c "
+d='${raw}'.replace('0x','').replace('\"','')
+print(int(d[192:256],16) if len(d)>=256 else 0)
+" 2>/dev/null || echo 0
+}
+
+_wait_mined() {
+  local tx="$1" label="$2"
+  for _i in $(seq 1 20); do
+    sleep 3
+    local st
+    st=$(_attach "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'pending';})()")
+    case "$st" in
+      0x1|1) pass "${label}  (tx=${tx:0:14}…)"; return 0 ;;
+      0x0|0) fail "${label} reverted  (tx=${tx:0:14}…)"; return 1 ;;
+    esac
+  done
+  fail "${label} not mined after 60 s  (tx=${tx:0:14}…)"
+  return 1
+}
+
+# ── Phase 0: pre-flight ───────────────────────────────────────────────────────
+log "=== U-3 slash/jail/unjail drill ==="
+
+for n in 1 2 3; do
+  pidfile=$(val_pid "$n")
+  if ! { [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; }; then
+    die "validator-${n} is not running. U-3 must complete successfully first."
+  fi
+done
+log "All 3 validators running."
+
+VAL3_ADDR=$(val_addr 3)
+log "validator-3 address: ${VAL3_ADDR}"
+
+# Verify registration
+_elec=$(_election_count)
+if [[ "${_elec:-0}" -ge 3 ]]; then
+  pass "StakeHub election set = ${_elec} (all validators registered)"
+else
+  fail "StakeHub election set = ${_elec:-0}, expected ≥ 3 — run U-3 first"
+  exit 1
+fi
+
+# ── Phase 1: stop validator-3 ────────────────────────────────────────────────
+log "=== Phase 1: stop validator-3 to simulate downtime ==="
+
+VAL3_PID=$(cat "$(val_pid 3)" 2>/dev/null || true)
+log "Stopping validator-3 (pid=${VAL3_PID})..."
+stop_pidfile "$(val_pid 3)"
+log "validator-3 stopped."
+
+# ── Phase 2: wait for misdemeanor ────────────────────────────────────────────
+log "=== Phase 2: poll slash count → misdemeanor threshold=${MISDEMEANOR_THRESHOLD} ==="
+
+COUNT=0; MISDEMEANOR_DETECTED=0
+for attempt in $(seq 1 120); do
+  sleep "$SLASH_POLL"
+  COUNT=$(_slash_count "$VAL3_ADDR")
+  log "  block #$(_tip)  val3 slash count = ${COUNT}"
+  if [[ "${COUNT:-0}" -ge "$MISDEMEANOR_THRESHOLD" ]]; then
+    MISDEMEANOR_DETECTED=1; break
+  fi
+done
+
+if [[ "$MISDEMEANOR_DETECTED" -eq 1 ]]; then
+  pass "Misdemeanor threshold reached: count=${COUNT} at block #$(_tip)"
+else
+  fail "Misdemeanor threshold not reached after polling (count=${COUNT:-0})"
+fi
+
+# ── Phase 3: wait for felony + jail ─────────────────────────────────────────
+log "=== Phase 3: continue until felony threshold=${FELONY_THRESHOLD} and val3 jailed ==="
+
+FELONY_DETECTED=0; JAILED="false"
+for attempt in $(seq 1 120); do
+  sleep "$SLASH_POLL"
+  COUNT=$(_slash_count "$VAL3_ADDR")
+  JAILED=$(_is_jailed "$VAL3_ADDR")
+  log "  block #$(_tip)  slash count=${COUNT}  jailed=${JAILED}"
+  if [[ "$JAILED" == "true" ]]; then
+    FELONY_DETECTED=1; break
+  fi
+done
+
+JAIL_UNTIL=$(_jail_until "$VAL3_ADDR")
+if [[ "$FELONY_DETECTED" -eq 1 && "$JAILED" == "true" ]]; then
+  pass "Felony executed: validator-3 jailed (jailUntil=${JAIL_UNTIL})"
+else
+  fail "Felony not reached or val3 not jailed (count=${COUNT:-0} jailed=${JAILED})"
+fi
+
+# Verify no failedFelony events
+FAILED_FELONY_SIG=$(_attach "web3.sha3('failedFelony(address,uint256,bytes)').slice(2)")
+FAILED_FELONY_LOG=$(_attach \
+"(function(){
+  var logs=eth.getLogs({fromBlock:'earliest',toBlock:'latest',
+    address:'${SLASHINDICATOR}',topics:['0x${FAILED_FELONY_SIG}']});
+  return logs.length;
+})()")
+if [[ "${FAILED_FELONY_LOG:-0}" -eq 0 ]]; then
+  pass "No failedFelony events — felony executed cleanly"
+else
+  fail "failedFelony emitted ${FAILED_FELONY_LOG} time(s) — felony reverted!"
+fi
+
+# ── Phase 4: breathe block with jailed validator (critical path) ─────────────
+log "=== Phase 4: breathe block with val3 jailed (CRITICAL PATH) ==="
+
+TIP_BEFORE=$(_tip)
+_wait_secs=$(( BREATHE_BLOCK_INTERVAL + 15 ))
+log "Waiting ${_wait_secs}s for breathe block (interval=${BREATHE_BLOCK_INTERVAL}s)..."
+sleep "$_wait_secs"
+TIP_AFTER=$(_tip)
+
+if [[ "${TIP_AFTER:-0}" -gt "${TIP_BEFORE:-0}" ]]; then
+  pass "Chain live during jailed-validator breathe block: #${TIP_BEFORE} → #${TIP_AFTER}"
+else
+  fail "Chain STALLED during breathe block with jailed validator!"
+fi
+
+if _has_breathe 80; then
+  pass "Breathe block fired (updateValidatorSetV2 succeeded with val3 excluded)"
+else
+  fail "No breathe block found — updateValidatorSetV2 may have reverted!"
+fi
+
+_elec=$(_election_count)
+if [[ "${_elec:-0}" -le 2 ]]; then
+  pass "StakeHub election set = ${_elec} (val3 excluded while jailed)"
+else
+  fail "StakeHub election set = ${_elec:-0}, expected ≤ 2 while val3 is jailed"
+fi
+
+# ── Phase 5: unjail ───────────────────────────────────────────────────────────
+log "=== Phase 5: wait for jail expiry, restart val3, unjail ==="
+
+NOW=$(python3 -c "import time; print(int(time.time()))")
+WAIT_UNJAIL=$(( JAIL_UNTIL - NOW + 5 ))
+if [[ "$WAIT_UNJAIL" -gt 0 ]]; then
+  log "Waiting ${WAIT_UNJAIL}s for jail time to expire (jailUntil=${JAIL_UNTIL})..."
+  sleep "$WAIT_UNJAIL"
+else
+  log "Jail time already expired (jailUntil=${JAIL_UNTIL} ≤ now=${NOW})"
+fi
+
+log "Restarting validator-3..."
+launch_validator 3
+wait_for_ipc "$GETH" "$_ipc3" 30
+wire_mesh
+log "validator-3 back in peer mesh."
+
+log "Sending unjail(val3) from validator-3..."
+UNJAIL_SEL=$(_attach "web3.sha3('unjail(address)').slice(2,10)")
+VAL3_PADDED="$(printf '%064s' "${VAL3_ADDR#0x}" | tr ' ' '0')"
+UNJAIL_TX=$(attach_exec "$GETH" "$_ipc3" \
+  "eth.sendTransaction({from:'${VAL3_ADDR}',to:'${STAKEHUB}',gas:200000,data:'0x${UNJAIL_SEL}${VAL3_PADDED}'})")
+if [[ "$UNJAIL_TX" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  _wait_mined "$UNJAIL_TX" "unjail(val3)"
+else
+  fail "unjail tx rejected (got: '${UNJAIL_TX}')"
+fi
+
+log "Waiting ${_wait_secs}s for breathe block after unjail..."
+sleep "$_wait_secs"
+
+pass "Chain live after unjail: tip = #$(_tip)"
+
+if _has_breathe 80; then
+  pass "Breathe block fired after unjail"
+else
+  fail "No breathe block after unjail"
+fi
+
+_elec_final=$(_election_count)
+if [[ "${_elec_final:-0}" -eq 3 ]]; then
+  pass "Validator-3 re-entered election set (count = 3)"
+else
+  fail "StakeHub election set = ${_elec_final:-0}, expected 3 after unjail"
+fi
+
+# ── Result ────────────────────────────────────────────────────────────────────
+echo ""
+if [[ "$FAIL" -eq 0 ]]; then
+  echo "ALL ${PASS} CHECKS PASSED"
+  exit 0
+else
+  echo "${FAIL} CHECK(S) FAILED — see output above and $(val_log 1)"
+  exit 1
+fi
