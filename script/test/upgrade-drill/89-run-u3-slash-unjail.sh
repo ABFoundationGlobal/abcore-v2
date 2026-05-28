@@ -48,7 +48,7 @@ require_file "${GENESIS_JSON}"
 MISDEMEANOR_THRESHOLD=${MISDEMEANOR_THRESHOLD:-5}
 FELONY_THRESHOLD=${FELONY_THRESHOLD:-15}
 DOWNTIME_JAIL_SECS=${DOWNTIME_JAIL_SECS:-60}
-SLASH_POLL=${SLASH_POLL:-4}
+SLASH_POLL=${SLASH_POLL:-2}
 
 STAKEHUB="0x0000000000000000000000000000000000002002"
 SLASHINDICATOR="0x0000000000000000000000000000000000001001"
@@ -113,17 +113,36 @@ print(int(d[128:192],16) if len(d)>=192 else 0)
 " 2>/dev/null || echo 0
 }
 
-_has_breathe() {
-  local window="${1:-50}"
-  local sel; sel="$(python3 -c "import hashlib; print(hashlib.sha3_256(b'updateValidatorSetV2(address[],uint64[],bytes[])').hexdigest()[:8])")"
+# _has_breathe_after FROM_BLOCK: true if updateValidatorSetV2 was called in any block >= FROM_BLOCK
+_BREATHE_SEL="$(python3 -c "import hashlib; print(hashlib.sha3_256(b'updateValidatorSetV2(address[],uint64[],bytes[])').hexdigest()[:8])")"
+_has_breathe_after() {
+  local from_block="${1:-0}"
   local count
   count=$(_attach \
-"(function(){var sel='${sel}',n=eth.blockNumber,c=0;
-for(var i=n;i>n-${window}&&i>=0;i--){
+"(function(){var sel='${_BREATHE_SEL}',n=eth.blockNumber,c=0;
+for(var i=n;i>=${from_block}&&i>=0;i--){
   var b=eth.getBlock(i,true);
   if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='${VALCONTRACT}'&&tx.input&&tx.input.slice(2,10)===sel;}))c++;
 }return c;})()")
   [[ "${count:-0}" -gt 0 ]]
+}
+
+# _wait_breathe_after FROM_BLOCK TIMEOUT_SECS: poll until breathe block seen or timeout
+_wait_breathe_after() {
+  local from_block="$1"
+  local timeout="${2:-$(( BREATHE_BLOCK_INTERVAL + 30 ))}"
+  local deadline; deadline=$(( $(python3 -c "import time; print(int(time.time()))") + timeout ))
+  while true; do
+    local now; now=$(python3 -c "import time; print(int(time.time()))")
+    [[ "$now" -ge "$deadline" ]] && return 1
+    sleep 3
+    _has_breathe_after "$from_block" && return 0
+  done
+}
+
+# kept for backwards-compat with any callers that still use window-based check
+_has_breathe() {
+  _has_breathe_after $(( $(_tip) - ${1:-50} ))
 }
 
 _election_count() {
@@ -240,21 +259,18 @@ fi
 log "=== Phase 4: breathe block with val3 jailed (CRITICAL PATH) ==="
 
 TIP_BEFORE=$(_tip)
-_wait_secs=$(( BREATHE_BLOCK_INTERVAL + 15 ))
-log "Waiting ${_wait_secs}s for breathe block (interval=${BREATHE_BLOCK_INTERVAL}s)..."
-sleep "$_wait_secs"
-TIP_AFTER=$(_tip)
-
-if [[ "${TIP_AFTER:-0}" -gt "${TIP_BEFORE:-0}" ]]; then
+log "Polling for breathe block (interval=${BREATHE_BLOCK_INTERVAL}s, timeout=$(( BREATHE_BLOCK_INTERVAL + 30 ))s)..."
+if _wait_breathe_after "$(( TIP_BEFORE + 1 ))" $(( BREATHE_BLOCK_INTERVAL + 30 )); then
+  TIP_AFTER=$(_tip)
   pass "Chain live during jailed-validator breathe block: #${TIP_BEFORE} → #${TIP_AFTER}"
-else
-  fail "Chain STALLED during breathe block with jailed validator!"
-fi
-
-if _has_breathe 80; then
   pass "Breathe block fired (updateValidatorSetV2 succeeded with val3 excluded)"
 else
-  fail "No breathe block found — updateValidatorSetV2 may have reverted!"
+  TIP_AFTER=$(_tip)
+  if [[ "${TIP_AFTER:-0}" -gt "${TIP_BEFORE:-0}" ]]; then
+    fail "Chain live but no breathe block — updateValidatorSetV2 may have reverted!"
+  else
+    fail "Chain STALLED during breathe block with jailed validator!"
+  fi
 fi
 
 _elec=$(_election_count)
@@ -293,15 +309,13 @@ else
   fail "unjail tx rejected (got: '${UNJAIL_TX}')"
 fi
 
-log "Waiting ${_wait_secs}s for breathe block after unjail..."
-sleep "$_wait_secs"
-
-pass "Chain live after unjail: tip = #$(_tip)"
-
-if _has_breathe 80; then
+TIP_UNJAIL=$(_tip)
+log "Polling for breathe block after unjail (timeout=$(( BREATHE_BLOCK_INTERVAL + 30 ))s)..."
+if _wait_breathe_after "$(( TIP_UNJAIL + 1 ))" $(( BREATHE_BLOCK_INTERVAL + 30 )); then
+  pass "Chain live after unjail: tip = #$(_tip)"
   pass "Breathe block fired after unjail"
 else
-  fail "No breathe block after unjail"
+  fail "No breathe block after unjail (tip stuck at #$(_tip))"
 fi
 
 _elec_final=$(_election_count)
