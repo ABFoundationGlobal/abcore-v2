@@ -97,6 +97,12 @@ run bash "${SCRIPT_DIR}/81-run-u2-london-forks.sh"
 
 run bash "${SCRIPT_DIR}/82-run-u3-shanghai-feynman.sh"
 
+# ── U-3 extra: slash → misdemeanor → felony → breathe-with-jailed → unjail ───
+# Nodes still running from U-3; exercises the downtime-punishment path flagged
+# in abcore-v2#112 (critical path: updateValidatorSetV2 with a jailed validator).
+
+run bash "${SCRIPT_DIR}/89-run-u3-slash-unjail.sh"
+
 # ── U-4: Cancun + Haber + HaberFix ───────────────────────────────────────────
 # Nodes are still running from U-3; 83-run-u4 patches genesis.json with
 # cancunTime/haberTime/haberFixTime and does a rolling genesis reinit.
