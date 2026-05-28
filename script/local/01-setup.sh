@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
-GENESIS_CONTRACTS_JSON="$SCRIPT_DIR/genesis-contracts-dev.json"
+GENESIS_CONTRACTS_JSON="${GENESIS_CONTRACTS_JSON:-$SCRIPT_DIR/genesis-contracts-dev.json}"
 
 # Parse number of validators (default: 1, max: 5)
 NUM_VALIDATORS=${1:-1}
