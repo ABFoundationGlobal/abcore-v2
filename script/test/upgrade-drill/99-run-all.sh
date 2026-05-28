@@ -154,7 +154,7 @@ fi
 # Nodes still running from U-3; exercises the downtime-punishment path flagged
 # in abcore-v2#112 (critical path: updateValidatorSetV2 with a jailed validator).
 
-run bash "${SCRIPT_DIR}/89-run-u3-slash-unjail.sh"
+run bash "${SCRIPT_DIR}/96-run-u3-slash-unjail.sh"
 
 # ── U-4: Cancun + Haber + HaberFix ───────────────────────────────────────────
 # Nodes are still running from T-tests (or U-3 if tests skipped); 83-run-u4

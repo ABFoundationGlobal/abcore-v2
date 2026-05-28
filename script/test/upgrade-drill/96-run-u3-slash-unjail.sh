@@ -198,6 +198,21 @@ else
   exit 1
 fi
 
+# Read live thresholds from SlashIndicator — T-12/T-13 may have bumped them via
+# governance before this drill runs, so the on-chain values may differ from the
+# compile-time defaults.  The env-var defaults are only used as a fallback.
+_msel=$(_attach "web3.sha3('misdemeanorThreshold()').slice(2,10)")
+_fsel=$(_attach "web3.sha3('felonyThreshold()').slice(2,10)")
+_mraw=$(_attach "eth.call({to:'${SLASHINDICATOR}',data:'0x${_msel}'})")
+_fraw=$(_attach "eth.call({to:'${SLASHINDICATOR}',data:'0x${_fsel}'})")
+MISDEMEANOR_THRESHOLD=$(python3 -c "
+d='${_mraw}'.replace('0x','').replace('\"','')
+print(int(d,16) if d else ${MISDEMEANOR_THRESHOLD})" 2>/dev/null || echo "${MISDEMEANOR_THRESHOLD}")
+FELONY_THRESHOLD=$(python3 -c "
+d='${_fraw}'.replace('0x','').replace('\"','')
+print(int(d,16) if d else ${FELONY_THRESHOLD})" 2>/dev/null || echo "${FELONY_THRESHOLD}")
+log "Live SlashIndicator thresholds: misdemeanor=${MISDEMEANOR_THRESHOLD} felony=${FELONY_THRESHOLD}"
+
 # ── Phase 1: stop validator-3 ────────────────────────────────────────────────
 log "=== Phase 1: stop validator-3 to simulate downtime ==="
 
@@ -304,13 +319,21 @@ log "validator-3 back in peer mesh."
 # Wait for val3 to sync within 5 blocks of val1 before sending unjail tx,
 # otherwise the tx may not propagate correctly.
 log "Waiting for val3 to sync..."
+_sync_ok=0
 for _si in $(seq 1 30); do
   _v1tip=$(_tip)
   _v3tip=$(head_number "$GETH" "$_ipc3" 2>/dev/null || echo 0)
-  [[ "${_v3tip:-0}" -ge "$(( _v1tip - 5 ))" ]] && break
+  if [[ "${_v3tip:-0}" -ge "$(( _v1tip - 5 ))" ]]; then
+    _sync_ok=1
+    break
+  fi
   sleep 2
 done
-log "val3 synced to block #${_v3tip:-?} (val1 at #${_v1tip:-?})"
+if [[ "$_sync_ok" -eq 1 ]]; then
+  log "val3 synced to block #${_v3tip:-?} (val1 at #${_v1tip:-?})"
+else
+  fail "val3 failed to sync within 60 s (val3=#${_v3tip:-?} val1=#${_v1tip:-?}) — unjail tx may not propagate"
+fi
 
 VAL3_PADDED="$(printf '%064s' "${VAL3_ADDR#0x}" | tr ' ' '0')"
 
