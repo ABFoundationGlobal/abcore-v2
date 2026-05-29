@@ -503,7 +503,7 @@ targets_enc = enc_addr_array([val2])
 amounts_enc = enc_uint_array([1])
 
 off0 = 2 * 32
-off1 = off0 + 32 + len(targets_enc) // 2
+off1 = off0 + len(targets_enc) // 2
 head = p32(off0) + p32(off1)
 print('0x' + sel + head + targets_enc + amounts_enc)
 ")
