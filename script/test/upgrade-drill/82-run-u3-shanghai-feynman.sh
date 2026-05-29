@@ -505,18 +505,20 @@ else
 fi
 
 # 6. updateValidatorSetV2 was called at a breathe block.
-#    Scan the last 50 blocks for system calls to ValidatorContract (0x1000)
-#    matching the exact 4-byte selector for updateValidatorSetV2.
+#    Scan the last (_breathe_iv + 20) blocks — the breathe block can fire any
+#    time during the _breathe_iv+10 wait window, so a 50-block fixed window
+#    is too narrow when BREATHE_BLOCK_INTERVAL < 60 blocks/s.
 _sel=$(attach_exec "$GETH" "$IPC1" \
   "web3.sha3('updateValidatorSetV2(address[],uint64[],bytes[])').slice(2,10)" \
   2>/dev/null || echo "")
+_scan_window=$(( _breathe_iv + 20 ))
 _breathe_hits=$(attach_exec "$GETH" "$IPC1" \
-  "(function(){var sel='${_sel}';var n=eth.blockNumber,hits=[];for(var i=n;i>n-50&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='0x0000000000000000000000000000000000001000'&&tx.input&&tx.input.slice(2,10)===sel;}))hits.push('#'+i+'@ts='+b.timestamp);}return hits.join(',');})()" \
+  "(function(){var sel='${_sel}';var n=eth.blockNumber,hits=[],w=${_scan_window};for(var i=n;i>n-w&&i>=0;i--){var b=eth.getBlock(i,true);if(b&&b.transactions.some(function(tx){return tx.to&&tx.to.toLowerCase()==='0x0000000000000000000000000000000000001000'&&tx.input&&tx.input.slice(2,10)===sel;}))hits.push('#'+i+'@ts='+b.timestamp);}return hits.join(',');})()" \
   2>/dev/null || true)
 if [[ -n "$_breathe_hits" ]]; then
   pass "updateValidatorSetV2 breathe blocks found: ${_breathe_hits}"
 else
-  fail "no updateValidatorSetV2 breathe block in last 50 blocks (BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-86400}s)"
+  fail "no updateValidatorSetV2 breathe block in last ${_scan_window} blocks (BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-86400}s)"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

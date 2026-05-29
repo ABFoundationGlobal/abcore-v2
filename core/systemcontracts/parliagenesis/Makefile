@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-GENESIS_CONTRACT_BRANCH := master
-GENESIS_CONTRACT_COMMIT := ffd40570435bc1857decdb08465a597e50778a3a
+GENESIS_CONTRACT_BRANCH := test/reduce-local-slash-params
+GENESIS_CONTRACT_COMMIT := a506d9751e1b27e82d7314e4cf89a33d3cfc84f9
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
