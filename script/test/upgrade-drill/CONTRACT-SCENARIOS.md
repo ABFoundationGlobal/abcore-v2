@@ -231,18 +231,22 @@ eth_call  StakeHub.getValidatorDescription(val1_operator)  → moniker == "val1-
 
 **Verify:** `DescriptionEdited` event emitted; moniker field updated.
 
-### T-7.c — `editConsensusAddress`
+### T-7.c — `editConsensusAddress` (eth_call dry-run)
 
-Register a new consensus address for val1 and confirm routing tables are updated.
+Verify that `editConsensusAddress` accepts the call once the `BREATHE_BLOCK_INTERVAL`
+cooldown has cleared.  A real `sendTx` is intentionally omitted: the parlia engine
+keeps signing with the original key, so a real consensus-address change would cause
+val1 to stop producing blocks until the next breathe-block validator-set refresh.
 
 ```
-eth_call  StakeHub.consensusToOperator(old_consensus)  → val1_operator
-sendTx    val1: StakeHub.editConsensusAddress(new_consensus_addr)
-eth_call  StakeHub.consensusToOperator(new_consensus_addr)  → val1_operator
-eth_call  StakeHub.consensusToOperator(old_consensus_addr)  → 0x0
+# After sleep 7 s (cooldown cleared by T-7.b's updateTime)
+eth_call  [from: val1, to: StakeHub]
+          editConsensusAddress(TEST_ADDR)  → SUCCESS (no revert)
+eth_call  StakeHub.consensusToOperator(TEST_ADDR)  → 0x0  (real state unchanged)
 ```
 
-**Verify:** `ConsensusAddressEdited` event emitted; old mapping cleared.
+**Verify:** Dry-run succeeds once cooldown window has elapsed; real storage is
+untouched since no tx was sent.
 
 ### T-7.d — validator info query suite
 
@@ -272,6 +276,21 @@ eth_call  StakeHub.getNodeIDs(val1_operator)  → []
 ```
 
 **Verify:** `NodeIDAdded` / `NodeIDRemoved` events emitted.
+
+### T-7.f — `UpdateTooFrequently` cooldown enforcement
+
+Verify that a second edit within the same `BREATHE_BLOCK_INTERVAL` window reverts
+with the expected custom error.  Run immediately after T-7.b (no sleep between them).
+
+```
+# T-7.b already set updateTime = block.timestamp
+eth_call  [from: val1, to: StakeHub]
+          editCommissionRate(newRate)  → REVERT UpdateTooFrequently()
+verify: error data[0:4] == keccak256("UpdateTooFrequently()")[0:4]
+```
+
+**Verify:** Custom error selector matches `UpdateTooFrequently()`; confirms the shared
+`updateTime` guard fires for all `edit*` functions within the same cooldown window.
 
 ---
 
@@ -346,6 +365,24 @@ eth_call  StakeCredit(val1).totalPooledBNB()               → total staked BNB
 ```
 
 **Verify:** `getSharesByPooledBNB` and `getPooledBNBByShares` are inverse operations.
+
+### T-8.f — real `claimBatch` after `unbondPeriod` elapses
+
+Complements T-8.d (which uses a stateDiff override) with a real end-to-end claim.
+Requires `unbondPeriod ≤ 15 s` (set via `generate.py abchain_local`).
+
+```
+# T-8.b already queued an unbond request; poll until claimable:
+poll  StakeCredit(val2).claimableUnbondRequest(val1)  → 1  (timeout 40 s)
+record  val1 BNB balance before claim
+sendTx  val1: StakeHub.claimBatch([val2_operator], [1])
+verify  val1 BNB balance increased
+verify  Claimed(val2_operator, val1, amount) event emitted
+verify  pendingUnbondRequest(val1) count decreased
+```
+
+**Verify:** Real BNB transfer occurs; unbond queue is drained; complements the
+stateDiff simulation in T-8.d with a real on-chain flow.
 
 ---
 
@@ -623,3 +660,13 @@ Phase 8: verify on-chain state matches expected value
 - Slash-triggering scenarios (double-sign evidence, downtime evidence, finality
   violation evidence) require real misbehavior and are deferred to cloud testnet
   scope (E-2 / S-1).
+- **`generate.py` abchain-local defaults changed** to enable T-7.a/b/c/f and T-8.f:
+  - `breathe_block_interval`: `"1 days"` → `"5 seconds"` — clears the
+    `BREATHE_BLOCK_INTERVAL` cooldown in `editCommissionRate` / `editDescription` /
+    `editConsensusAddress` within a normal script run.
+  - `unbond_period`: `"7 days"` → `"15 seconds"` — allows T-8.f to wait for a real
+    unbond to mature rather than relying on stateDiff simulation.
+  - `editConsensusAddress` is still tested as an `eth_call` dry-run only (T-7.c),
+    because sending a real tx would break parlia block signing until the next
+    breathe-block validator-set update, during which geth still signs with the
+    original key.
