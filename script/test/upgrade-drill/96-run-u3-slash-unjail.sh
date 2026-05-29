@@ -113,7 +113,7 @@ print(int(d[128:192],16) if len(d)>=192 else 0)
 " 2>/dev/null || echo 0
 }
 
-# _has_breathe_after FROM_BLOCK: true if updateValidatorSetV2 was called in any block >= FROM_BLOCK
+# _has_breathe_after FROM_BLOCK: true if updateValidatorSetV2 succeeded (status=0x1) in any block >= FROM_BLOCK
 # Uses web3.sha3 (keccak256) — NOT hashlib.sha3_256 which is NIST SHA3, not Ethereum keccak.
 _has_breathe_after() {
   local from_block="${1:-0}"
@@ -126,7 +126,9 @@ _has_breathe_after() {
   for(var i=n;i>=${from_block}&&i>=0;i--){
     var b=eth.getBlock(i,true);
     if(b&&b.transactions.some(function(tx){
-      return tx.to&&tx.to.toLowerCase()===vc&&tx.input&&tx.input.slice(2,10)===sel;
+      if(!(tx.to&&tx.to.toLowerCase()===vc&&tx.input&&tx.input.slice(2,10)===sel))return false;
+      var r=eth.getTransactionReceipt(tx.hash);
+      return r&&(r.status==='0x1'||r.status===1);
     }))c++;
   }return c;})()")
   [[ "${count:-0}" -gt 0 ]]
@@ -136,9 +138,9 @@ _has_breathe_after() {
 _wait_breathe_after() {
   local from_block="$1"
   local timeout="${2:-$(( BREATHE_BLOCK_INTERVAL + 30 ))}"
-  local deadline; deadline=$(( $(python3 -c "import time; print(int(time.time()))") + timeout ))
+  local deadline; deadline=$(( $(date +%s) + timeout ))
   while true; do
-    local now; now=$(python3 -c "import time; print(int(time.time()))")
+    local now; now=$(date +%s)
     [[ "$now" -ge "$deadline" ]] && return 1
     sleep 3
     _has_breathe_after "$from_block" && return 0
@@ -157,6 +159,34 @@ _election_count() {
   python3 -c "
 d='${raw}'.replace('0x','').replace('\"','')
 print(int(d[192:256],16) if len(d)>=256 else 0)
+" 2>/dev/null || echo 0
+}
+
+# _val_voting_power ADDR: returns the validator's current voting power from getValidatorElectionInfo.
+# Jailed validators have voting power 0; active validators have non-zero power.
+_val_voting_power() {
+  local target="${1#0x}"
+  local sel; sel=$(_attach "web3.sha3('getValidatorElectionInfo(uint256,uint256)').slice(2,10)")
+  local zero64="0000000000000000000000000000000000000000000000000000000000000000"
+  local lim10="000000000000000000000000000000000000000000000000000000000000000a"
+  local raw; raw=$(_attach "eth.call({to:'${STAKEHUB}',data:'0x${sel}${zero64}${lim10}'})")
+  python3 -c "
+import sys
+d='${raw}'.replace('0x','').replace('\"','').lower()
+if len(d) < 256:
+    print(0); sys.exit()
+# ABI head (4 words): offsets to validators[], votingPowers[], voteAddrs[], then totalLength
+val_off = int(d[0:64],   16) * 2
+vp_off  = int(d[64:128], 16) * 2
+n = int(d[val_off:val_off+64], 16) if len(d) >= val_off+64 else 0
+m = int(d[vp_off:vp_off+64],   16) if len(d) >= vp_off+64  else 0
+target = '${target}'.lower()
+for i in range(min(n, m)):
+    addr_slot = d[val_off+64+i*64 : val_off+64+(i+1)*64]
+    if addr_slot[-40:] == target:
+        vp_slot = d[vp_off+64+i*64 : vp_off+64+(i+1)*64]
+        print(int(vp_slot, 16)); sys.exit()
+print(0)
 " 2>/dev/null || echo 0
 }
 
@@ -259,6 +289,8 @@ if [[ "$FELONY_DETECTED" -eq 1 && "$JAILED" == "true" ]]; then
   pass "Felony executed: validator-3 jailed (jailUntil=${JAIL_UNTIL})"
 else
   fail "Felony not reached or val3 not jailed (count=${COUNT:-0} jailed=${JAILED})"
+  echo "${FAIL} CHECK(S) FAILED — Phase 4/5 require val3 to be jailed; aborting" >&2
+  exit 1
 fi
 
 # Verify no failedFelony events
@@ -301,7 +333,7 @@ log "StakeHub election totalLength = ${_elec} (jailed validator still counted; v
 # ── Phase 5: unjail ───────────────────────────────────────────────────────────
 log "=== Phase 5: wait for jail expiry, restart val3, unjail ==="
 
-NOW=$(python3 -c "import time; print(int(time.time()))")
+NOW=$(date +%s)
 WAIT_UNJAIL=$(( JAIL_UNTIL - NOW + 5 ))
 if [[ "$WAIT_UNJAIL" -gt 0 ]]; then
   log "Waiting ${WAIT_UNJAIL}s for jail time to expire (jailUntil=${JAIL_UNTIL})..."
@@ -373,11 +405,11 @@ else
   fail "No breathe block after unjail (tip stuck at #$(_tip))"
 fi
 
-_elec_final=$(_election_count)
-if [[ "${_elec_final:-0}" -eq 3 ]]; then
-  pass "Validator-3 re-entered election set (count = 3)"
+_vp_final=$(_val_voting_power "$VAL3_ADDR")
+if [[ "${_vp_final:-0}" -gt 0 ]]; then
+  pass "Validator-3 re-entered active election set (votingPower=${_vp_final})"
 else
-  fail "StakeHub election set = ${_elec_final:-0}, expected 3 after unjail"
+  fail "Validator-3 has zero voting power after unjail — not re-entered active set"
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────
