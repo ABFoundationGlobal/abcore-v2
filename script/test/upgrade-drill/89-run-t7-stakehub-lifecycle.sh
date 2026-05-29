@@ -371,8 +371,12 @@ raw = '${raw}'
 if not raw or raw == '0x' or len(raw) < 10: print(''); exit()
 data = bytes.fromhex(raw[2:])
 try:
-    offsets = [int.from_bytes(data[i*32:(i+1)*32], 'big') for i in range(4)]
-    off = offsets[1]  # identity is index 1
+    # The return type is a dynamic tuple (string,string,string,string); ABI wraps it
+    # with a leading outer-offset word (0x20) before the tuple content.
+    outer = int.from_bytes(data[0:32], 'big')   # = 0x20 = 32
+    base  = outer                                # tuple content starts here
+    inner = [int.from_bytes(data[base+i*32:base+(i+1)*32], 'big') for i in range(4)]
+    off   = base + inner[1]                      # absolute offset to identity (index 1)
     length = int.from_bytes(data[off:off+32], 'big')
     s = data[off+32:off+32+length].decode('utf-8', 'replace') if length > 0 else ''
     print(s)
