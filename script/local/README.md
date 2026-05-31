@@ -66,8 +66,6 @@ Validator-1 always starts. Additional validators start based on the count passed
 | validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
 | validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
 | validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
-| validator-4 | `http://localhost:8548` | `ws://localhost:9548` | `30306` |
-| validator-5 | `http://localhost:8549` | `ws://localhost:9549` | `30307` |
 
 All ports are bound to `127.0.0.1` (localhost only). Only the ports for the validators that were set up will be active.
 
