@@ -528,12 +528,28 @@ var (
 		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
 		//     non-mainnet networks (mainnet split them by ~14 days)
 		// CheckConfigForkOrder permits all four times at T3.
-		ShanghaiTime:       newUint64(1779955200), // 2026-05-28 08:00:00 UTC
-		KeplerTime:         newUint64(1779955200),
-		FeynmanTime:        newUint64(1779955200),
-		FeynmanFixTime:     newUint64(1779955200),
-		CancunTime:         nil,
-		PragueTime:         nil,
+		ShanghaiTime:   newUint64(1779955200), // 2026-05-28 08:00:00 UTC
+		KeplerTime:     newUint64(1779955200),
+		FeynmanTime:    newUint64(1779955200),
+		FeynmanFixTime: newUint64(1779955200),
+		// === T4 (v0.5.0 upgrade): Cancun + Haber + HaberFix ===
+		//
+		// EIP-4844 blob transactions. Activated by timestamp T4 =
+		// 2026-06-01 08:00:00 UTC = unix 1780300800. See
+		// devnet-upgrade-plan.md §3 "Upgrade 4: v0.5.0 — Cancun + Haber + HaberFix".
+		//
+		// Why all three equal T4: BSC convention pairs Haber/HaberFix with Cancun
+		// (mainnet split them only because it activated them on different real
+		// dates). CheckConfigForkOrder permits all three at the same timestamp.
+		//
+		// BlobScheduleConfig.Cancun is REQUIRED once CancunTime is set, otherwise
+		// the node refuses to start ("missing blob schedule"). Target 3 / Max 6 is
+		// the BSC Cancun default (DefaultCancunBlobConfig).
+		CancunTime:         newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
+		HaberTime:          newUint64(1780300800),
+		HaberFixTime:       newUint64(1780300800),
+		PragueTime:         nil, // v0.6.0 (T5)
+		BlobScheduleConfig: &BlobScheduleConfig{Cancun: DefaultCancunBlobConfig},
 		ParliaGenesisBlock: big.NewInt(2400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
