@@ -13,12 +13,34 @@ GETH="$REPO_ROOT/build/bin/geth"
 DATA_DIR="$SCRIPT_DIR/data"
 GENESIS_CONTRACTS_JSON="$SCRIPT_DIR/genesis-contracts-dev.json"
 
-# Parse number of validators (default: 1, max: 5)
-NUM_VALIDATORS=${1:-1}
-if ! [[ "$NUM_VALIDATORS" =~ ^[1-5]$ ]]; then
-    echo -e "${RED}Error: Number of validators must be between 1 and 5${NC}"
+# Parse number of validators (default: 3, max: 3)
+#
+# The system contracts baked into genesis-contracts-dev.json (ValidatorContract
+# INIT_VALIDATORSET_BYTES + StakeHub whitelist) are generated for a FIXED set of
+# 3 validators whose keystores live in
+#   core/systemcontracts/parliagenesis/default/keystores/validator-{1,2,3}
+# We reuse those exact validators (not freshly-generated random keys) so the
+# consensus signer (genesis extraData) == the contract's validator set.
+#
+# Default is 3 because at the first epoch boundary (block 200) Parlia switches
+# the snapshot to the contract's validator set — which is all 3. Running fewer
+# than 3 lets the chain produce blocks up to block 200, then stall: the snapshot
+# expands to 3 validators but the missing ones never sign, so no quorum forms
+# ("Signed recently, must wait for others"). Use 1 or 2 only for short-lived
+# pre-epoch tests that never reach block 200.
+NUM_VALIDATORS=${1:-3}
+if ! [[ "$NUM_VALIDATORS" =~ ^[1-3]$ ]]; then
+    echo -e "${RED}Error: Number of validators must be between 1 and 3${NC}"
     echo "Usage: $0 [num_validators]"
-    echo "  num_validators: 1-5 (default: 1)"
+    echo "  num_validators: 1-3 (default: 3) — bounded by the baked validator keystores;"
+    echo "                  use 3 to cross the epoch boundary (block 200)"
+    exit 1
+fi
+
+KEYSTORE_SRC="$REPO_ROOT/core/systemcontracts/parliagenesis/default/keystores"
+if [ ! -d "$KEYSTORE_SRC/validator-1" ]; then
+    echo -e "${RED}Error: baked validator keystores not found at $KEYSTORE_SRC${NC}"
+    echo "These ship with the repo and must match the genesis-contracts-dev.json contracts."
     exit 1
 fi
 
@@ -44,32 +66,38 @@ fi
 
 mkdir -p "$DATA_DIR"
 
-# Generate validator accounts
-echo -e "${GREEN}Generating validator accounts...${NC}"
+# Install validator accounts from the baked keystores.
+#
+# We copy the pre-generated keystores (consensus key, password, and BLS wallet)
+# that the genesis-contracts-dev.json system contracts were generated for. Using
+# these exact keys — rather than `geth account new` random keys — is what keeps
+# the consensus signer aligned with the contract validator set across the epoch
+# boundary (see the NUM_VALIDATORS comment above).
+echo -e "${GREEN}Installing validator accounts from baked keystores...${NC}"
 
 for i in $(seq 1 $NUM_VALIDATORS); do
     VAL_DIR="$DATA_DIR/validator-$i"
-    mkdir -p "$VAL_DIR"
+    SRC="$KEYSTORE_SRC/validator-$i"
+    mkdir -p "$VAL_DIR/keystore"
 
-    echo -e "${YELLOW}Creating validator-$i account...${NC}"
-
-    # Create empty password file
-    touch "$VAL_DIR/password.txt"
-
-    # Generate account
-    ACCOUNT_OUTPUT=$($GETH account new --datadir "$VAL_DIR" --password "$VAL_DIR/password.txt" 2>&1)
-
-    # Extract address from output
-    ADDRESS=$(echo "$ACCOUNT_OUTPUT" | grep -Eo '0x[0-9a-fA-F]{40}' | head -1)
-
-    if [ -z "$ADDRESS" ]; then
-        echo -e "${RED}Failed to extract address for validator-$i${NC}"
-        echo "Output: $ACCOUNT_OUTPUT"
+    if [ ! -d "$SRC" ]; then
+        echo -e "${RED}Missing baked keystore for validator-$i at $SRC${NC}"
         exit 1
     fi
 
-    echo "$ADDRESS" > "$VAL_DIR/address.txt"
-    echo -e "  Address: ${GREEN}$ADDRESS${NC}"
+    # Consensus key + password (geth expects keystore JSON under <datadir>/keystore).
+    cp "$SRC"/UTC--* "$VAL_DIR/keystore/"
+    cp "$SRC/password.txt" "$VAL_DIR/password.txt"
+    cp "$SRC/address.txt"  "$VAL_DIR/address.txt"
+
+    # BLS wallet + password + pubkey/proof (consumed by the fast-finality test).
+    cp -r "$SRC/bls-wallet"      "$VAL_DIR/bls"            2>/dev/null || true
+    cp    "$SRC/bls-password.txt" "$VAL_DIR/bls-password.txt" 2>/dev/null || true
+    cp    "$SRC/bls-pubkey.txt"   "$VAL_DIR/bls-pubkey.txt"   2>/dev/null || true
+    cp    "$SRC/bls-proof.txt"    "$VAL_DIR/bls-proof.txt"    2>/dev/null || true
+
+    ADDRESS=$(cat "$VAL_DIR/address.txt")
+    echo -e "  validator-$i: ${GREEN}$ADDRESS${NC} (baked keystore)"
 done
 
 # Validate and display addresses
