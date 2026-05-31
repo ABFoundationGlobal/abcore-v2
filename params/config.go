@@ -543,7 +543,8 @@ var (
 		// dates). CheckConfigForkOrder permits all three at the same timestamp.
 		//
 		// BlobScheduleConfig.Cancun is REQUIRED once CancunTime is set, otherwise
-		// the node refuses to start ("missing blob schedule"). Target 3 / Max 6 is
+		// CheckConfigForkOrder fails at startup with `invalid chain configuration:
+		// missing entry for fork "cancun" in blobSchedule`. Target 3 / Max 6 is
 		// the BSC Cancun default (DefaultCancunBlobConfig).
 		CancunTime:         newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
 		HaberTime:          newUint64(1780300800),
