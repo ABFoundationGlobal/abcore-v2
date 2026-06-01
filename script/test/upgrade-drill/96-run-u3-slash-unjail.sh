@@ -162,8 +162,11 @@ print(int(d[192:256],16) if len(d)>=256 else 0)
 " 2>/dev/null || echo 0
 }
 
-# _val_voting_power ADDR: returns the validator's current voting power from getValidatorElectionInfo.
-# Jailed validators have voting power 0; active validators have non-zero power.
+# _val_voting_power ADDR: returns 1 if validator has non-zero voting power, 0 otherwise.
+# Uses 0/1 rather than the raw uint256 to avoid bash integer overflow:
+# WHITELIST_VOTING_POWER = uint256(uint64.max)*1e10 is a 30-digit number that bash
+# truncates to 20 digits, yielding uint64.max which is -1 in signed 64-bit arithmetic,
+# causing [[ vp -gt 0 ]] to incorrectly return false.
 _val_voting_power() {
   local target="${1#0x}"
   local sel; sel=$(_attach "web3.sha3('getValidatorElectionInfo(uint256,uint256)').slice(2,10)")
@@ -185,7 +188,10 @@ for i in range(min(n, m)):
     addr_slot = d[val_off+64+i*64 : val_off+64+(i+1)*64]
     if addr_slot[-40:] == target:
         vp_slot = d[vp_off+64+i*64 : vp_off+64+(i+1)*64]
-        print(int(vp_slot, 16)); sys.exit()
+        # Return 1/0 instead of raw uint256 to avoid bash signed-64-bit overflow.
+        # WHITELIST_VOTING_POWER is a 30-digit number; bash [[ -gt ]] truncates it
+        # to uint64.max which is -1 in signed arithmetic and compares as <= 0.
+        print(1 if int(vp_slot, 16) > 0 else 0); sys.exit()
 print(0)
 " 2>/dev/null || echo 0
 }
