@@ -19,10 +19,14 @@
 # never signs BLS votes, so no attestation is ever assembled.
 set -euo pipefail
 
-# Breathe block interval (seconds). With 3s blocks, 60s ≈ one breathe block
-# every ~20 blocks. Must match the value used by 03-register-vote-address.sh's
-# expectations for "wait one breathe block".
-BREATHE_INTERVAL=${BREATHE_INTERVAL:-60}
+# Breathe block interval (seconds). The orchestrator (99-run-all.sh) overrides
+# this to a very large value to keep breathe blocks effectively OFF for the whole
+# run: a breathe block firing on an empty StakeHub election calls
+# updateValidatorSetV2([],[],[]) which reverts `invalid opcode: INVALID` and
+# stalls the chain. Breathe (validator-set rotation) is orthogonal to fast
+# finality — voteAddress activates at the epoch boundary, not at a breathe block,
+# so 03/04 never depend on a breathe firing. Do NOT lower this for the E2E run.
+BREATHE_INTERVAL=${BREATHE_INTERVAL:-315360000}
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +38,10 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 [ -d "$DATA_DIR/validator-1" ] || { echo -e "${RED}Setup not done. Run ./01-setup.sh first${NC}"; exit 1; }
 NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
-# N=1 is valid: quorum ceil(2*1/3)=1, the lone validator's own vote justifies.
+# Needs the 3 baked validators: the system contracts elect a fixed 3-validator
+# set at the epoch boundary, so fewer than 3 stalls past block 200 (the chain
+# must cross that boundary to activate voteAddress). 3 also reaches the BLS
+# quorum ceil(2*3/3)=2. See 01-setup.sh / README for the full rationale.
 [ "$NUM_VALIDATORS" -ge 1 ] || { echo -e "${RED}No validators found — run ./01-setup.sh${NC}"; exit 1; }
 
 echo -e "${GREEN}=== Starting ${NUM_VALIDATORS} validators with --vote (breathe=${BREATHE_INTERVAL}s) ===${NC}"

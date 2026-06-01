@@ -68,25 +68,36 @@ run "$SCRIPT_DIR/02-start-with-vote.sh"
 run "$SCRIPT_DIR/03-register-vote-address.sh"
 
 # Wait until the chain crosses the first epoch boundary AFTER registration, so
-# the registered voteAddress is read into the validator snapshot. Poll the tip.
-echo -e "\n${YELLOW}==> Waiting for the chain to cross an epoch boundary (block % ${EPOCH} == 0) to activate voteAddress...${NC}"
-TARGET=0
-for _ in $(seq 1 240); do   # up to ~20 min wall (3s blocks → ~400 blocks)
+# the registered voteAddress is read into the validator snapshot. Poll the tip
+# with a hard wall-clock budget AND a stall guard so a broken chain fails fast
+# instead of hanging the Jenkins job (the previous version could loop forever).
+EPOCH_WAIT_SECS=${EPOCH_WAIT_SECS:-1200}   # ~20 min; an epoch is 200 blocks * 3s = ~10 min
+TARGET=0; ELAPSED=0; PREV_BN=-1; STALL=0
+echo -e "\n${YELLOW}==> Waiting (≤${EPOCH_WAIT_SECS}s) for the chain to cross an epoch boundary (block % ${EPOCH} == 0) to activate voteAddress...${NC}"
+while [ "$ELAPSED" -lt "$EPOCH_WAIT_SECS" ]; do
     BN=$(_blk)
     if [[ "$BN" =~ ^[0-9]+$ ]] && [ "$BN" -gt 0 ]; then
         # first epoch boundary strictly greater than the current tip
-        TARGET=$(( (BN / EPOCH + 1) * EPOCH ))
-        if [ "$BN" -ge "$TARGET" ]; then break; fi
-        # recompute target once we know tip; then wait for tip >= TARGET
-        while :; do
-            BN=$(_blk); [[ "$BN" =~ ^[0-9]+$ ]] || { sleep 3; continue; }
-            [ "$BN" -ge "$TARGET" ] && break
-            sleep 5
-        done
-        break
+        [ "$TARGET" -eq 0 ] && TARGET=$(( (BN / EPOCH + 1) * EPOCH ))
+        [ "$BN" -ge "$TARGET" ] && break
+        # stall guard: if the tip hasn't moved across several polls, bail out
+        if [ "$BN" -eq "$PREV_BN" ]; then
+            STALL=$((STALL + 1))
+            if [ "$STALL" -ge 6 ]; then
+                echo -e "${RED}  FAIL  chain stalled at block ${BN} (no progress ~30s) before reaching epoch boundary ${TARGET}${NC}"
+                exit 1
+            fi
+        else
+            STALL=0
+        fi
+        PREV_BN=$BN
     fi
-    sleep 3
+    sleep 5; ELAPSED=$((ELAPSED + 5))
 done
+if [ "$TARGET" -eq 0 ] || [ "$(_blk)" -lt "$TARGET" ]; then
+    echo -e "${RED}  FAIL  chain did not reach epoch boundary ${TARGET} within ${EPOCH_WAIT_SECS}s${NC}"
+    exit 1
+fi
 echo -e "  ${GREEN}tip=$(_blk) (>= epoch boundary ${TARGET}) — voteAddress should now be active${NC}"
 
 run "$SCRIPT_DIR/04-verify-finality.sh"

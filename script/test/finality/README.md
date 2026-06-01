@@ -15,10 +15,11 @@ wrapper.
 Devnet validators already run with `--vote` (the `devnet-ops` Jenkinsfiles add
 `--vote --blswallet --blspassword` to every `val-*` node), so fast finality is
 live there. Note that voting is **independent of system rewards**: the deployed
-contracts have `INIT_SYSTEM_REWARD_RATIO = 0` so `distributeFinalityReward`
-pays nothing, but votes are still produced and blocks still finalize — see
-`consensus/parlia/parlia.go:1199` for the vote gate and `BSCValidatorSet.sol:305`
-for the (separate) reward gate.
+contracts pay nothing for finality (the system-reward ratio is 0), but votes are
+still produced and blocks still finalize. The vote gate lives in
+`consensus/parlia/parlia.go` (around the `IsActiveValidatorAt` / vote-key check);
+the reward distribution is a separate path in the StakeHub/SystemReward system
+contracts (`core/systemcontracts/parliagenesis/`), not coupled to it.
 
 This is the only test that drives the full voting path on a live local network
 rather than testing the data structures in isolation. A bug in that path is a

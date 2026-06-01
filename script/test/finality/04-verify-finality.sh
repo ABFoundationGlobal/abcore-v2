@@ -14,9 +14,11 @@ set -euo pipefail
 
 # Tunables.
 # Poll for up to FINALITY_TIMEOUT seconds for justified/finalized to start
-# advancing. This must comfortably exceed: time-to-next-breathe-block (admits
-# voteAddress into the snapshot) + the 40-block voting warmup in
-# core/vote/vote_manager.go + a few rounds for justify→finalize to accumulate.
+# advancing. This must comfortably exceed: time-to-next-epoch-boundary (block %
+# epoch == 0, which admits voteAddress into the snapshot — NOT a breathe block) +
+# the 40-block voting warmup in core/vote/vote_manager.go + a few rounds for
+# justify→finalize to accumulate. When run via 99-run-all.sh the epoch boundary
+# is already crossed before this script starts, so the default is ample.
 FINALITY_TIMEOUT=${FINALITY_TIMEOUT:-360}
 POLL_INTERVAL=${POLL_INTERVAL:-5}
 
@@ -38,9 +40,10 @@ _justified() { local v; v=$(_attach "parlia.getJustifiedNumber()" 2>/dev/null); 
 _finalized() { local v; v=$(_attach "parlia.getFinalizedNumber()" 2>/dev/null); [[ "$v" =~ ^[0-9]+$ ]] && echo "$v" || echo 0; }
 _tip()       { local v; v=$(_attach "eth.blockNumber" 2>/dev/null); [[ "$v" =~ ^[0-9]+$ ]] && echo "$v" || echo 0; }
 
-# Returns 1 if any validator in the latest snapshot has a non-zero BLS
-# vote_address (i.e. updateValidatorSetV2 ran and admitted the registered keys),
-# else 0. This is the precondition for any voting to happen at all.
+# Returns 1 if the latest Parlia snapshot contains any validator with a non-zero
+# BLS vote_address, else 0 (regardless of how it got there). The snapshot picks
+# up the registered voteAddress at the epoch boundary. This is the precondition
+# for any voting to happen at all.
 _voteaddr_present() {
     local js
     js=$(_attach 'var s=parlia.getSnapshot();var ok=0;for(var v in s.validators){var a=s.validators[v].vote_address;if(a){for(var i=0;i<a.length;i++){if(a[i]!==0){ok=1;break;}}}if(ok)break;}ok' 2>/dev/null)
@@ -122,16 +125,18 @@ if [ "$J_NOW" -gt 0 ]; then
     fi
 fi
 
-# ── (c) a recent header carries a vote attestation ───────────────────────────
+# ── (c) a recent NON-EPOCH header carries a vote attestation ─────────────────
 # extraData = 32B vanity + [attestation RLP] + 65B seal. With no attestation the
-# length is exactly 97 bytes (194 hex + 0x). Anything materially longer on a
-# non-epoch block indicates an embedded attestation.
-echo -e "${YELLOW}==> Checking recent headers for embedded vote attestation...${NC}"
-ATT_FOUND=$(_attach 'var n=eth.blockNumber,found=0;for(var i=n;i>n-20&&i>1;i--){var b=eth.getBlock(i);if(b&&b.extraData&&(b.extraData.length-2)/2>97){found=i;break;}}found' 2>/dev/null)
+# length is exactly 97 bytes (194 hex + 0x). Anything materially longer indicates
+# an embedded attestation — EXCEPT on an epoch block (block % epoch == 0), whose
+# header also carries the validator set in extraData and is >97 bytes regardless
+# of any attestation. We therefore skip epoch blocks to avoid a false positive.
+echo -e "${YELLOW}==> Checking recent non-epoch headers for embedded vote attestation...${NC}"
+ATT_FOUND=$(_attach 'var n=eth.blockNumber,ep=parlia.getSnapshot().epoch_length||200,found=0;for(var i=n;i>n-20&&i>1;i--){if(i%ep===0)continue;var b=eth.getBlock(i);if(b&&b.extraData&&(b.extraData.length-2)/2>97){found=i;break;}}found' 2>/dev/null)
 if [[ "$ATT_FOUND" =~ ^[0-9]+$ ]] && [ "$ATT_FOUND" -gt 0 ]; then
-    echo -e "${GREEN}  PASS  attestation found in header #${ATT_FOUND} (extraData > 97 bytes)${NC}"
+    echo -e "${GREEN}  PASS  attestation found in non-epoch header #${ATT_FOUND} (extraData > 97 bytes)${NC}"
 else
-    echo -e "${RED}  FAIL  no vote attestation in last 20 headers${NC}"
+    echo -e "${RED}  FAIL  no vote attestation in last 20 non-epoch headers${NC}"
     FAIL=1
 fi
 

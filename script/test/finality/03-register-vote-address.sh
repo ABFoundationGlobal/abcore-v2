@@ -4,9 +4,11 @@
 #
 # Why this is required: IsActiveValidatorAt (consensus/parlia/parlia.go:1768)
 # checks the validator's voteAddress in the snapshot via checkVoteKeyFn. Until
-# the BLS pubkey is registered on-chain via StakeHub.createValidator and the
-# next breathe block runs updateValidatorSetV2, the node's voteKey won't match
-# any active validator and it will NOT sign votes.
+# the BLS pubkey is registered on-chain via StakeHub.createValidator AND the
+# chain crosses the next epoch boundary (block % epoch == 0), where Parlia
+# re-reads the validator set — including voteAddress — into the snapshot, the
+# node's voteKey won't match any active validator and it will NOT sign votes.
+# (This harness keeps breathe blocks off; activation is purely epoch-driven.)
 #
 # The createValidator ABI encoding is reused verbatim from
 # script/local/08-test-breathe-block.sh.
@@ -157,5 +159,6 @@ echo -e "  ${GREEN}election set has ${ELECTED} validator(s) — safe for breathe
 
 echo ""
 echo -e "${GREEN}=== All ${NUM_VALIDATORS} validators registered; election non-empty ===${NC}"
-echo "voteAddress takes effect at the next breathe block (updateValidatorSetV2)."
+echo "voteAddress takes effect when the chain next crosses an epoch boundary"
+echo "(block % epoch == 0), where Parlia reads it into the snapshot — not at a breathe block."
 echo "Next: ./04-verify-finality.sh"

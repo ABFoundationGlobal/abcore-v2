@@ -8,7 +8,8 @@
 # chain satisfies the fast-finality protocol gate from a low block height.
 #
 # Per-validator BLS artifacts written under data/validator-N/:
-#   bls-wallet/         — Prysm-format BLS wallet (--blswallet for 02-start)
+#   bls/wallet/         — Prysm-format BLS wallet (geth's `bls account new`
+#                         default; passed verbatim to --blswallet by 02-start)
 #   bls-password.txt    — wallet password (--blspassword for 02-start)
 #   bls-pubkey.txt      — 48-byte BLS public key (96 hex chars, no 0x)
 #   bls-proof.txt       — 96-byte proof-of-possession (0x-prefixed, 194 chars)
