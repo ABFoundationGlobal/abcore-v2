@@ -7,10 +7,21 @@ Scripts to spin up a local Parlia (PoSA) test network using the ABCore v2 binary
 - Built geth binary: run `make geth` from the repo root
 - Python 3 (for genesis generation)
 
+> **Validator set is fixed.** `01-setup.sh` installs a baked set of up to 3
+> validators from `core/systemcontracts/parliagenesis/default/keystores/`. These
+> exact addresses are compiled into the genesis system contracts
+> (`ValidatorContract` init set + `StakeHub` whitelist), so the consensus signer
+> stays aligned with the on-chain validator set across the epoch boundary
+> (block 200). **Run 3 validators** to keep producing blocks past block 200;
+> running 1–2 stalls there (the snapshot expands to all 3 but the missing
+> signers never sign). Earlier versions generated random keys, which silently
+> stalled at the first epoch boundary.
+
 ## Quick Start
 
 ```bash
-# 1. Generate validator keys and genesis (default: 1 validator, max: 5)
+# 1. Install validator keys (from the repo's baked keystores) and generate genesis
+#    (default: 3 validators, max: 3 — see note below)
 ./01-setup.sh [num_validators]
 
 # 2. Start validators
@@ -37,8 +48,8 @@ An alternative to the bare-metal workflow above. No Go toolchain required — th
 ### Quick Start
 
 ```bash
-# 1. Generate validator keys and genesis (same as bare metal)
-./01-setup.sh [num_validators]   # 1–5 validators supported
+# 1. Install validator keys and genesis (same as bare metal)
+./01-setup.sh [num_validators]   # 1–3 validators (use 3 to cross block 200)
 
 # 2. Build image (first time only) and start
 ./07-docker-up.sh
@@ -48,15 +59,13 @@ An alternative to the bare-metal workflow above. No Go toolchain required — th
 
 ### Endpoints
 
-Validator-1 always starts. Additional validators start based on the count passed to `01-setup.sh` (1–5).
+Validator-1 always starts. Additional validators start based on the count passed to `01-setup.sh` (1–3).
 
 | Node | HTTP RPC | WebSocket | P2P |
 |------|----------|-----------|-----|
 | validator-1 | `http://localhost:8545` | `ws://localhost:9545` | `30303` |
 | validator-2 | `http://localhost:8546` | `ws://localhost:9546` | `30304` |
 | validator-3 | `http://localhost:8547` | `ws://localhost:9547` | `30305` |
-| validator-4 | `http://localhost:8548` | `ws://localhost:9548` | `30306` |
-| validator-5 | `http://localhost:8549` | `ws://localhost:9549` | `30307` |
 
 All ports are bound to `127.0.0.1` (localhost only). Only the ports for the validators that were set up will be active.
 

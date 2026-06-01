@@ -4,7 +4,7 @@
 # Usage:
 #   ./07-docker-up.sh
 #
-# Prerequisite: run ./01-setup.sh [1-5] first.
+# Prerequisite: run ./01-setup.sh [1-3] first.
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -39,8 +39,8 @@ fi
 NUM_VALIDATORS=$(ls -d "$SCRIPT_DIR/data"/validator-* 2>/dev/null | wc -l | tr -d ' ')
 echo -e "${GREEN}Found ${NUM_VALIDATORS} validator(s) on disk${NC}"
 
-if [ "$NUM_VALIDATORS" -lt 1 ] || [ "$NUM_VALIDATORS" -gt 5 ]; then
-    echo -e "${RED}Error: validator count must be 1–5, got ${NUM_VALIDATORS}.${NC}"
+if [ "$NUM_VALIDATORS" -lt 1 ] || [ "$NUM_VALIDATORS" -gt 3 ]; then
+    echo -e "${RED}Error: validator count must be 1–3, got ${NUM_VALIDATORS}.${NC}"
     exit 1
 fi
 
