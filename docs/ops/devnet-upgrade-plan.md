@@ -770,12 +770,36 @@ reset 后，DevNet 在 genesis alloc 中包含一个 well-known funder 账户：
 >
 > 对照参考：Testnet 已有专用 funder（`0x009f1ddaf7f528e60a7c560c51ae997cd4709cc3`，私钥仅 ops 团队持有），Mainnet 走 Foundation 分发流程，不存在 well-known funder。
 
+#### Fast finality 节点启动参数（`--vote`，T3 起生效）
+
+Feynman 同时激活 BEP-126 fast finality（BLS 投票最终性）。注册 `vote_address`（上方 `createValidator` 的 `<vote_address_bytes>`）只是**链上**那一半；validator 进程还必须用 fast-finality 相关 flag **启动**才会真正产生并广播 BLS vote attestation。两半缺一不可：
+
+| 半边 | 内容 | 缺失后果 |
+|---|---|---|
+| 链上 | `createValidator` 写入 `vote_address`（BLS pubkey）+ proof | 没注册 → 该 validator 的投票被其它节点拒收 |
+| 链下 | 节点启动加 `--vote --blswallet <path> --blspassword <path>` | 没加 → 节点根本不投票，`eth_getFinalizedHeader` / `cast block finalized` 恒停在 genesis |
+
+> **关键**：fast finality **没有"慢速降级"路径**。BEP-126 要求 ≥⌈2N/3⌉ 个 validator 对区块产生 BLS attestation，凑够 quorum 才能 justify（1 个）→ finalize（连续 2 个 justified）。投票不足时 `finalized` 恒为 0，**不是"变慢"而是完全不 finalize**。因此链上能观察到 finalized 高度持续推进，本身就证明 `--vote` 在所有 validator 上都已开启。
+
+**devnet 部署落点**：`devnet-ops` 的 Jenkinsfile（`Jenkinsfile.newchain` / `Jenkinsfile.rolling`）在 `val-*` 节点的 `MINE_ARGS` 里固定带上这三个 flag：
+
+```bash
+MINE_ARGS="--mine --unlock <addr> --password /data/password.txt --miner.etherbase <addr> --allow-insecure-unlock \
+    --vote \
+    --blswallet /data/bls/wallet \
+    --blspassword /data/bls-password.txt"
+```
+
+这组 flag 是 **v0.4.0 (T3 / Feynman) 这一档随 2026-05-21 reset 一起引入**部署脚本的（devnet-ops commit `08ff96d`，2026-05-20）——**不是 v1→v2 首次切换（v0.2.0 Parlia）就有**。T3 之前 fast finality 机制尚未激活，开 `--vote` 无意义；v0.5.0 (T4) 及之后未改动这组 flag。BLS wallet 由 `devnet-ops/scripts/register-validators.sh` 配套生成（`geth bls account generate-proof` 产出 pubkey + proof，pubkey 即上链的 `vote_address`）。
+
 **验证清单：**
 ```bash
 # 1. PUSH0 opcode 可用（部署含 PUSH0 的合约）
 # 2. 第一个 breathe block 后 validator set 正确（仍是 5 个）
 cast call $STAKE_HUB "getValidators()(address[])" --rpc-url http://rpc-0:8545
 # 3. 链继续正常推进
+# 4. fast finality 工作：finalized 高度持续推进（证明 --vote + voteAddress 两半都到位）
+cast block finalized --rpc-url http://rpc-0:8545 | grep -E "^number"
 ```
 
 **观察窗口：≥ 48h（覆盖至少 2 个 breathe block 周期）**
@@ -1553,5 +1577,31 @@ T3 仍保持 breathe 对齐：`T3 % 86400 = 28800`，Feynman 在 2026-05-28 00:0
 **预期**：这次 2026-05-29 00:00 UTC 的第一个 breathe block **不再卡死**（`validatorExtraSet` 已在 `init()` 初始化）。这是本次 reset 的关键验证点。
 
 **待执行**：reset 后按上述验证清单确认；breathe block 通过后补充实际结果到本节。
+
+### Upgrade 4：v0.5.0 — Cancun + Haber + HaberFix（2026-06-01 T4）— 成功 ✅
+
+第四次 reset（2026-05-28，T3 / Feynman）跨过第一个 breathe block 后稳定运行，fast finality 正常（详见下方）。在此基础上按计划推进 Upgrade 4。
+
+**配置改动**（[#118](https://github.com/ABFoundationGlobal/abcore-v2/pull/118)，已合并 master `4ae923dee`，2026-05-31 17:05 UTC）：`ABCoreDevnetChainConfig` 设
+
+| Fork | 时间戳 | UTC | 计划要求(T4) | 一致 |
+|---|---|---|---|---|
+| CancunTime | `1780300800` | 2026-06-01 08:00:00 | ✅ | ✅ |
+| HaberTime | `1780300800` | 同上 | ✅ | ✅ |
+| HaberFixTime | `1780300800` | 同上 | ✅ | ✅ |
+| BlobScheduleConfig.Cancun | `DefaultCancunBlobConfig` | — | Cancun 必需 | ✅ |
+| PragueTime | `nil` | — | 留给 v0.6.0 (T5) | ✅ 未提前 |
+
+三个 fork 同戳 T4，BlobSchedule 就位，Prague 及之后正确留给 T5。
+
+**链上实测（T4 后，2026-06-01 09:57 UTC）：**
+
+- latest `#124809`、finalized `#124808`（仅差 1 块）——fast finality 健康，跨 T4 未中断。
+- 区块头出现 Cancun (EIP-4844) 新字段 `blobGasUsed=0` / `excessBlobGas=0`；T4 之前的块（如 `#115640`）这两个字段为空 → **Cancun 确已在 T4 时刻激活并生效**。
+- 节点已通过 `Jenkinsfile.rolling` 滚动升级到含 #118 的镜像，出块正常。
+
+**关于 fast finality 的澄清（运维记录）**：本次复核确认 devnet 所有 `val-*` 节点**从 T3 起就带 `--vote --blswallet --blspassword` 启动**（devnet-ops `08ff96d`，2026-05-20，随 05-21 reset 引入），voteAddress 也已通过 `register-validators.sh` 注册进 StakeHub。fast finality 自 T3 (Feynman) 即工作，**与 v0.5.0/Cancun 无关**——T4 之前的 finalized 推进就是明证。详见 §三 Upgrade 3「Fast finality 节点启动参数」小节。
+
+**观察窗口**：≥ 48h（覆盖 ≥2 个 breathe block 周期 + blob tx / 新区块头字段验证）后推进 Upgrade 5 (v0.6.0 / T5)。
 
 
