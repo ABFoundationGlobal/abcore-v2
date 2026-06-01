@@ -218,12 +218,42 @@ log "  Selectors ready."
 
 VAL1_PAD=$(printf '%064s' "${VAL1#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
 
+# ── Read commission info (needed for slot probe with valid rate) ───────────────
+raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_COMMISSION}${VAL1_PAD}")
+commission_info=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x' or len(raw) < 194:
+    print('0 10000 1000'); exit()
+data = bytes.fromhex(raw[2:])
+rate       = int.from_bytes(data[0:32],  'big')
+max_rate   = int.from_bytes(data[32:64], 'big')
+max_change = int.from_bytes(data[64:96], 'big')
+print(f'{rate} {max_rate} {max_change}')
+" 2>/dev/null || echo "0 10000 1000")
+current_rate="${commission_info%% *}"
+_rest="${commission_info#* }"
+max_rate="${_rest%% *}"
+max_change="${_rest##* }"
+
+new_commission_rate=$(python3 -c "
+rate=int('${current_rate}'); mc=int('${max_change}'); mr=int('${max_rate}')
+if mc==0: print(rate); exit()
+step=min(mc,100)
+print(rate+step if rate+step<=mr else max(0,rate-step))
+" 2>/dev/null || echo "$current_rate")
+
+edit_commission_data=$(python3 -c "
+print('0x'+'${SEL_EDIT_COMMISSION}'+format(int('${new_commission_rate}'),'064x'))
+")
+
 # ── Discover val1's _validators[val1].updateTime storage slot ─────────────────
 # The stateDiff tests (T-7.a/b/c) override updateTime to 0 to bypass the
-# BREATHE_BLOCK_INTERVAL (1 day) cooldown without sending real txs.
+# BREATHE_BLOCK_INTERVAL (5 s) cooldown without sending real txs.  T-7.f sets
+# updateTime to the current timestamp to TRIGGER the cooldown.
 # Strategy: scan mapping base slots 40-120 to find _validators[val1] struct,
-# then probe struct offsets until overriding that slot makes editCommissionRate
-# succeed (the slot that clears UpdateTooFrequently is updateTime).
+# then probe struct offsets until overriding that slot (with updateTime=0) makes
+# editCommissionRate succeed.  The probe uses the actual target rate so it passes
+# the InvalidCommission check and only hits UpdateTooFrequently.
 log ""
 log "Discovering val1 _validators updateTime storage slot..."
 
@@ -233,7 +263,6 @@ log "  val1 consensus (for slot probe): 0x${VAL1_CONSENSUS_LOWER}"
 
 UPDATE_TIME_SLOT=""
 _STRUCT_BASE=""
-_edit_probe_data=$(python3 -c "print('0x'+'${SEL_EDIT_COMMISSION}'+format(0,'064x'))")
 
 for _map_slot in $(seq 40 130); do
   _map_slot_hex=$(printf '%064x' "$_map_slot")
@@ -247,68 +276,41 @@ for _map_slot in $(seq 40 130); do
   if [[ "${_stored: -40}" == "${VAL1_CONSENSUS_LOWER}" ]]; then
     _STRUCT_BASE="$_struct_hex"
     log "  Found _validators[val1] struct base (mapping slot ${_map_slot})"
-    # Now find updateTime by trying each struct offset until editCommissionRate succeeds
-    for _offset in $(seq 6 25); do
-      _probe="0x$(python3 -c "print(format((int('${_struct_hex}',16)+${_offset})%2**256,'064x'))")"
-      _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${_probe}\":\"0x$(printf '%064x' 0)\"}}}"
-      _res=$(eth_call_with_state "$STAKE_HUB" "$_edit_probe_data" "$VAL1" "$_state")
-      if [[ "$_res" != "error:"* && "$_res" != "0x" ]]; then
-        UPDATE_TIME_SLOT="$_probe"
-        log "  updateTime slot found at struct offset ${_offset}: ${_probe}"
-        break 2
-      fi
-    done
+    if [[ "$new_commission_rate" != "$current_rate" ]]; then
+      # Probe each struct offset: override slot to 0, see if editCommissionRate succeeds
+      for _offset in $(seq 6 25); do
+        _probe="0x$(python3 -c "print(format((int('${_struct_hex}',16)+${_offset})%2**256,'064x'))")"
+        _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${_probe}\":\"0x$(printf '%064x' 0)\"}}}"
+        _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
+        if [[ "$_res" != "error:"* && "$_res" != "0x" ]]; then
+          UPDATE_TIME_SLOT="$_probe"
+          log "  updateTime slot found at struct offset ${_offset}: ${_probe}"
+          break 2
+        fi
+      done
+    fi
     break
   fi
 done
 
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  NOTE: updateTime slot not found — T-7.a/b/c will use plain dry-run (no stateDiff)"
+  log "  NOTE: updateTime slot not found — T-7.a/b/c/f will be skipped"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.a — editCommissionRate (stateDiff dry-run, updateTime overridden to 0)
-# BREATHE_BLOCK_INTERVAL = 1 day; real tx would revert.  We prove the function
-# works by overriding val1.updateTime = 0 in the eth_call state.
+# commission info and edit_commission_data already computed above for slot probe.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.a: editCommissionRate (stateDiff dry-run) ────────────────────────────"
-
-raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_COMMISSION}${VAL1_PAD}")
-commission_info=$(python3 -c "
-raw = '${raw}'
-if not raw or raw == '0x' or len(raw) < 194:
-    print('0 10000 1000'); exit()
-data = bytes.fromhex(raw[2:])
-rate       = int.from_bytes(data[0:32],  'big')
-max_rate   = int.from_bytes(data[32:64], 'big')
-max_change = int.from_bytes(data[64:96], 'big')
-print(f'{rate} {max_rate} {max_change}')
-" 2>/dev/null || echo "0 10000 1000")
-current_rate="${commission_info%% *}"
-rest="${commission_info#* }"
-max_rate="${rest%% *}"
-max_change="${rest##* }"
 log "  current commission: rate=${current_rate}  maxRate=${max_rate}  maxChangeRate=${max_change}"
-
-new_commission_rate=$(python3 -c "
-rate=int('${current_rate}'); mc=int('${max_change}'); mr=int('${max_rate}')
-if mc==0: print(rate); exit()
-step=min(mc,100)
-print(rate+step if rate+step<=mr else max(0,rate-step))
-" 2>/dev/null || echo "$current_rate")
+log "  target rate: ${new_commission_rate}"
 
 if [[ "$new_commission_rate" == "$current_rate" || -z "$UPDATE_TIME_SLOT" ]]; then
-  if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-    log "  NOTE T-7.a: updateTime slot not found; skipping stateDiff test"
-  else
-    log "  NOTE T-7.a: maxChangeRate=0 or no room to move"
-  fi
+  [[ -z "$UPDATE_TIME_SLOT" ]] && log "  NOTE T-7.a: updateTime slot not found; skipping" \
+                               || log "  NOTE T-7.a: maxChangeRate=0 or no room to move"
   ok "T-7.a: editCommissionRate skipped"
 else
-  edit_commission_data=$(python3 -c "
-print('0x'+'${SEL_EDIT_COMMISSION}'+format(int('${new_commission_rate}'),'064x'))
-")
   _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
   _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
   if [[ "$_res" != "error:"* && -n "$_res" ]]; then
@@ -357,17 +359,33 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.f — UpdateTooFrequently enforcement
-# Direct call without stateDiff — BREATHE_BLOCK_INTERVAL = 1 day and
-# createValidator set updateTime recently, so this MUST revert.
+# BREATHE_BLOCK_INTERVAL = 5 s; by the time T-7.f runs (minutes after U-3),
+# the real updateTime cooldown has long expired.  Instead we use stateDiff to
+# set updateTime = current block.timestamp, simulating a just-done edit, then
+# verify the call reverts with UpdateTooFrequently.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
 
-_t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
-  -H 'Content-Type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"0x${SEL_EDIT_COMMISSION}$(printf '%064x' 0)\"},\"latest\"],\"id\":1}" \
-  2>/dev/null \
-  | python3 -c "
+if [[ -z "$UPDATE_TIME_SLOT" ]]; then
+  log "  NOTE T-7.f: updateTime slot not found; skipping"
+  ok "T-7.f: UpdateTooFrequently enforcement skipped (updateTime slot not found)"
+else
+  # Set updateTime = current block.timestamp so cooldown is active
+  _cur_ts=$(attach_exec "$GETH" "$IPC1" "eth.getBlock('latest').timestamp" 2>/dev/null | tr -d '"')
+  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' ${_cur_ts:-0})\"}}}"
+
+  _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "$(python3 -c "
+import json
+print(json.dumps({
+  'jsonrpc':'2.0','method':'eth_call','id':1,
+  'params':[{'to':'${STAKE_HUB}','from':'${VAL1}','data':'${edit_commission_data}'},
+            'latest',${_state_t7f}]
+}))")" \
+    2>/dev/null \
+    | python3 -c "
 import json, sys
 resp = json.load(sys.stdin)
 if 'error' not in resp: print('no_revert'); sys.exit(0)
@@ -378,10 +396,11 @@ else:
     print('no_data')
 " 2>/dev/null || echo "exception")
 
-if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
-  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently (selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
-else
-  fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
+  if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
+    ok "T-7.f: editCommissionRate reverts UpdateTooFrequently (stateDiff updateTime=now, selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
+  else
+    fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
+  fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
