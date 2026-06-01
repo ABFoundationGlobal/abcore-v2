@@ -36,12 +36,63 @@ Because it spins up a 3-validator network and crosses an epoch boundary
 - Reuses `script/local` (genesis, accounts, start/stop) and
   `script/test/upgrade-drill/bls_proof` (proof-of-possession).
 
-## Run
+## Run (manual)
+
+There is no CI entry point yet — this is run by hand on any machine that has the
+repo and a built `geth`. (A `devnet-ops` manual-trigger Jenkins job can wrap
+`99-run-all.sh` later; see "CI" below.)
 
 ```bash
+# 0. one-time prerequisites
+make geth                       # from the repo root → build/bin/geth
+python3 --version && go version # both must be on PATH
+
+# 1. full flow — exits 0 only if fast finality is verified, non-zero otherwise
 cd script/test/finality
-./99-run-all.sh            # full flow; exits 0 only if finality is verified
+./99-run-all.sh
 ```
+
+`99-run-all.sh` is self-contained: it sets up 3 validators, starts them with
+`--vote`, registers each voteAddress, waits for the chain to cross the epoch
+boundary, asserts justify/finalize, and **always tears the network down and
+wipes `script/local/data` on exit**. Total wall time ~13–15 min.
+
+Run it from a shell where you can watch the output, or capture it:
+
+```bash
+./99-run-all.sh 2>&1 | tee /tmp/finality.log; echo "exit=${PIPESTATUS[0]}"
+```
+
+### If the default ports are taken
+
+The validators bind high ports (RPC `18640+N`, P2P `31340+N`) specifically to
+avoid a node already on `8545`. If those high ports are also in use, shift them:
+
+```bash
+FINALITY_RPC_BASE=28640 FINALITY_P2P_BASE=41340 ./99-run-all.sh
+```
+
+### Debugging a failure
+
+```bash
+KEEP_DATA=1 ./99-run-all.sh          # leave script/local/data in place on exit
+# then inspect, e.g.:
+tail -n 200 ../../local/data/validator-1/geth.log
+../../../build/bin/geth attach ../../local/data/validator-1/geth.ipc
+# remember to clean up afterwards:
+../../local/05-cleanup.sh
+```
+
+You can also run the steps one at a time (`01-setup.sh` → `02-start-with-vote.sh`
+→ `03-register-vote-address.sh` → wait for `block % 200 == 0` →
+`04-verify-finality.sh`); each prints its own PASS/FAIL.
+
+### CI
+
+Not wired into Jenkins/Actions yet. When it is, the job should be **manual
+trigger only** (not per-PR) because of the ~13–15 min runtime: a thin wrapper
+that checks out a chosen abcore-v2 ref, runs `make geth`, then calls
+`./99-run-all.sh` and surfaces its exit code.
 
 Environment knobs:
 
@@ -50,7 +101,10 @@ Environment knobs:
 | `FINALITY_NUM_VALIDATORS` | `3` | validator count (max 3, bounded by the baked keystores). 3 is required: the baked system contracts elect a fixed 3-validator set at the epoch boundary, so fewer than 3 stalls past block 200; 3 also reaches the BLS quorum ⌈2·3/3⌉=2 |
 | `BREATHE_INTERVAL` | `315360000` | breathe interval (s). Kept effectively **off** so a breathe block never fires on an empty election (which would stall the chain — see below). Not needed for voting |
 | `EPOCH` | `200` | epoch length; voteAddress activates when the chain crosses `block % EPOCH == 0` |
+| `EPOCH_WAIT_SECS` | `1200` | `99` hard budget for reaching the epoch boundary; fails fast (with a stall guard) instead of hanging |
 | `FINALITY_TIMEOUT` | `360` | seconds `04` polls for voteAddress activation + justified advancing |
+| `FINALITY_RPC_BASE` | `18640` | RPC port base (validator-N → `BASE+N`); raise it if the default high ports collide |
+| `FINALITY_P2P_BASE` | `31340` | P2P port base (validator-N → `BASE+N`) |
 | `KEEP_DATA` | `0` | `1` keeps `script/local/data` after the run for inspection |
 
 ## How voting actually activates (important)
