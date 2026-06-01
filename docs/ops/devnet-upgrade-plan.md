@@ -790,7 +790,7 @@ MINE_ARGS="--mine --unlock <addr> --password /data/password.txt --miner.etherbas
     --blspassword /data/bls-password.txt"
 ```
 
-这组 flag 是 **v0.4.0 (T3 / Feynman) 这一档随 2026-05-21 reset 一起引入**部署脚本的（devnet-ops commit `08ff96d`，2026-05-20）——**不是 v1→v2 首次切换（v0.2.0 Parlia）就有**。T3 之前 fast finality 机制尚未激活，开 `--vote` 无意义；v0.5.0 (T4) 及之后未改动这组 flag。BLS wallet 由 `devnet-ops/scripts/register-validators.sh` 配套生成（`geth bls account generate-proof` 产出 pubkey + proof，pubkey 即上链的 `vote_address`）。
+**引入 vs 生效（容易混淆，分清）**：这组 flag 在 devnet-ops commit `08ff96d`（**2026-05-20**）就加进了 Jenkinsfile，**不是 v1→v2 首次切换（v0.2.0 Parlia）才有**，但也**不是到 T3 才挂上**。紧接着的 **2026-05-21 reset 只重走 v0.2.0→v0.3.0（Parlia + London），并未激活 Feynman**——所以从 05-21 reset 起，validator 进程**就已经带着 `--vote` 启动了，但在 T3 (Feynman) 激活之前完全是 no-op**：vote manager 起来了，但 BEP-126 的 justify/finalize 逻辑尚未激活，不产生有效 attestation，`finalized` 恒为 0。直到 **T3 (2026-05-28 fourth pass) 激活 Feynman + voteAddress 注册到位**，这组早已挂着的 flag 才真正开始产生最终性。一句话：**flag 早带（05-21 起），T3 才生效**。v0.5.0 (T4) 及之后未改动这组 flag。BLS wallet 由 `devnet-ops/scripts/register-validators.sh` 配套生成（`geth bls account generate-proof` 产出 pubkey + proof，pubkey 即上链的 `vote_address`）。
 
 **验证清单：**
 ```bash
@@ -1600,7 +1600,7 @@ T3 仍保持 breathe 对齐：`T3 % 86400 = 28800`，Feynman 在 2026-05-28 00:0
 - 区块头出现 Cancun (EIP-4844) 新字段 `blobGasUsed=0` / `excessBlobGas=0`；T4 之前的块（如 `#115640`）这两个字段为空 → **Cancun 确已在 T4 时刻激活并生效**。
 - 节点已通过 `Jenkinsfile.rolling` 滚动升级到含 #118 的镜像，出块正常。
 
-**关于 fast finality 的澄清（运维记录）**：本次复核确认 devnet 所有 `val-*` 节点**从 T3 起就带 `--vote --blswallet --blspassword` 启动**（devnet-ops `08ff96d`，2026-05-20，随 05-21 reset 引入），voteAddress 也已通过 `register-validators.sh` 注册进 StakeHub。fast finality 自 T3 (Feynman) 即工作，**与 v0.5.0/Cancun 无关**——T4 之前的 finalized 推进就是明证。详见 §三 Upgrade 3「Fast finality 节点启动参数」小节。
+**关于 fast finality 的澄清（运维记录）**：本次复核确认 devnet 所有 `val-*` 节点的 `--vote --blswallet --blspassword` flag 在 devnet-ops `08ff96d`（2026-05-20）就加入 Jenkinsfile，**从 2026-05-21 reset 起就一直挂在启动命令里**（含 T3 之前的 v0.2.0/v0.3.0 阶段，但那时是 no-op）；voteAddress 经 `register-validators.sh` 注册进 StakeHub。fast finality 自 **T3 (Feynman) 激活后**才真正生效，**与 v0.5.0/Cancun 无关**——T4 之前的 finalized 推进就是明证。**flag 早带、T3 才生效**的细节见 §三 Upgrade 3「Fast finality 节点启动参数」小节。
 
 **观察窗口**：≥ 48h（覆盖 ≥2 个 breathe block 周期 + blob tx / 新区块头字段验证）后推进 Upgrade 5 (v0.6.0 / T5)。
 
