@@ -546,11 +546,46 @@ var (
 		// CheckConfigForkOrder fails at startup with `invalid chain configuration:
 		// missing entry for fork "cancun" in blobSchedule`. Target 3 / Max 6 is
 		// the BSC Cancun default (DefaultCancunBlobConfig).
-		CancunTime:         newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
-		HaberTime:          newUint64(1780300800),
-		HaberFixTime:       newUint64(1780300800),
-		PragueTime:         nil, // v0.6.0 (T5)
-		BlobScheduleConfig: &BlobScheduleConfig{Cancun: DefaultCancunBlobConfig},
+		CancunTime:   newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
+		HaberTime:    newUint64(1780300800),
+		HaberFixTime: newUint64(1780300800),
+		// === T5 (v0.6.0 upgrade): Pascal + Prague + Bohr + Lorentz + Maxwell ===
+		//
+		// Activated by timestamp T5 = 2026-06-03 08:00:00 UTC = unix 1780473600.
+		// See devnet-upgrade-plan.md §3 "Upgrade 5: v0.6.0".
+		//
+		// Field order matches the BSC fork order (Bohr → Pascal → Prague →
+		// Lorentz → Maxwell); CheckConfigForkOrder requires non-decreasing
+		// timestamps, which Bohr=Pascal=Prague(T5) ≤ Lorentz(T5+4h) ≤
+		// Maxwell(T5+8h) satisfies.
+		//   - Pascal: EIP-7623 (calldata cost)
+		//   - Prague: EIP-7702 (EOA delegation), EIP-2537 (BLS12-381 precompile)
+		//   - Bohr:   no-op on ABCore — getTurnLength() returns 1 when turnLength==0,
+		//             same as pre-Bohr; kept on the main path to match upstream
+		//             fork order. Only visible change: a 1-byte turnLength(=1)
+		//             appended to epoch-block header.extra.
+		//   - Lorentz/Maxwell: Parlia epoch length 200 → 500 → 1000 BLOCKS (not a
+		//             block-interval change — interval stays 3s, see
+		//             protocol_params.go). The snapshot.go auto-promotion needs the
+		//             chain to cross a block where number % newEpochLength == 0
+		//             after the fork time, so we stagger them 4h apart (devnet uses
+		//             a shortened window vs the plan's +1d/+7d) to observe each
+		//             promotion (200→500, then 500→1000) separately.
+		PascalTime:  newUint64(1780473600), // 2026-06-03 08:00:00 UTC (T5)
+		PragueTime:  newUint64(1780473600), // T5
+		BohrTime:    newUint64(1780473600), // T5
+		LorentzTime: newUint64(1780488000), // T5+4h = 2026-06-03 12:00:00 UTC — epoch 200→500
+		MaxwellTime: newUint64(1780502400), // T5+8h = 2026-06-03 16:00:00 UTC — epoch 500→1000
+		// Prague entry is REQUIRED once PragueTime is set, otherwise
+		// CheckConfigForkOrder fails at startup with `invalid chain configuration:
+		// missing entry for fork "prague" in blobSchedule` (same as Cancun at T4).
+		// BSC keeps Prague's blob params identical to Cancun (Target 3 / Max 6) via
+		// DefaultPragueBlobConfigBSC — NOT the ETH-mainnet DefaultPragueBlobConfig
+		// (Target 6 / Max 9). chapel/bsc configs use the BSC variant; we match them.
+		BlobScheduleConfig: &BlobScheduleConfig{
+			Cancun: DefaultCancunBlobConfig,
+			Prague: DefaultPragueBlobConfigBSC,
+		},
 		ParliaGenesisBlock: big.NewInt(2400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength

@@ -824,14 +824,22 @@ cast send --blob --rpc-url http://rpc-0:8545 ...
 
 ### Upgrade 5：v0.6.0 — Prague + Pascal + Lorentz + Maxwell + Bohr
 
-**params/config.go 修改：**
+**params/config.go 修改（模板，T5 为整点 UTC 时间戳）：**
 ```go
 PascalTime:  newUint64(T5),
 PragueTime:  newUint64(T5),
 BohrTime:    newUint64(T5),
 LorentzTime: newUint64(T5 + 86400),    // +1 天，epoch 200 → 500
 MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
+// 注：PragueTime 一旦设置，BlobScheduleConfig 必须新增 Prague 条目
+// （BSC 用 DefaultPragueBlobConfigBSC == Cancun 的 Target3/Max6），否则
+// CheckConfigForkOrder 启动即报 `missing entry for fork "prague" in blobSchedule`。
 ```
+
+> **DevNet 实测采用值（2026-06-03，缩短窗口）**：`ABCoreDevnetChainConfig` 实际设
+> `Pascal = Prague = Bohr = 1780473600`（**2026-06-03 08:00 UTC = T5**）、
+> `Lorentz = 1780488000`（**T5+4h**，epoch 200→500）、`Maxwell = 1780502400`（**T5+8h**，epoch 500→1000）。
+> DevNet 把 Lorentz/Maxwell 偏移从模板的 +1天/+7天压缩到 +4h/+8h（4h≈4800 块 ≫ 500/1000，足够跨过新 epoch 边界观察 promotion），以便当天内跑完 epoch 200→500→1000 两次切换的验证。Testnet/Mainnet 仍按模板的保守偏移。
 
 > **LorentzTime / MaxwellTime 的 epoch 切换行为**：时间戳激活与 epoch boundary 不对齐。Lorentz/Maxwell 激活后，代码按新 epoch 长度（500/1000）重新计算 `blockNumber % epoch`。若在旧 epoch 中途激活，首个新 epoch block 的实际位置取决于实现（通常为激活后第一个满足新 epoch 条件的块），不一定是直觉上的整数倍块高。**验收标准**：激活后第一个 epoch block 的 validator set 轮换正常（无 missed slot 异常），且后续 epoch boundary 间隔为 500/1000 块。建议选整点 UTC 时间戳减少对齐偏差。
 
@@ -901,7 +909,7 @@ BlobScheduleConfig: &BlobScheduleConfig{
 | 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 计划值 6000）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
 | 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
-| 5 | v0.6.0 | Prague + Pascal + Bohr = T5；Lorentz = T5+1d；Maxwell = T5+7d | 时间戳（binary 中硬编码）| Maxwell 后 48h 才算完整观察；出块速度不变 | ≥ 9 天 |
+| 5 | v0.6.0 | Prague + Pascal + Bohr = T5（devnet 实测 T5=2026-06-03 08:00 UTC=1780473600）；Lorentz = T5+4h（1780488000）；Maxwell = T5+8h（1780502400）。模板偏移为 +1d/+7d，devnet 缩短为 +4h/+8h | 时间戳（binary 中硬编码）| Prague 需 BlobScheduleConfig.Prague；epoch 200→500→1000；出块速度不变 | devnet ~1 天（模板 ≥9 天）|
 | 6 | v0.7.0 | Fermi + Osaka + Mendel = T6 | 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
 
 > 真正"可选"且暂未规划的 fork（BPO1 / BPO2 / Amsterdam / Pasteur）见文末附录。
