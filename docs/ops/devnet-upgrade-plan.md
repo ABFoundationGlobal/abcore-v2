@@ -106,7 +106,7 @@ server-1 升级示例：
 | 共识（初始）| Clique PoA |
 | Clique Period | 3s（与 mainnet 一致）|
 | Clique Epoch | 30000 |
-| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 2400（2026-05-26 reset 后）|
+| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 2400（2026-05-28 reset re-run 后；PGB 与 05-26 那次相同，但 05-26 已卡死，存活链是 05-28）|
 
 ### 系统合约字节码路由
 
@@ -271,7 +271,7 @@ FermiTime + OsakaTime + MendelTime                        — v0.7.0 (T6)
 **关于 Parlia epoch 长度**（PR #103 后已对齐 BSC 上游）：
 ABCore Parlia `Parlia.Epoch = 200`（与 BSC mainnet `defaultEpochLength` 一致）。PGB reseed 时 `Parlia.snapshot()` 读 `chainConfig.Parlia.Epoch`，fallback 到 `defaultEpochLength=200`，**不再从 `Clique.Epoch=30000` 拷贝**。Lorentz/Maxwell 激活时 200→500→1000 的自动 promotion（`snapshot.go` 的 `apply()`）现在可以正确触发。
 
-**实测验证**（devnet post-reset 2026-05-26）：PGB=2400 (197B, IsOnParliaGenesis 路径)、block 2600/2800/... 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)，epoch interval = 200 块。
+**实测验证**（最近一次 reset，2026-05-28 re-run）：PGB=2400 (197B, IsOnParliaGenesis 路径)、block 2600/2800/... 都是 197B Parlia epoch block (32 vanity + 5×20 validators + 65 seal)，epoch interval = 200 块。
 
 **v0.3.0 升级真正验证什么**：
 - ✓ EIP-1559 header schema（block M 起带 `baseFeePerGas` 字段，值=`0x0` 是 BSC Parlia 规范，`InitialBaseFeeForBSC = 0`）
@@ -430,7 +430,7 @@ DevNet 2026-05-14 cutover 验证过这套补救流程，约 1 分钟完成 2400 
 
 **params/config.go 修改：**
 ```go
-// N = 2400（devnet 实测值，2026-05-26 reset 后）
+// N = 2400（devnet 实测值，2026-05-28 reset re-run 后；与 05-26 那次相同）
 // 选址要求：(a) head + ≥1h safety margin；(b) 200 grid 对齐属运维约定（非协议要求），
 // 因为 PGB 通过 IsOnParliaGenesis 路径已被强制视为 epoch boundary。
 // 实际值须在执行前根据当前链高度重新设定。
@@ -517,7 +517,7 @@ eth.getBlock(0).hash
 
 **params/config.go 修改（**M 为示例值，须在执行前根据实际链高度重新设定**；建议 M 满足：(a) ≥ N + 28800 块（≥ 24h 观察窗口 @ 3s），(b) M mod 200 = 0（epoch boundary），这样 Luban extraData 变更在 M 自己生效）：**
 ```go
-// M = 3600（devnet 实测值，2026-05-26 reset 设定；= N(2400) + 1200 = reset + 3h，
+// M = 3600（devnet 实测值，2026-05-28 reset re-run；与 05-26 那次相同；= N(2400) + 1200 = reset + 3h，
 // **故意短于 ≥24h 推荐窗口**，这是 devnet rehearsal pacing demo，testnet/mainnet
 // 不要复制这个 gap。3600 mod 200 = 0 满足 epoch boundary 要求）
 // 实际值须在执行前根据当前链高度重新设定
@@ -931,9 +931,9 @@ BlobScheduleConfig: &BlobScheduleConfig{
 
 | # | 版本 | Fork 内容 | 激活方式 | 特殊操作 | 观察窗口 |
 |---|------|-----------|----------|----------|---------|
-| 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 2400，2026-05-26 reset）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
-| 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 实测值 3600，2026-05-26 reset）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3（devnet 实测 T3=2026-05-26 08:00 UTC）| 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
+| 1 | v0.2.0 | ParliaGenesisBlock = N（devnet 实测值 2400，2026-05-28 reset re-run）| 块高 | bootstrap 自动；snapshot restore drill；完整 Parlia 验证 | ≥ 24h（≈ 28800 块 @ 3s）|
+| 2 | v0.3.0 | London + 13 BSC block forks = M（devnet 实测值 3600，2026-05-28 reset re-run）| 块高 | Luban extraData 验证（M 选在 200 倍数上时，M 自己就是首个 Luban-form epoch block）| ≥ 48h |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3（devnet 实测 T3=2026-05-28 08:00 UTC，由 #114 从 05-26 重设）| 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5（devnet 实测 T5=2026-06-03 08:00 UTC=1780473600）；Lorentz = T5+4h（1780488000）；Maxwell = T5+8h（1780502400）。模板偏移为 +1d/+7d，devnet 缩短为 +4h/+8h | 时间戳（binary 中硬编码）| Prague 需 BlobScheduleConfig.Prague；epoch 200→500→1000；出块速度不变 | devnet ~1 天（模板 ≥9 天）|
 | 6 | v0.7.0 | Fermi + Osaka + Mendel = T6（devnet 实测 T6=2026-06-05 08:00 UTC=1780646400）| 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
@@ -1574,9 +1574,9 @@ T3 仍保持 breathe 对齐：`T3 % 86400 = 28800`，Feynman 在 2026-05-28 00:0
 
 **操作**：`Jenkinsfile.init RESET=true`（v1 起 Clique，顺带 reset block explorer，见 devnet-ops#13）→ 立即 `Jenkinsfile.rolling TAG=<新 v2 image，从含 #113+#114 的 master build>`（T1 前完成）→ T3 后 `Jenkinsfile.register-validators`（16h 窗口）。
 
-**预期**：这次 2026-05-29 00:00 UTC 的第一个 breathe block **不再卡死**（`validatorExtraSet` 已在 `init()` 初始化）。这是本次 reset 的关键验证点。
+**关键验证点**：2026-05-29 00:00 UTC 的第一个 breathe block 不能再卡死（`validatorExtraSet` 已在 `init()` 初始化）。
 
-**待执行**：reset 后按上述验证清单确认；breathe block 通过后补充实际结果到本节。
+**结果 ✅**：reset 后链稳定运行，第一个 breathe block 顺利通过，未再出现 `validatorExtraSet` 越界停摆；其后跨过 epoch 边界、fast finality 正常（详见下方 Upgrade 4 段的链上实测）。本次 bytecode-fix re-run 的目标达成,05-28 fourth pass 即当前存活链。
 
 ### Upgrade 4：v0.5.0 — Cancun + Haber + HaberFix（2026-06-01 T4）— 成功 ✅
 
