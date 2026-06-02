@@ -64,8 +64,11 @@ for i in $(seq 1 "$NUM_VALIDATORS"); do
 
     echo -e "${YELLOW}==> validator-$i: generating BLS keypair...${NC}"
 
-    # Skip if already present (idempotent re-runs).
-    if [ -f "$VAL_DIR/bls-pubkey.txt" ] && [ -d "$VAL_DIR/bls/wallet" ]; then
+    # Skip if already present (idempotent re-runs). Require all three artifacts —
+    # wallet, pubkey AND proof — so a run interrupted after `bls account new` but
+    # before bls-proof.txt is written is regenerated rather than silently skipped
+    # (a missing proof would later be passed empty to createValidator and rejected).
+    if [ -f "$VAL_DIR/bls-pubkey.txt" ] && [ -f "$VAL_DIR/bls-proof.txt" ] && [ -d "$VAL_DIR/bls/wallet" ]; then
         echo -e "  ${GREEN}BLS keys already exist — skipping${NC}"
         continue
     fi

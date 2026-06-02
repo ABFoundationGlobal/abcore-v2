@@ -42,7 +42,7 @@ NUM_VALIDATORS=$(ls -d "$DATA_DIR"/validator-* 2>/dev/null | wc -l)
 # set at the epoch boundary, so fewer than 3 stalls past block 200 (the chain
 # must cross that boundary to activate voteAddress). 3 also reaches the BLS
 # quorum ceil(2*3/3)=2. See 01-setup.sh / README for the full rationale.
-[ "$NUM_VALIDATORS" -ge 1 ] || { echo -e "${RED}No validators found — run ./01-setup.sh${NC}"; exit 1; }
+[ "$NUM_VALIDATORS" -ge 3 ] || { echo -e "${RED}Need 3 baked validators (got ${NUM_VALIDATORS}); fewer stalls past block 200 and can't reach BLS quorum — run ./01-setup.sh${NC}"; exit 1; }
 
 echo -e "${GREEN}=== Starting ${NUM_VALIDATORS} validators with --vote (breathe=${BREATHE_INTERVAL}s) ===${NC}"
 
