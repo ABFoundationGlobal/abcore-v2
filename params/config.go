@@ -549,21 +549,21 @@ var (
 		CancunTime:   newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
 		HaberTime:    newUint64(1780300800),
 		HaberFixTime: newUint64(1780300800),
-		// === T5 (v0.6.0 upgrade): Pascal + Prague + Bohr + Lorentz + Maxwell ===
+		// === T5 (v0.6.0 upgrade): Bohr + Pascal + Prague + Lorentz + Maxwell ===
 		//
 		// Activated by timestamp T5 = 2026-06-03 08:00:00 UTC = unix 1780473600.
 		// See devnet-upgrade-plan.md §3 "Upgrade 5: v0.6.0".
 		//
-		// Field order matches the BSC fork order (Bohr → Pascal → Prague →
-		// Lorentz → Maxwell); CheckConfigForkOrder requires non-decreasing
-		// timestamps, which Bohr=Pascal=Prague(T5) ≤ Lorentz(T5+4h) ≤
-		// Maxwell(T5+8h) satisfies.
-		//   - Pascal: EIP-7623 (calldata cost)
-		//   - Prague: EIP-7702 (EOA delegation), EIP-2537 (BLS12-381 precompile)
+		// Assignments are ordered by the BSC fork order (Bohr → Pascal → Prague →
+		// Lorentz → Maxwell), matching the ChainConfig struct field order.
+		// CheckConfigForkOrder requires non-decreasing timestamps, which
+		// Bohr=Pascal=Prague(T5) ≤ Lorentz(T5+4h) ≤ Maxwell(T5+8h) satisfies.
 		//   - Bohr:   no-op on ABCore — getTurnLength() returns 1 when turnLength==0,
 		//             same as pre-Bohr; kept on the main path to match upstream
 		//             fork order. Only visible change: a 1-byte turnLength(=1)
 		//             appended to epoch-block header.extra.
+		//   - Pascal: EIP-7623 (calldata cost)
+		//   - Prague: EIP-7702 (EOA delegation), EIP-2537 (BLS12-381 precompile)
 		//   - Lorentz/Maxwell: Parlia epoch length 200 → 500 → 1000 BLOCKS (not a
 		//             block-interval change — interval stays 3s, see
 		//             protocol_params.go). The snapshot.go auto-promotion needs the
@@ -571,9 +571,9 @@ var (
 		//             after the fork time, so we stagger them 4h apart (devnet uses
 		//             a shortened window vs the plan's +1d/+7d) to observe each
 		//             promotion (200→500, then 500→1000) separately.
-		PascalTime:  newUint64(1780473600), // 2026-06-03 08:00:00 UTC (T5)
+		BohrTime:    newUint64(1780473600), // 2026-06-03 08:00:00 UTC (T5)
+		PascalTime:  newUint64(1780473600), // T5
 		PragueTime:  newUint64(1780473600), // T5
-		BohrTime:    newUint64(1780473600), // T5
 		LorentzTime: newUint64(1780488000), // T5+4h = 2026-06-03 12:00:00 UTC — epoch 200→500
 		MaxwellTime: newUint64(1780502400), // T5+8h = 2026-06-03 16:00:00 UTC — epoch 500→1000
 		// Prague entry is REQUIRED once PragueTime is set, otherwise
