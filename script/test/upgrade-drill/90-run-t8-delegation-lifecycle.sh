@@ -754,7 +754,11 @@ except Exception:
     print(0)
 " 2>/dev/null || echo "0")
   log "  pendingUnbondRequest(val1) after claim: ${pending_after}"
-  ok "T-8.f: pendingUnbondRequest count after claim = ${pending_after}"
+  if [[ "$pending_after" -eq 0 ]]; then
+    ok "T-8.f: pendingUnbondRequest(val1) == 0 after claim (request consumed)"
+  else
+    fail "T-8.f: pendingUnbondRequest(val1) == ${pending_after} after claim, expected 0"
+  fi
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

@@ -3,15 +3,14 @@
 # 89-run-t7-stakehub-lifecycle.sh — T-7: StakeHub validator lifecycle
 #
 # T-7.a  editCommissionRate: stateDiff dry-run overriding val1.updateTime=0 so the
-#         1-day cooldown appears elapsed; verifies the function succeeds.
+#         BREATHE_BLOCK_INTERVAL (5 s) cooldown appears elapsed; verifies the function succeeds.
 # T-7.b  editDescription: same stateDiff technique; verifies function succeeds.
 # T-7.c  editConsensusAddress: stateDiff dry-run (real tx omitted — would break
 #         parlia block signing since geth continues signing with the original key).
 # T-7.d  validator info query suite: read-only queries for all 3 validators.
 # T-7.e  Node ID management: addNodeIDs / removeNodeIDs / getNodeIDs round-trip.
-# T-7.f  UpdateTooFrequently enforcement: direct call without stateDiff override
-#         must revert — BREATHE_BLOCK_INTERVAL = 1 day and createValidator set
-#         updateTime recently, so the cooldown is still active.
+# T-7.f  UpdateTooFrequently enforcement: stateDiff sets updateTime=now to simulate
+#         a just-done edit, then verifies the next call reverts with UpdateTooFrequently.
 #
 # Prerequisites:
 #   - U-3 (82-run-u3-shanghai-feynman.sh) completed; all 3 nodes running.
@@ -282,7 +281,8 @@ for _map_slot in $(seq 40 130); do
         _probe="0x$(python3 -c "print(format((int('${_struct_hex}',16)+${_offset})%2**256,'064x'))")"
         _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${_probe}\":\"0x$(printf '%064x' 0)\"}}}"
         _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
-        if [[ "$_res" != "error:"* && "$_res" != "0x" ]]; then
+        # editCommissionRate is void; geth returns "0x" on success — accept that too
+        if [[ "$_res" != "error:"* ]]; then
           UPDATE_TIME_SLOT="$_probe"
           log "  updateTime slot found at struct offset ${_offset}: ${_probe}"
           break 2
