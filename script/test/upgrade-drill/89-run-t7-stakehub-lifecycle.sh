@@ -374,9 +374,14 @@ log "── T-7.f: UpdateTooFrequently enforcement ─────────�
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
   fail "T-7.f: updateTime slot not found — storage layout may have shifted"
 else
-  # Set updateTime = current block.timestamp so cooldown is active
+  # Set updateTime = current_ts + 1000 (far-future relative to now).
+  # Using just current_ts would race: eth_call runs a few seconds later, by which
+  # time block.timestamp > updateTime + BREATHE_BLOCK_INTERVAL and the check
+  # passes instead of reverting.  The +1000 buffer ensures the cooldown is still
+  # active regardless of BREATHE_BLOCK_INTERVAL value or machine speed.
   _cur_ts=$(attach_exec "$GETH" "$IPC1" "eth.getBlock('latest').timestamp" 2>/dev/null | tr -d '"')
-  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' ${_cur_ts:-0})\"}}}"
+  _future_ts=$(( ${_cur_ts:-0} + 1000 ))
+  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' ${_future_ts})\"}}}"
 
   _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
