@@ -170,7 +170,26 @@ send_tx_wait() {
       return 1
     fi
   done
-  log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2; return 1
+  log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2
+  # Dump txpool diagnostics to help identify why the tx was not included
+  local nonce_l nonce_p pool_s pool_c
+  nonce_l=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','latest')"  2>/dev/null | tr -d '"' || echo "err")
+  nonce_p=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','pending')" 2>/dev/null | tr -d '"' || echo "err")
+  pool_s=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var s=txpool.status();return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  pool_c=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var c=txpool.content();var a='${from_addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  local tx_info
+  tx_info=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var t=eth.getTransactionByHash('${tx}');return t?JSON.stringify({nonce:t.nonce,blockNumber:t.blockNumber}):'null';})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  log "  [DEBUG] nonce_latest=${nonce_l}  nonce_pending=${nonce_p}" >&2
+  log "  [DEBUG] txByHash=${tx_info}" >&2
+  log "  [DEBUG] txpool.status=${pool_s}" >&2
+  log "  [DEBUG] txpool.content[${from_addr:0:10}...]=${pool_c}" >&2
+  return 1
 }
 
 # Query BSCGovernor.state(proposalId); returns decimal integer
