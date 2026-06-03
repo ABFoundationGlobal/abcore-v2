@@ -693,10 +693,10 @@ else
   fail "T-8.f: claimableUnbondRequest(val1) still 0 after 40 s — unbondPeriod not elapsed?"
 fi
 
-# Record val1 BNB balance before claim
-bal_before=$(attach_exec "$GETH" "$IPC1" \
-  "web3.fromWei(eth.getBalance('${VAL1}'),'ether')" 2>/dev/null || echo "0")
-log "  val1 ETH balance before claim: ${bal_before} BNB"
+# Record val1 balance in wei before claim (avoid ether float drift from block rewards)
+bal_before_wei=$(attach_exec "$GETH" "$IPC1" \
+  "eth.getBalance('${VAL1}')" 2>/dev/null | tr -d '"' || echo "0")
+log "  val1 balance before claim: ${bal_before_wei} wei"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
 claim_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 500000 \
@@ -710,35 +710,45 @@ if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
 fi
 
 if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-  # Verify BNB balance increased
-  bal_after=$(attach_exec "$GETH" "$IPC1" \
-    "web3.fromWei(eth.getBalance('${VAL1}'),'ether')" 2>/dev/null || echo "0")
-  log "  val1 ETH balance after claim: ${bal_after} BNB"
-  balance_increased=$(python3 -c "
-before = float('${bal_before}') if '${bal_before}' != '0' else 0.0
-after  = float('${bal_after}')  if '${bal_after}'  != '0' else 0.0
-print('true' if after > before else 'false')
-" 2>/dev/null || echo "false")
-  if [[ "$balance_increased" == "true" ]]; then
-    ok "T-8.f: val1 BNB balance increased after claimBatch (${bal_before} → ${bal_after})"
-  else
-    fail "T-8.f: val1 BNB balance did not increase (${bal_before} → ${bal_after})"
-  fi
-
-  # Verify Claimed event was emitted
+  # Verify Claimed event was emitted and extract the claimed amount
   blk_before_hex=$(printf '0x%x' "$blk_before")
   blk_after_hex=$(printf '0x%x' "$blk_after")
   claimed_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_CLAIMED" "$blk_before_hex" "$blk_after_hex")
-  _t8f_ev=0
-  python3 - <<PYEOF 2>/dev/null || _t8f_ev=$?
+  claimed_amount=$(python3 -c "
 import json, sys
 logs = json.loads('''${claimed_logs}''')
-if not logs: print("no Claimed event found", file=sys.stderr); sys.exit(1)
-PYEOF
-  if [[ "$_t8f_ev" -eq 0 ]]; then
-    ok "T-8.f: Claimed event emitted"
+if not logs: print(0); sys.exit(0)
+# Claimed(address operatorAddress, address delegator, uint256 bnbAmount)
+# bnbAmount is in the last 32 bytes of log.data
+try:
+    data = bytes.fromhex(logs[0]['data'].replace('0x',''))
+    print(int.from_bytes(data[-32:], 'big'))
+except Exception:
+    print(0)
+" 2>/dev/null || echo "0")
+  if [[ "$claimed_amount" -gt 0 ]]; then
+    ok "T-8.f: Claimed event emitted (amount=${claimed_amount} wei)"
   else
-    fail "T-8.f: Claimed event missing"
+    fail "T-8.f: Claimed event missing or zero amount"
+  fi
+
+  # Verify balance increase matches claimed amount (minus gas, so use >= 90% threshold)
+  bal_after_wei=$(attach_exec "$GETH" "$IPC1" \
+    "eth.getBalance('${VAL1}')" 2>/dev/null | tr -d '"' || echo "0")
+  log "  val1 balance after claim: ${bal_after_wei} wei"
+  balance_check=$(python3 -c "
+before = int('${bal_before_wei}') if '${bal_before_wei}' else 0
+after  = int('${bal_after_wei}')  if '${bal_after_wei}'  else 0
+claimed = int('${claimed_amount}') if '${claimed_amount}' else 0
+delta  = after - before
+# Balance must have increased by at least 90% of claimed amount (gas cost is << claimed)
+ok = delta >= claimed * 9 // 10
+print('true' if ok else f'false (delta={delta} claimed={claimed})')
+" 2>/dev/null || echo "false")
+  if [[ "$balance_check" == "true" ]]; then
+    ok "T-8.f: val1 balance increased by ~claimed amount (${bal_before_wei}→${bal_after_wei}, claimed=${claimed_amount} wei)"
+  else
+    fail "T-8.f: balance delta does not match claimed amount: ${balance_check}"
   fi
 
   # Verify pending unbond count dropped

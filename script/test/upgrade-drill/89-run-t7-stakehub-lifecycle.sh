@@ -293,8 +293,12 @@ for _map_slot in $(seq 40 130); do
   fi
 done
 
+# A missing slot means the contract storage layout has shifted or the probe
+# range is wrong — treat it as a hard failure so the gap is never invisible.
+_UPDATE_TIME_SLOT_MISSING=0
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  NOTE: updateTime slot not found — T-7.a/b/c/f will be skipped"
+  log "  WARN: updateTime slot not found — T-7.a/b/c/f will FAIL (storage layout may have shifted)"
+  _UPDATE_TIME_SLOT_MISSING=1
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,10 +310,11 @@ log "── T-7.a: editCommissionRate (stateDiff dry-run) ───────�
 log "  current commission: rate=${current_rate}  maxRate=${max_rate}  maxChangeRate=${max_change}"
 log "  target rate: ${new_commission_rate}"
 
-if [[ "$new_commission_rate" == "$current_rate" || -z "$UPDATE_TIME_SLOT" ]]; then
-  [[ -z "$UPDATE_TIME_SLOT" ]] && log "  NOTE T-7.a: updateTime slot not found; skipping" \
-                               || log "  NOTE T-7.a: maxChangeRate=0 or no room to move"
-  ok "T-7.a: editCommissionRate skipped"
+if [[ -n "$UPDATE_TIME_SLOT" && "$new_commission_rate" == "$current_rate" ]]; then
+  log "  NOTE T-7.a: maxChangeRate=0 or no room to move"
+  ok "T-7.a: editCommissionRate skipped (maxChangeRate constraint)"
+elif [[ -z "$UPDATE_TIME_SLOT" ]]; then
+  fail "T-7.a: updateTime slot not found — storage layout may have shifted"
 else
   _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
   _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
@@ -345,8 +350,7 @@ print('0x'+sel+p32(0x20)+heads+''.join(bodies))
 ")
 
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  NOTE T-7.b: updateTime slot not found; skipping stateDiff test"
-  ok "T-7.b: editDescription skipped (updateTime slot not found)"
+  fail "T-7.b: updateTime slot not found — storage layout may have shifted"
 else
   _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
   _res=$(eth_call_with_state "$STAKE_HUB" "$edit_desc_data" "$VAL1" "$_state")
@@ -368,8 +372,7 @@ log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
 
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  NOTE T-7.f: updateTime slot not found; skipping"
-  ok "T-7.f: UpdateTooFrequently enforcement skipped (updateTime slot not found)"
+  fail "T-7.f: updateTime slot not found — storage layout may have shifted"
 else
   # Set updateTime = current block.timestamp so cooldown is active
   _cur_ts=$(attach_exec "$GETH" "$IPC1" "eth.getBlock('latest').timestamp" 2>/dev/null | tr -d '"')
@@ -416,8 +419,7 @@ TEST_NEW_CONSENSUS_PAD=$(printf '%064s' "${TEST_NEW_CONSENSUS#0x}" | tr '[:upper
 edit_consensus_data="0x${SEL_EDIT_CONSENSUS}${TEST_NEW_CONSENSUS_PAD}"
 
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  NOTE T-7.c: updateTime slot not found; skipping stateDiff test"
-  ok "T-7.c: editConsensusAddress skipped (updateTime slot not found)"
+  fail "T-7.c: updateTime slot not found — storage layout may have shifted"
 else
   _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
   _res=$(eth_call_with_state "$STAKE_HUB" "$edit_consensus_data" "$VAL1" "$_state")
