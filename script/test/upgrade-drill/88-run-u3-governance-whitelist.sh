@@ -357,10 +357,23 @@ print(build('${SEL_EXECUTE}'))
   log "${label}: waiting for BSCTimelock delay (3 s)..."
   sleep 10
 
-  # ── execute ──
+  # ── execute (with one retry in case the tx is transiently dropped) ──
+  # In P2P test networks a tx can occasionally fail to propagate to the block
+  # producers' mempools and time out without being mined.  Re-submitting once
+  # (with the same data) is sufficient to recover.
   log ""
   log "${label}: executing proposal"
-  LAST_EXEC_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 1000000 "$execute_data" "${label}:execute()") || return 1
+  _exec_attempts=0
+  while true; do
+    _exec_attempts=$(( _exec_attempts + 1 ))
+    LAST_EXEC_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 1000000 "$execute_data" "${label}:execute()") && break
+    if [[ "$_exec_attempts" -ge 2 ]]; then
+      log "  FAIL: ${label}: execute() failed after ${_exec_attempts} attempts" >&2
+      return 1
+    fi
+    log "  ${label}: execute() not mined, retrying (attempt ${_exec_attempts})..."
+    sleep 3
+  done
   ok "${label}: execute() mined"
 
   cur=$(governor_state "$PROPOSAL_ID_HEX")
