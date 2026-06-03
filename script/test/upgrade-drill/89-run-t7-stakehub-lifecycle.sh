@@ -364,9 +364,11 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.f — UpdateTooFrequently enforcement
 # BREATHE_BLOCK_INTERVAL = 5 s; by the time T-7.f runs (minutes after U-3),
-# the real updateTime cooldown has long expired.  Instead we use stateDiff to
-# set updateTime = current block.timestamp, simulating a just-done edit, then
-# verify the call reverts with UpdateTooFrequently.
+# the real updateTime cooldown has long expired.  Use stateDiff to set
+# updateTime = year-2100 timestamp (4102444800 s).  Reading the current
+# block.timestamp from geth is unreliable (format varies: decimal, hex, or
+# BigInt-with-n-suffix); a hardcoded far-future constant is simpler and
+# guaranteed correct: 4102444800 + 5 > any current block.timestamp.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
@@ -374,14 +376,9 @@ log "── T-7.f: UpdateTooFrequently enforcement ─────────�
 if [[ -z "$UPDATE_TIME_SLOT" ]]; then
   fail "T-7.f: updateTime slot not found — storage layout may have shifted"
 else
-  # Set updateTime = current_ts + 1000 (far-future relative to now).
-  # Using just current_ts would race: eth_call runs a few seconds later, by which
-  # time block.timestamp > updateTime + BREATHE_BLOCK_INTERVAL and the check
-  # passes instead of reverting.  The +1000 buffer ensures the cooldown is still
-  # active regardless of BREATHE_BLOCK_INTERVAL value or machine speed.
-  _cur_ts=$(attach_exec "$GETH" "$IPC1" "eth.getBlock('latest').timestamp" 2>/dev/null | tr -d '"')
-  _future_ts=$(( ${_cur_ts:-0} + 1000 ))
-  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' ${_future_ts})\"}}}"
+  # Year-2100 unix timestamp: 4102444800 = 0xF4E24800.
+  # 4102444800 + BREATHE_BLOCK_INTERVAL (5) > any current block.timestamp (~1.75e9)
+  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 4102444800)\"}}}"
 
   _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
