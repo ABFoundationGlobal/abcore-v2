@@ -693,10 +693,12 @@ else
   fail "T-8.f: claimableUnbondRequest(val1) still 0 after 40 s — unbondPeriod not elapsed?"
 fi
 
-# Record val1 balance in wei before claim (avoid ether float drift from block rewards)
-bal_before_wei=$(attach_exec "$GETH" "$IPC1" \
-  "eth.getBalance('${VAL1}')" 2>/dev/null | tr -d '"' || echo "0")
-log "  val1 balance before claim: ${bal_before_wei} wei"
+# Record val1 balance as hex to avoid JS scientific-notation precision loss.
+# eth.getBalance() returns e.g. 9.97e+23 for large balances in JS Number (only
+# ~15 significant digits); web3.toHex() gives the exact big-integer hex string.
+bal_before_hex=$(attach_exec "$GETH" "$IPC1" \
+  "web3.toHex(eth.getBalance('${VAL1}'))" 2>/dev/null | tr -d '"' || echo "0x0")
+log "  val1 balance before claim: ${bal_before_hex}"
 
 blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
 claim_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 500000 \
@@ -733,20 +735,23 @@ except Exception:
   fi
 
   # Verify balance increase matches claimed amount (minus gas, so use >= 90% threshold)
-  bal_after_wei=$(attach_exec "$GETH" "$IPC1" \
-    "eth.getBalance('${VAL1}')" 2>/dev/null | tr -d '"' || echo "0")
-  log "  val1 balance after claim: ${bal_after_wei} wei"
+  bal_after_hex=$(attach_exec "$GETH" "$IPC1" \
+    "web3.toHex(eth.getBalance('${VAL1}'))" 2>/dev/null | tr -d '"' || echo "0x0")
+  log "  val1 balance after claim: ${bal_after_hex}"
   balance_check=$(python3 -c "
-before = int('${bal_before_wei}') if '${bal_before_wei}' else 0
-after  = int('${bal_after_wei}')  if '${bal_after_wei}'  else 0
+def parse(s):
+    s = (s or '0').strip().strip('\"')
+    return int(s, 16) if s.startswith('0x') else int(s)
+before  = parse('${bal_before_hex}')
+after   = parse('${bal_after_hex}')
 claimed = int('${claimed_amount}') if '${claimed_amount}' else 0
-delta  = after - before
-# Balance must have increased by at least 90% of claimed amount (gas cost is << claimed)
+delta   = after - before
+# Balance must increase by >= 90% of claimed (gas cost is negligible vs 1 BNB)
 ok = delta >= claimed * 9 // 10
 print('true' if ok else f'false (delta={delta} claimed={claimed})')
 " 2>/dev/null || echo "false")
   if [[ "$balance_check" == "true" ]]; then
-    ok "T-8.f: val1 balance increased by ~claimed amount (${bal_before_wei}→${bal_after_wei}, claimed=${claimed_amount} wei)"
+    ok "T-8.f: val1 balance increased by ~claimed amount (claimed=${claimed_amount} wei)"
   else
     fail "T-8.f: balance delta does not match claimed amount: ${balance_check}"
   fi
