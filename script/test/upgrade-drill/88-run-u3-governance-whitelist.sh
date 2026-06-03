@@ -170,9 +170,34 @@ send_tx_wait() {
       return 1
     fi
   done
+  # tx not mined — check if it was evicted from pool and retry once
+  local _tx_in_pool
+  _tx_in_pool=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+    2>/dev/null || echo "null")
+  if [[ "$_tx_in_pool" == "null" ]]; then
+    log "  ${label}: tx dropped from pool (nonce evicted by system tx) — re-submitting..." >&2
+    tx=$(attach_exec "$GETH" "$ipc" \
+      "eth.sendTransaction({from:'${from_addr}',to:'${to_addr}',value:'${value_hex}',gas:${gas},data:'${data}'})" \
+      2>/dev/null || echo "")
+    if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+      log "  ${label}: re-submitted tx=${tx:0:20}…" >&2
+      for i in $(seq 1 60); do
+        sleep 1
+        status=$(attach_exec "$GETH" "$IPC1" \
+          "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+          2>/dev/null || echo "p")
+        if [[ "$status" == "0x1" || "$status" == "1" ]]; then echo "$tx"; return 0; fi
+        if [[ "$status" == "0x0" || "$status" == "0" ]]; then
+          log "  FAIL: ${label}: re-submitted tx reverted (tx=${tx})" >&2
+          return 1
+        fi
+      done
+    fi
+  fi
   log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2
-  # Dump txpool diagnostics to help identify why the tx was not included
-  local nonce_l nonce_p pool_s pool_c
+  # Dump txpool diagnostics
+  local nonce_l nonce_p pool_s pool_c tx_info
   nonce_l=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','latest')"  2>/dev/null | tr -d '"' || echo "err")
   nonce_p=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','pending')" 2>/dev/null | tr -d '"' || echo "err")
   pool_s=$(attach_exec "$GETH" "$IPC1" \
@@ -181,12 +206,11 @@ send_tx_wait() {
   pool_c=$(attach_exec "$GETH" "$IPC1" \
     "(function(){var c=txpool.content();var a='${from_addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
     2>/dev/null | tr -d '"' || echo "err")
-  local tx_info
   tx_info=$(attach_exec "$GETH" "$IPC1" \
     "(function(){var t=eth.getTransactionByHash('${tx}');return t?JSON.stringify({nonce:t.nonce,blockNumber:t.blockNumber}):'null';})()" \
     2>/dev/null | tr -d '"' || echo "err")
   log "  [DEBUG] nonce_latest=${nonce_l}  nonce_pending=${nonce_p}" >&2
-  log "  [DEBUG] txByHash=${tx_info}" >&2
+  log "  [DEBUG] txByHash=${tx_info}  pool_in=${_tx_in_pool}" >&2
   log "  [DEBUG] txpool.status=${pool_s}" >&2
   log "  [DEBUG] txpool.content[${from_addr:0:10}...]=${pool_c}" >&2
   return 1

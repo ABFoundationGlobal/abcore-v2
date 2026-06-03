@@ -304,6 +304,7 @@ done
 
 log "Sending StakeHub registration transactions..."
 declare -a REG_TX=()
+declare -a REG_CALLDATA=()
 for n in 1 2 3; do
   addr=$(val_addr "$n")
   addr_lower=$(echo "$addr" | tr '[:upper:]' '[:lower:]')
@@ -393,13 +394,20 @@ PY
   fi
   log "    tx=${_tx}"
   REG_TX+=("$_tx")
+  REG_CALLDATA+=("$CALLDATA")
 done
 
-# Wait for registration txs to be mined (poll up to 30s each).
+# Wait for registration txs to be mined (poll up to 30s; retry once if dropped).
+# With breathe_block_interval=5s system transactions run from the sealer's address
+# and increment its nonce.  If the sealer seals a breathe block while our user tx
+# is in the pending pool, the user tx nonce becomes stale and is evicted.
+# Detect this (getTransactionByHash returns null) and re-submit once.
 log "Waiting for registration transactions to be mined..."
 for i in 0 1 2; do
   n=$(( i + 1 ))
   tx="${REG_TX[$i]:-}"
+  calldata="${REG_CALLDATA[$i]:-}"
+  addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
   if [[ -z "$tx" || "$tx" == "null" ]]; then
     fail "validator-${n}: registration tx not sent"
     continue
@@ -412,10 +420,31 @@ for i in 0 1 2; do
     [[ "$_status" == "p" ]] || break
     sleep 1
   done
+  # If still pending, check whether the tx was evicted from the pool (dropped nonce)
+  if [[ "$_status" == "p" ]]; then
+    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc 1)" \
+      "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+      2>/dev/null || echo "null")
+    if [[ "$_tx_in_pool" == "null" && -n "$calldata" ]]; then
+      log "  val${n}: tx dropped (nonce evicted by system tx) — re-submitting with fresh nonce..."
+      tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \
+        "eth.sendTransaction({from:'${addr}',to:'${STAKEHUB}',value:'${TX_VALUE_HEX}',gas:2000000,data:'${calldata}'})" \
+        2>/dev/null || echo "")
+      if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        log "  val${n}: re-submitted tx=${tx}"
+        for _try in $(seq 1 30); do
+          _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+            "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+            2>/dev/null || echo "p")
+          [[ "$_status" == "p" ]] || break
+          sleep 1
+        done
+      fi
+    fi
+  fi
   if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
     pass "validator-${n}: StakeHub registration confirmed (tx=${tx:0:14}…)"
   else
-    addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
     debug_stuck_tx "$addr" "$tx" "registration val${n}"
     fail "validator-${n}: registration tx failed or not mined (status=${_status}, tx=${tx})"
   fi
@@ -434,6 +463,7 @@ _DEL_SEL=$(attach_exec "$GETH" "$IPC1" \
   || die "Failed to compute StakeHub.delegate selector (got: '${_DEL_SEL}')"
 
 DEL_TX=()
+DEL_CALLDATA=()
 for n in 1 2 3; do
   addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
   # ABI-encode delegate(address operatorAddress, bool delegateVotePower)
@@ -450,12 +480,15 @@ for n in 1 2 3; do
   fi
   log "  validator-${n}: delegate tx=${_del_tx}"
   DEL_TX+=("$_del_tx")
+  DEL_CALLDATA+=("$del_calldata")
 done
 
 log "Waiting for delegation transactions to be mined..."
 for i in 0 1 2; do
   n=$(( i + 1 ))
   tx="${DEL_TX[$i]:-}"
+  del_calldata="${DEL_CALLDATA[$i]:-}"
+  addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
   _status="p"
   for _try in $(seq 1 30); do
     _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
@@ -464,10 +497,30 @@ for i in 0 1 2; do
     [[ "$_status" == "p" ]] || break
     sleep 1
   done
+  if [[ "$_status" == "p" ]]; then
+    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc 1)" \
+      "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+      2>/dev/null || echo "null")
+    if [[ "$_tx_in_pool" == "null" && -n "$del_calldata" ]]; then
+      log "  val${n}: delegate tx dropped — re-submitting with fresh nonce..."
+      tx=$(attach_exec "$GETH" "$(val_ipc "$n")" \
+        "eth.sendTransaction({from:'${addr}',to:'${STAKEHUB}',value:'0xde0b6b3a7640000',gas:300000,data:'${del_calldata}'})" \
+        2>/dev/null || echo "")
+      if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        log "  val${n}: re-submitted delegate tx=${tx}"
+        for _try in $(seq 1 30); do
+          _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+            "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+            2>/dev/null || echo "p")
+          [[ "$_status" == "p" ]] || break
+          sleep 1
+        done
+      fi
+    fi
+  fi
   if [[ "$_status" == "0x1" || "$_status" == "1" ]]; then
     pass "validator-${n}: govAB voting power delegated (tx=${tx:0:14}…)"
   else
-    addr=$(val_addr "$n" | tr '[:upper:]' '[:lower:]')
     debug_stuck_tx "$addr" "$tx" "delegation val${n}"
     fail "validator-${n}: delegation tx failed or not mined (status=${_status}, tx=${tx})"
   fi
