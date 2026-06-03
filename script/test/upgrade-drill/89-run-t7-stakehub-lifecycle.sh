@@ -363,14 +363,23 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.f — UpdateTooFrequently enforcement
-# BREATHE_BLOCK_INTERVAL = 1 day.  createValidator (in U-3, minutes ago) sets
-# updateTime = block.timestamp.  Calling editCommissionRate WITHOUT any stateDiff
-# override will hit: updateTime + 86400 > block.timestamp → UpdateTooFrequently.
-# No stateDiff tricks needed; the real cooldown is reliable and timing-agnostic.
+# BREATHE_BLOCK_INTERVAL = 5 s.  By the time T-7.f runs (minutes after U-3)
+# the real cooldown has already expired.  Strategy: send a REAL tx that mines
+# and sets updateTime = block.timestamp(N).  Then immediately call
+# editCommissionRate via eth_call (no real tx) — within 5 s of the real tx,
+# updateTime + 5 > block.timestamp(N+1) is guaranteed, so UpdateTooFrequently fires.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
+log "  Step 1: real editCommissionRate tx to set updateTime = now..."
 
+_t7f_real_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
+  "$edit_commission_data" "T-7.f:editCommissionRate") || {
+  fail "T-7.f: real editCommissionRate tx failed"; _t7f_real_tx=""; }
+
+if [[ "${_t7f_real_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  ok "T-7.f: real editCommissionRate mined (updateTime = now)"
+  log "  Step 2: eth_call editCommissionRate immediately — must hit UpdateTooFrequently within 5s..."
   _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
     --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"${edit_commission_data}\"},\"latest\"],\"id\":1}" \
@@ -385,9 +394,12 @@ if isinstance(data, str) and len(data) >= 10:
 else:
     print('no_data')
 " 2>/dev/null || echo "exception")
+else
+  _t7f_revert_data="real_tx_failed"
+fi
 
 if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
-  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently (1-day cooldown active, selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
+  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently within 5s cooldown (selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
 else
   fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
 fi
