@@ -1,6 +1,6 @@
 genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-genesis_contract_commit: d0c1b8c3cb1ab25bb3f282bd9a0e443f5deb483b
-generated_at:            2026-06-03T07:31:34Z
+genesis_contract_commit: e9ee51692de5c7b11695af7e871db87b7a0b711e
+generated_at:            2026-06-03T09:23:49Z
 
 # Build parameters
 OUTDIR:       default
@@ -18,7 +18,7 @@ GovHubContract                         f2e37b831e1659f40924fde91bc3fb65492c6bf79
 TokenManagerContract                   62388c8e5a130bbda260262ca84199dad9cdcbe595e89a46c008fbcf0c58f647
 CrossChainContract                     9170edceaa3097c2dca7d5a646ed63c0008d709841a96013110d9c29d0cbef3d
 StakingContract                        2182364862c220d0f67355631c7392faa0093f9c24cadca16bb46f5867129d34
-StakeHubContract                       c750b8ef858105b5f8f466261abe91495a97dd02544dca1975de5ed2357048b5
+StakeHubContract                       c83510f7cfd34c8232d28e756a5e408885879ee64f0e49fc484b83772ed7a2ba
 StakeCreditContract                    529987cdd19ff32e40af3bad8882e94f7ed2f7d590ed1594b91f4ac8083988d7
 GovernorContract                       d40b0dc9d934239276384566a3f360b9908d84d73e5202f27bc5c2b00678196b
 GovTokenContract                       8c1cf79032d4d00caf8017f9271fc77db2a15415b155f4f2726f4c4d68097819

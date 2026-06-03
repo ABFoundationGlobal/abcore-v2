@@ -363,32 +363,17 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.f — UpdateTooFrequently enforcement
-# BREATHE_BLOCK_INTERVAL = 5 s; by the time T-7.f runs (minutes after U-3),
-# the real updateTime cooldown has long expired.  Use stateDiff to set
-# updateTime = year-2100 timestamp (4102444800 s).  Reading the current
-# block.timestamp from geth is unreliable (format varies: decimal, hex, or
-# BigInt-with-n-suffix); a hardcoded far-future constant is simpler and
-# guaranteed correct: 4102444800 + 5 > any current block.timestamp.
+# BREATHE_BLOCK_INTERVAL = 1 day.  createValidator (in U-3, minutes ago) sets
+# updateTime = block.timestamp.  Calling editCommissionRate WITHOUT any stateDiff
+# override will hit: updateTime + 86400 > block.timestamp → UpdateTooFrequently.
+# No stateDiff tricks needed; the real cooldown is reliable and timing-agnostic.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
 
-if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  fail "T-7.f: updateTime slot not found — storage layout may have shifted"
-else
-  # Year-2100 unix timestamp: 4102444800 = 0xF4E24800.
-  # 4102444800 + BREATHE_BLOCK_INTERVAL (5) > any current block.timestamp (~1.75e9)
-  _state_t7f="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 4102444800)\"}}}"
-
   _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
     -H 'Content-Type: application/json' \
-    --data "$(python3 -c "
-import json
-print(json.dumps({
-  'jsonrpc':'2.0','method':'eth_call','id':1,
-  'params':[{'to':'${STAKE_HUB}','from':'${VAL1}','data':'${edit_commission_data}'},
-            'latest',${_state_t7f}]
-}))")" \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"${edit_commission_data}\"},\"latest\"],\"id\":1}" \
     2>/dev/null \
     | python3 -c "
 import json, sys
@@ -401,11 +386,10 @@ else:
     print('no_data')
 " 2>/dev/null || echo "exception")
 
-  if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
-    ok "T-7.f: editCommissionRate reverts UpdateTooFrequently (stateDiff updateTime=now, selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
-  else
-    fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
-  fi
+if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
+  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently (1-day cooldown active, selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
+else
+  fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
