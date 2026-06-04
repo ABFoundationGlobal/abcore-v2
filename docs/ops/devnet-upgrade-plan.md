@@ -868,7 +868,7 @@ MaxwellTime: newUint64(T5 + 86400*7),  // +7 天，epoch 500 → 1000
 
 ### Upgrade 6：v0.7.0 — Fermi + Osaka + Mendel
 
-**params/config.go 修改：**
+**params/config.go 修改（模板，T6 为整点 UTC 时间戳）：**
 ```go
 FermiTime:  newUint64(T6),
 OsakaTime:  newUint64(T6),
@@ -878,9 +878,11 @@ MendelTime: newUint64(T6),
 BlobScheduleConfig: &BlobScheduleConfig{
     Cancun: DefaultCancunBlobConfig,
     Prague: DefaultPragueBlobConfigBSC,
-    Osaka:  DefaultOsakaBlobConfigBSC,  // 新增
+    Osaka:  DefaultOsakaBlobConfigBSC,  // 新增；不加则 CheckConfigForkOrder 启动报 missing entry for fork "osaka"
 },
 ```
+
+> **DevNet 实测采用值**：`ABCoreDevnetChainConfig` 实际设 `Fermi = Osaka = Mendel = 1780646400`（**2026-06-05 08:00 UTC = T6**）。T6 > Maxwell（1780502400），fork order 合法。
 
 > **为什么把 Fermi / Osaka / Mendel 合并到一个升级**：BSC 主网 2026-04-28 同一时间戳激活 Osaka + Mendel；Fermi 在 ABCore 上为 no-op（不改变出块速度，见 §1"代码现状"）。三者合并节省一次升级窗口。
 
@@ -910,7 +912,7 @@ BlobScheduleConfig: &BlobScheduleConfig{
 | 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix = T3 | 时间戳（binary 中硬编码）| T3 后 5 个 validator 必须在**下一个 Go 层 breathe block 之前**完成 `createValidator` + `delegate govAB`（窗口 ≤ 24h，取决于 T3 落在 UTC-day 边界何处；详见 §3）| ≥ 48h |
 | 4 | v0.5.0 | Cancun + Haber + HaberFix = T4 | 时间戳（binary 中硬编码）| BlobScheduleConfig 必设；blob tx + header 验证 | ≥ 48h |
 | 5 | v0.6.0 | Prague + Pascal + Bohr = T5（devnet 实测 T5=2026-06-03 08:00 UTC=1780473600）；Lorentz = T5+4h（1780488000）；Maxwell = T5+8h（1780502400）。模板偏移为 +1d/+7d，devnet 缩短为 +4h/+8h | 时间戳（binary 中硬编码）| Prague 需 BlobScheduleConfig.Prague；epoch 200→500→1000；出块速度不变 | devnet ~1 天（模板 ≥9 天）|
-| 6 | v0.7.0 | Fermi + Osaka + Mendel = T6 | 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
+| 6 | v0.7.0 | Fermi + Osaka + Mendel = T6（devnet 实测 T6=2026-06-05 08:00 UTC=1780646400）| 时间戳（binary 中硬编码）| blobSchedule.osaka 必设；出块速度不变 | ≥ 48h |
 
 > 真正"可选"且暂未规划的 fork（BPO1 / BPO2 / Amsterdam / Pasteur）见文末附录。
 

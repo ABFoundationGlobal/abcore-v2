@@ -576,15 +576,33 @@ var (
 		PragueTime:  newUint64(1780473600), // T5
 		LorentzTime: newUint64(1780488000), // T5+4h = 2026-06-03 12:00:00 UTC — epoch 200→500
 		MaxwellTime: newUint64(1780502400), // T5+8h = 2026-06-03 16:00:00 UTC — epoch 500→1000
-		// Prague entry is REQUIRED once PragueTime is set, otherwise
-		// CheckConfigForkOrder fails at startup with `invalid chain configuration:
-		// missing entry for fork "prague" in blobSchedule` (same as Cancun at T4).
-		// BSC keeps Prague's blob params identical to Cancun (Target 3 / Max 6) via
-		// DefaultPragueBlobConfigBSC — NOT the ETH-mainnet DefaultPragueBlobConfig
-		// (Target 6 / Max 9). chapel/bsc configs use the BSC variant; we match them.
+		// === T6 (v0.7.0 upgrade): Fermi + Osaka + Mendel ===
+		//
+		// Activated by timestamp T6 = 2026-06-05 08:00:00 UTC = unix 1780646400.
+		// See devnet-upgrade-plan.md §3 "Upgrade 6: v0.7.0". Field order matches
+		// the BSC fork order (Fermi → Osaka → Mendel); all three at T6, and
+		// T6 > Maxwell, so CheckConfigForkOrder's non-decreasing requirement holds.
+		//   - Fermi:  no-op on ABCore — FermiBlockInterval is overridden to 3000ms
+		//             in protocol_params.go, so block time stays 3s. Activated only
+		//             to keep up with the upstream BSC fork order.
+		//   - Osaka:  BPO (Blob-Parameter-Only) fork — requires a
+		//             BlobScheduleConfig.Osaka entry or CheckConfigForkOrder fails
+		//             at startup (same gate as Cancun@T4 / Prague@T5).
+		//   - Mendel: activates together with Osaka.
+		FermiTime:  newUint64(1780646400), // 2026-06-05 08:00:00 UTC (T6)
+		OsakaTime:  newUint64(1780646400), // T6
+		MendelTime: newUint64(1780646400), // T6
+		// Prague entry is REQUIRED once PragueTime is set; Osaka entry is REQUIRED
+		// once OsakaTime is set — otherwise CheckConfigForkOrder fails at startup
+		// with `invalid chain configuration: missing entry for fork "<fork>" in
+		// blobSchedule` (same as Cancun at T4). BSC keeps Prague's and Osaka's blob
+		// params identical to Cancun (Target 3 / Max 6) via the *BSC variants — NOT
+		// the ETH-mainnet DefaultPragueBlobConfig / DefaultOsakaBlobConfig. chapel/bsc
+		// configs use the BSC variants; we match them.
 		BlobScheduleConfig: &BlobScheduleConfig{
 			Cancun: DefaultCancunBlobConfig,
 			Prague: DefaultPragueBlobConfigBSC,
+			Osaka:  DefaultOsakaBlobConfigBSC,
 		},
 		ParliaGenesisBlock: big.NewInt(2400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
