@@ -2,15 +2,16 @@
 #
 # 89-run-t7-stakehub-lifecycle.sh — T-7: StakeHub validator lifecycle
 #
-# T-7.a  editCommissionRate: stateDiff dry-run overriding val1.updateTime=0 so the
-#         BREATHE_BLOCK_INTERVAL (5 s) cooldown appears elapsed; verifies the function succeeds.
-# T-7.b  editDescription: same stateDiff technique; verifies function succeeds.
-# T-7.c  editConsensusAddress: stateDiff dry-run (real tx omitted — would break
-#         parlia block signing since geth continues signing with the original key).
+# T-7.a  editCommissionRate: real tx; by T-7 time the 5 s BREATHE_BLOCK_INTERVAL
+#         cooldown from createValidator has long expired, so the tx succeeds.
+# T-7.b  editDescription: real tx; sleep 7 s after T-7.a to clear its cooldown.
+# T-7.c  editConsensusAddress: real tx; sleep 7 s after T-7.b then change to a test
+#         address, verify, sleep 7 s, then restore the original address.
 # T-7.d  validator info query suite: read-only queries for all 3 validators.
 # T-7.e  Node ID management: addNodeIDs / removeNodeIDs / getNodeIDs round-trip.
-# T-7.f  UpdateTooFrequently enforcement: stateDiff sets updateTime=now to simulate
-#         a just-done edit, then verifies the next call reverts with UpdateTooFrequently.
+# T-7.f  UpdateTooFrequently enforcement: immediately after T-7.b's real tx (which
+#         sets updateTime = now), eth_call editCommissionRate — within the 5 s window
+#         updateTime + 5 > block.timestamp → UpdateTooFrequently fires.
 #
 # Prerequisites:
 #   - U-3 (82-run-u3-shanghai-feynman.sh) completed; all 3 nodes running.
@@ -217,7 +218,7 @@ log "  Selectors ready."
 
 VAL1_PAD=$(printf '%064s' "${VAL1#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
 
-# ── Read commission info (needed for slot probe with valid rate) ───────────────
+# ── Read commission info ──────────────────────────────────────────────────────
 raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_COMMISSION}${VAL1_PAD}")
 commission_info=$(python3 -c "
 raw = '${raw}'
@@ -240,96 +241,78 @@ if mc==0: print(rate); exit()
 step=min(mc,100)
 print(rate+step if rate+step<=mr else max(0,rate-step))
 " 2>/dev/null || echo "$current_rate")
-
 edit_commission_data=$(python3 -c "
 print('0x'+'${SEL_EDIT_COMMISSION}'+format(int('${new_commission_rate}'),'064x'))
 ")
 
-# ── Discover val1's _validators[val1].updateTime storage slot ─────────────────
-# The stateDiff tests (T-7.a/b/c) override updateTime to 0 to bypass the
-# BREATHE_BLOCK_INTERVAL (5 s) cooldown without sending real txs.  T-7.f sets
-# updateTime to the current timestamp to TRIGGER the cooldown.
-# Strategy: scan mapping base slots 40-120 to find _validators[val1] struct,
-# then probe struct offsets until overriding that slot (with updateTime=0) makes
-# editCommissionRate succeed.  The probe uses the actual target rate so it passes
-# the InvalidCommission check and only hits UpdateTooFrequently.
-log ""
-log "Discovering val1 _validators updateTime storage slot..."
-
+# Read val1's current consensus address (needed to restore after T-7.c)
 raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
-VAL1_CONSENSUS_LOWER="${raw: -40}"
-log "  val1 consensus (for slot probe): 0x${VAL1_CONSENSUS_LOWER}"
-
-UPDATE_TIME_SLOT=""
-_STRUCT_BASE=""
-
-for _map_slot in $(seq 40 130); do
-  _map_slot_hex=$(printf '%064x' "$_map_slot")
-  _struct_hex=$(attach_exec "$GETH" "$IPC1" \
-    "web3.sha3('0x${VAL1_PAD}${_map_slot_hex}',{encoding:'hex'}).slice(2)" 2>/dev/null || true)
-  [[ "$_struct_hex" =~ ^[0-9a-fA-F]{64}$ ]] || continue
-  # Verify: consensusAddress is at struct offset 1
-  _cons_slot="0x$(python3 -c "print(format((int('${_struct_hex}',16)+1)%2**256,'064x'))")"
-  _stored=$(attach_exec "$GETH" "$IPC1" \
-    "eth.getStorageAt('${STAKE_HUB}','${_cons_slot}')" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '"')
-  if [[ "${_stored: -40}" == "${VAL1_CONSENSUS_LOWER}" ]]; then
-    _STRUCT_BASE="$_struct_hex"
-    log "  Found _validators[val1] struct base (mapping slot ${_map_slot})"
-    if [[ "$new_commission_rate" != "$current_rate" ]]; then
-      # Probe each struct offset: override slot to 0, see if editCommissionRate succeeds
-      for _offset in $(seq 6 25); do
-        _probe="0x$(python3 -c "print(format((int('${_struct_hex}',16)+${_offset})%2**256,'064x'))")"
-        _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${_probe}\":\"0x$(printf '%064x' 0)\"}}}"
-        _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
-        # editCommissionRate is void; geth returns "0x" on success — accept that too
-        if [[ "$_res" != "error:"* ]]; then
-          UPDATE_TIME_SLOT="$_probe"
-          log "  updateTime slot found at struct offset ${_offset}: ${_probe}"
-          break 2
-        fi
-      done
-    fi
-    break
-  fi
-done
-
-# A missing slot means the contract storage layout has shifted or the probe
-# range is wrong — treat it as a hard failure so the gap is never invisible.
-_UPDATE_TIME_SLOT_MISSING=0
-if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  log "  WARN: updateTime slot not found — T-7.a/b/c/f will FAIL (storage layout may have shifted)"
-  _UPDATE_TIME_SLOT_MISSING=1
-fi
+VAL1_ORIGINAL_CONSENSUS="0x${raw: -40}"
+log "  val1 current consensus: ${VAL1_ORIGINAL_CONSENSUS}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-7.a — editCommissionRate (stateDiff dry-run, updateTime overridden to 0)
-# commission info and edit_commission_data already computed above for slot probe.
+# T-7.a — editCommissionRate (real tx)
+# The 5 s BREATHE_BLOCK_INTERVAL cooldown from createValidator has expired
+# (createValidator ran minutes ago in U-3).
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-7.a: editCommissionRate (stateDiff dry-run) ────────────────────────────"
+log "── T-7.a: editCommissionRate (real tx) ──────────────────────────────────────"
 log "  current commission: rate=${current_rate}  maxRate=${max_rate}  maxChangeRate=${max_change}"
 log "  target rate: ${new_commission_rate}"
 
-if [[ -n "$UPDATE_TIME_SLOT" && "$new_commission_rate" == "$current_rate" ]]; then
-  log "  NOTE T-7.a: maxChangeRate=0 or no room to move"
+if [[ "$new_commission_rate" == "$current_rate" ]]; then
+  log "  NOTE T-7.a: maxChangeRate=0 or no room to move — skipping"
   ok "T-7.a: editCommissionRate skipped (maxChangeRate constraint)"
-elif [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  fail "T-7.a: updateTime slot not found — storage layout may have shifted"
 else
-  _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
-  _res=$(eth_call_with_state "$STAKE_HUB" "$edit_commission_data" "$VAL1" "$_state")
-  if [[ "$_res" != "error:"* && -n "$_res" ]]; then
-    ok "T-7.a: editCommissionRate stateDiff dry-run succeeded (rate ${current_rate}→${new_commission_rate})"
-  else
-    fail "T-7.a: editCommissionRate stateDiff dry-run failed: '${_res}'"
+  log "  Dry-run editCommissionRate(${new_commission_rate})..."
+  eth_call_debug "$STAKE_HUB" "$edit_commission_data" "$VAL1"
+
+  blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
+  t7a_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
+    "$edit_commission_data" "T-7.a:editCommissionRate") || {
+    fail "T-7.a: editCommissionRate tx failed"; t7a_tx=""; }
+
+  if [[ "${t7a_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    blk_after=$(attach_exec "$GETH" "$IPC1" \
+      "(function(){var r=eth.getTransactionReceipt('${t7a_tx}');return r?r.blockNumber:0;})()" \
+      2>/dev/null || echo "0")
+    # Verify rate updated
+    raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_COMMISSION}${VAL1_PAD}")
+    updated_rate=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x' or len(raw) < 194: print(-1); exit()
+data = bytes.fromhex(raw[2:])
+print(int.from_bytes(data[0:32], 'big'))
+" 2>/dev/null || echo "-1")
+    if [[ "$updated_rate" == "$new_commission_rate" ]]; then
+      ok "T-7.a: getValidatorCommission(val1).rate == ${updated_rate} (updated)"
+    else
+      fail "T-7.a: commission rate expected ${new_commission_rate}, got ${updated_rate}"
+    fi
+    # Verify CommissionRateEdited event
+    blk_before_hex=$(printf '0x%x' "$blk_before")
+    blk_after_hex=$(printf '0x%x' "$blk_after")
+    commission_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_COMMISSION_EDITED" \
+      "$blk_before_hex" "$blk_after_hex")
+    _ev=0
+    python3 - <<PYEOF 2>/dev/null || _ev=$?
+import json, sys
+logs = json.loads('''${commission_logs}''')
+if not logs: print("no CommissionRateEdited event", file=sys.stderr); sys.exit(1)
+PYEOF
+    [[ "$_ev" -eq 0 ]] && ok "T-7.a: CommissionRateEdited event emitted" \
+                        || fail "T-7.a: CommissionRateEdited event missing"
   fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-7.b — editDescription (stateDiff dry-run, updateTime overridden to 0)
+# T-7.b — editDescription (real tx)
+# sleep 7 s to clear the 5 s BREATHE_BLOCK_INTERVAL cooldown set by T-7.a.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-7.b: editDescription (stateDiff dry-run) ───────────────────────────────"
+log "── T-7.b: editDescription (real tx) ────────────────────────────────────────"
+log "  Sleeping 7 s to clear BREATHE_BLOCK_INTERVAL cooldown from T-7.a..."
+sleep 7
 
 EDIT_IDENTITY="abchain-val1"
 EDIT_WEBSITE="https://abchain.local"
@@ -349,42 +332,63 @@ for s in strs:
 print('0x'+sel+p32(0x20)+heads+''.join(bodies))
 ")
 
-if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  fail "T-7.b: updateTime slot not found — storage layout may have shifted"
-else
-  _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
-  _res=$(eth_call_with_state "$STAKE_HUB" "$edit_desc_data" "$VAL1" "$_state")
-  if [[ "$_res" != "error:"* && -n "$_res" ]]; then
-    ok "T-7.b: editDescription stateDiff dry-run succeeded (identity='${EDIT_IDENTITY}')"
-  else
-    fail "T-7.b: editDescription stateDiff dry-run failed: '${_res}'"
-  fi
+blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
+t7b_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 300000 \
+  "$edit_desc_data" "T-7.b:editDescription") || {
+  fail "T-7.b: editDescription tx failed"; t7b_tx=""; }
+
+if [[ "${t7b_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  blk_after=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var r=eth.getTransactionReceipt('${t7b_tx}');return r?r.blockNumber:0;})()" \
+    2>/dev/null || echo "0")
+  # Verify DescriptionEdited event
+  blk_before_hex=$(printf '0x%x' "$blk_before")
+  blk_after_hex=$(printf '0x%x' "$blk_after")
+  desc_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_DESC_EDITED" "$blk_before_hex" "$blk_after_hex")
+  _ev=0
+  python3 - <<PYEOF 2>/dev/null || _ev=$?
+import json, sys
+logs = json.loads('''${desc_logs}''')
+if not logs: print("no DescriptionEdited event", file=sys.stderr); sys.exit(1)
+PYEOF
+  [[ "$_ev" -eq 0 ]] && ok "T-7.b: DescriptionEdited event emitted" \
+                      || fail "T-7.b: DescriptionEdited event missing"
+  # Verify identity field updated
+  raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_DESC}${VAL1_PAD}")
+  identity_got=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x' or len(raw) < 10: print(''); exit()
+data = bytes.fromhex(raw[2:])
+try:
+    outer = int.from_bytes(data[0:32], 'big')
+    base  = outer
+    inner = [int.from_bytes(data[base+i*32:base+(i+1)*32], 'big') for i in range(4)]
+    off   = base + inner[1]
+    length = int.from_bytes(data[off:off+32], 'big')
+    s = data[off+32:off+32+length].decode('utf-8', 'replace') if length > 0 else ''
+    print(s)
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+  [[ "$identity_got" == "$EDIT_IDENTITY" ]] \
+    && ok "T-7.b: getValidatorDescription(val1).identity == '${EDIT_IDENTITY}'" \
+    || fail "T-7.b: identity expected '${EDIT_IDENTITY}', got '${identity_got}'"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.f — UpdateTooFrequently enforcement
-# BREATHE_BLOCK_INTERVAL = 5 s.  By the time T-7.f runs (minutes after U-3)
-# the real cooldown has already expired.  Strategy: send a REAL tx that mines
-# and sets updateTime = block.timestamp(N).  Then immediately call
-# editCommissionRate via eth_call (no real tx) — within 5 s of the real tx,
-# updateTime + 5 > block.timestamp(N+1) is guaranteed, so UpdateTooFrequently fires.
+# T-7.b's real tx set updateTime = block.timestamp(N).  Immediately calling
+# editCommissionRate (no real tx) triggers updateTime + 5 > block.timestamp(N+1).
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-7.f: UpdateTooFrequently enforcement ───────────────────────────────────"
-log "  Step 1: real editCommissionRate tx to set updateTime = now..."
+log "  T-7.b just set updateTime = now; calling editCommissionRate immediately..."
 
-_t7f_real_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
-  "$edit_commission_data" "T-7.f:editCommissionRate") || {
-  fail "T-7.f: real editCommissionRate tx failed"; _t7f_real_tx=""; }
-
-if [[ "${_t7f_real_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-  ok "T-7.f: real editCommissionRate mined (updateTime = now)"
-  log "  Step 2: eth_call editCommissionRate immediately — must hit UpdateTooFrequently within 5s..."
-  _t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
-    -H 'Content-Type: application/json' \
-    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"${edit_commission_data}\"},\"latest\"],\"id\":1}" \
-    2>/dev/null \
-    | python3 -c "
+_t7f_revert_data=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"${edit_commission_data}\"},\"latest\"],\"id\":1}" \
+  2>/dev/null \
+  | python3 -c "
 import json, sys
 resp = json.load(sys.stdin)
 if 'error' not in resp: print('no_revert'); sys.exit(0)
@@ -394,46 +398,59 @@ if isinstance(data, str) and len(data) >= 10:
 else:
     print('no_data')
 " 2>/dev/null || echo "exception")
-else
-  _t7f_revert_data="real_tx_failed"
-fi
 
 if [[ "${_t7f_revert_data,,}" == "${ERR_UPDATE_TOO_FREQUENTLY,,}" ]]; then
-  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently within 5s cooldown (selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
+  ok "T-7.f: editCommissionRate reverts UpdateTooFrequently within 5 s of T-7.b (selector=0x${ERR_UPDATE_TOO_FREQUENTLY})"
 else
   fail "T-7.f: expected UpdateTooFrequently (0x${ERR_UPDATE_TOO_FREQUENTLY}), got '${_t7f_revert_data}'"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-7.c — editConsensusAddress (stateDiff dry-run, updateTime overridden to 0)
-# Real tx omitted: would break parlia block signing until the next breathe block
-# re-elections, since geth continues signing with the original key.
+# T-7.c — editConsensusAddress (real tx + restore)
+# sleep 7 s after T-7.b to clear cooldown.  Change to a test address, verify,
+# sleep 7 s, then restore.  The restore happens before the next breathe block
+# (60 s interval) so the chain is unaffected.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-7.c: editConsensusAddress (stateDiff dry-run) ─────────────────────────"
+log "── T-7.c: editConsensusAddress (real tx + restore) ─────────────────────────"
+log "  Sleeping 7 s to clear BREATHE_BLOCK_INTERVAL cooldown from T-7.b..."
+sleep 7
 
 TEST_NEW_CONSENSUS="0xdeadc0de00000000000000000000000000000001"
 TEST_NEW_CONSENSUS_PAD=$(printf '%064s' "${TEST_NEW_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
 edit_consensus_data="0x${SEL_EDIT_CONSENSUS}${TEST_NEW_CONSENSUS_PAD}"
 
-if [[ -z "$UPDATE_TIME_SLOT" ]]; then
-  fail "T-7.c: updateTime slot not found — storage layout may have shifted"
-else
-  _state="{\"${STAKE_HUB}\":{\"stateDiff\":{\"${UPDATE_TIME_SLOT}\":\"0x$(printf '%064x' 0)\"}}}"
-  _res=$(eth_call_with_state "$STAKE_HUB" "$edit_consensus_data" "$VAL1" "$_state")
-  if [[ "$_res" != "error:"* && -n "$_res" ]]; then
-    ok "T-7.c: editConsensusAddress stateDiff dry-run succeeds (updateTime overridden to 0)"
-  else
-    fail "T-7.c: editConsensusAddress stateDiff dry-run failed: '${_res}'"
-  fi
+log "  Dry-run editConsensusAddress(${TEST_NEW_CONSENSUS})..."
+eth_call_debug "$STAKE_HUB" "$edit_consensus_data" "$VAL1"
 
-  # Verify real storage is unchanged (real tx was not sent)
+t7c_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
+  "$edit_consensus_data" "T-7.c:editConsensusAddress") || {
+  fail "T-7.c: editConsensusAddress tx failed"; t7c_tx=""; }
+
+if [[ "${t7c_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  # Verify new mapping
   raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_CONSENSUS_TO_OP}${TEST_NEW_CONSENSUS_PAD}")
-  mapped_op="0x${raw: -40}"
-  if [[ "$mapped_op" == "0x0000000000000000000000000000000000000000" ]]; then
-    ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == 0x0 (dry-run left real state unchanged)"
-  else
-    fail "T-7.c: consensusToOperator unexpectedly returned ${mapped_op}"
+  mapped="0x${raw: -40}"
+  [[ "${mapped,,}" == "${VAL1,,}" ]] \
+    && ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == val1 (new address registered)" \
+    || fail "T-7.c: expected val1, got ${mapped}"
+  ok "T-7.c: ConsensusAddressEdited — real tx mined"
+
+  # Restore original consensus address after cooldown
+  log "  Sleeping 7 s then restoring original consensus address..."
+  sleep 7
+  ORIG_PAD=$(printf '%064s' "${VAL1_ORIGINAL_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
+  restore_data="0x${SEL_EDIT_CONSENSUS}${ORIG_PAD}"
+  t7c_restore=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
+    "$restore_data" "T-7.c:restore-consensus") || {
+    fail "T-7.c: restore consensus tx failed"; t7c_restore=""; }
+
+  if [[ "${t7c_restore:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
+    restored="0x${raw: -40}"
+    [[ "${restored,,}" == "${VAL1_ORIGINAL_CONSENSUS,,}" ]] \
+      && ok "T-7.c: original consensus address restored (${VAL1_ORIGINAL_CONSENSUS})" \
+      || fail "T-7.c: restore failed — consensus is now ${restored}"
   fi
 fi
 
