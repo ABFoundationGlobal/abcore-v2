@@ -1604,4 +1604,27 @@ T3 仍保持 breathe 对齐：`T3 % 86400 = 28800`，Feynman 在 2026-05-28 00:0
 
 **观察窗口**：≥ 48h（覆盖 ≥2 个 breathe block 周期 + blob tx / 新区块头字段验证）后推进 Upgrade 5 (v0.6.0 / T5)。
 
+### Upgrade 5：v0.6.0 — Pascal + Prague + Bohr + Lorentz + Maxwell（2026-06-03 T5）— 成功 ✅
+
+配置见 [#121](https://github.com/ABFoundationGlobal/abcore-v2/pull/121)（已合并 master）。devnet 缩短窗口：Pascal/Prague/Bohr = `1780473600`（06-03 08:00 UTC = T5）、Lorentz = `1780488000`（T5+4h，epoch 200→500）、Maxwell = `1780502400`（T5+8h，epoch 500→1000）；BlobScheduleConfig 加 Prague。
+
+**链上实测（2026-06-03，ssh ab-d4 `devnet-rpc-0` IPC 调 `parlia.getSnapshot()`，最权威）：**
+
+- **当前态**：`epoch_length=1000`、`turn_length=1`、`block_interval=3000`、5 validators —— 全部符合预期。
+- **epoch promotion 回溯**（传历史块号读当时 snapshot）：epoch=200（≤184998）→ 500（184999–189998）→ 1000（≥189999）。两次切换**精确发生在 block 184999 / 189999**，符合 `snapshot.go` 的 `(number+1)%newEpoch==0`（184999→185000%500==0；189999→190000%1000==0）。切换块时间戳 184999@12:07 UTC / 189999@16:17 UTC，即 fork 时刻后第一个新-epoch 边界。
+- **共识健康**：184999/185000、189999/190000 四节点（ab-d1/d2/d3/d4）block hash 完全一致，无 reorg；finalized 持续推进、lag=1（fast finality 跨 epoch 变化未受影响）；block interval 实测 5 块 15s（仍 3s）。
+
+**Fork 特性验证（全部通过）：**
+- **Pascal — EIP-7623**（calldata floor gas）：发真实交易（2000 个零字节 calldata → 普通 EOA，无执行），receipt `gasUsed=41000`，精确等于 floor `21000 + 10×2000`，远高于 pre-7623 的 29000 → floor 生效。tx `0x5b32aa3a7a4ab82b0522783ddbd1cbe39779e34d39b52e84e98ae39eb54121be` @ block 193946。
+- **Prague — EIP-7702**（EOA set-code）：type-4 tx 成功，`cast code` 返回 `0xef0100+addr` 委托标记（同事 chendehai 验）。
+- **Prague — EIP-2537**（BLS12-381 precompile）：`eth_call` 0x0b（G1Add）输入 256B → 输出 128B（同事验）。
+- **Bohr**：no-op，turn_length=1（snapshot）。
+- **Fermi/Maxwell block interval**：不变,仍 3s。
+
+**结论**：v0.6.0 全部 fork 特性 + 共识健康度实测通过，升级成功。
+
+### Upgrade 6：v0.7.0 — Fermi + Osaka + Mendel（2026-06-05 T6）— scheduled
+
+配置见 [#123](https://github.com/ABFoundationGlobal/abcore-v2/pull/123)。`ABCoreDevnetChainConfig` 设 Fermi = Osaka = Mendel = `1780646400`（**2026-06-05 08:00 UTC = T6**），BlobScheduleConfig 加 `Osaka: DefaultOsakaBlobConfigBSC`。三者在 ABCore 基本 no-op（Fermi BlockInterval 已 override 3000ms；Osaka BPO 只换 blob schedule；Mendel 随 Osaka）。本 PR 须在 T6 前 merge + 滚动部署到 devnet 节点。**T6 后 devnet 走完 v0.2.0 → v0.7.0 全升级路径**；激活后补链上实测结果到本节。
+
 
