@@ -406,13 +406,15 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-7.c — editConsensusAddress (real tx + restore)
-# sleep 7 s after T-7.b to clear cooldown.  Change to a test address, verify,
-# sleep 7 s, then restore.  The restore happens before the next breathe block
-# (60 s interval) so the chain is unaffected.
+# T-7.c — editConsensusAddress (real tx, no restore)
+# sleep 7 s after T-7.b to clear cooldown.  Change to a test address and verify.
+# Restore is intentionally NOT attempted: editConsensusAddress does not clear
+# the old address from consensusToOperator, so trying to re-register the original
+# address triggers DuplicateConsensusAddress.  This is by design — consensus
+# addresses are permanently one-way deregistered.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-7.c: editConsensusAddress (real tx + restore) ─────────────────────────"
+log "── T-7.c: editConsensusAddress (real tx) ───────────────────────────────────"
 log "  Sleeping 7 s to clear BREATHE_BLOCK_INTERVAL cooldown from T-7.b..."
 sleep 7
 
@@ -428,30 +430,21 @@ t7c_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
   fail "T-7.c: editConsensusAddress tx failed"; t7c_tx=""; }
 
 if [[ "${t7c_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-  # Verify new mapping
+  # Verify new consensus address in storage
+  raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
+  new_cons="0x${raw: -40}"
+  [[ "${new_cons,,}" == "${TEST_NEW_CONSENSUS,,}" ]] \
+    && ok "T-7.c: getValidatorConsensusAddress(val1) == ${TEST_NEW_CONSENSUS} (updated)" \
+    || fail "T-7.c: expected ${TEST_NEW_CONSENSUS}, got ${new_cons}"
+
+  # Verify consensusToOperator mapping
   raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_CONSENSUS_TO_OP}${TEST_NEW_CONSENSUS_PAD}")
   mapped="0x${raw: -40}"
   [[ "${mapped,,}" == "${VAL1,,}" ]] \
-    && ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == val1 (new address registered)" \
+    && ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == val1 (routing updated)" \
     || fail "T-7.c: expected val1, got ${mapped}"
-  ok "T-7.c: ConsensusAddressEdited — real tx mined"
 
-  # Restore original consensus address after cooldown
-  log "  Sleeping 7 s then restoring original consensus address..."
-  sleep 7
-  ORIG_PAD=$(printf '%064s' "${VAL1_ORIGINAL_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
-  restore_data="0x${SEL_EDIT_CONSENSUS}${ORIG_PAD}"
-  t7c_restore=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
-    "$restore_data" "T-7.c:restore-consensus") || {
-    fail "T-7.c: restore consensus tx failed"; t7c_restore=""; }
-
-  if [[ "${t7c_restore:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-    raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
-    restored="0x${raw: -40}"
-    [[ "${restored,,}" == "${VAL1_ORIGINAL_CONSENSUS,,}" ]] \
-      && ok "T-7.c: original consensus address restored (${VAL1_ORIGINAL_CONSENSUS})" \
-      || fail "T-7.c: restore failed — consensus is now ${restored}"
-  fi
+  ok "T-7.c: ConsensusAddressEdited — real tx confirmed"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
