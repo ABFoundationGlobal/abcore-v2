@@ -712,21 +712,29 @@ if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
 fi
 
 if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-  # Verify Claimed event was emitted and extract the claimed amount
-  blk_before_hex=$(printf '0x%x' "$blk_before")
-  blk_after_hex=$(printf '0x%x' "$blk_after")
-  claimed_logs=$(eth_get_logs "$STAKE_HUB" "$TOPIC_CLAIMED" "$blk_before_hex" "$blk_after_hex")
-  claimed_amount=$(python3 -c "
+  # Verify Claimed event was emitted and extract the claimed amount.
+  # Use getTransactionReceipt (tx-scoped) instead of eth_getLogs (block-range) to
+  # avoid accidentally picking up an unrelated Claimed event from the same block.
+  claimed_amount=$(curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"${claim_tx}\"],\"id\":1}" \
+    2>/dev/null \
+    | python3 -c "
 import json, sys
-logs = json.loads('''${claimed_logs}''')
-if not logs: print(0); sys.exit(0)
-# Claimed(address operatorAddress, address delegator, uint256 bnbAmount)
-# bnbAmount is in the last 32 bytes of log.data
-try:
-    data = bytes.fromhex(logs[0]['data'].replace('0x',''))
-    print(int.from_bytes(data[-32:], 'big'))
-except Exception:
-    print(0)
+resp = json.load(sys.stdin)
+result = resp.get('result') or {}
+logs = result.get('logs', [])
+topic = '${TOPIC_CLAIMED}'.lower()
+for log in logs:
+    topics = [t.lower() for t in log.get('topics', [])]
+    if topics and topics[0] == topic:
+        try:
+            data = bytes.fromhex(log['data'].replace('0x',''))
+            print(int.from_bytes(data[-32:], 'big'))
+            sys.exit(0)
+        except Exception:
+            pass
+print(0)
 " 2>/dev/null || echo "0")
   if [[ "$claimed_amount" -gt 0 ]]; then
     ok "T-8.f: Claimed event emitted (amount=${claimed_amount} wei)"

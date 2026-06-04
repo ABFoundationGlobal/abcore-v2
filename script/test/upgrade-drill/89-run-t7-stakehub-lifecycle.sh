@@ -5,8 +5,11 @@
 # T-7.a  editCommissionRate: real tx; by T-7 time the 5 s BREATHE_BLOCK_INTERVAL
 #         cooldown from createValidator has long expired, so the tx succeeds.
 # T-7.b  editDescription: real tx; sleep 7 s after T-7.a to clear its cooldown.
-# T-7.c  editConsensusAddress: real tx; sleep 7 s after T-7.b then change to a test
-#         address, verify, sleep 7 s, then restore the original address.
+# T-7.c  editConsensusAddress: eth_call dry-run only (no real tx).  After sleeping
+#         7 s past T-7.b, the 5 s cooldown has elapsed so the call succeeds.  A real
+#         tx is intentionally omitted: editConsensusAddress does not clear the old
+#         consensusToOperator mapping, so the change is irreversible and would break
+#         BSCValidatorSet for all subsequent tests.
 # T-7.d  validator info query suite: read-only queries for all 3 validators.
 # T-7.e  Node ID management: addNodeIDs / removeNodeIDs / getNodeIDs round-trip.
 # T-7.f  UpdateTooFrequently enforcement: immediately after T-7.b's real tx (which
@@ -59,24 +62,6 @@ import json, sys
 resp = json.load(sys.stdin)
 if "error" in resp: print("0x"); sys.exit(0)
 print(resp.get("result","0x"))' || echo "0x"
-}
-
-eth_call_with_state() {
-  local to="$1" data="$2" from_addr="$3" state_json="$4"
-  curl -sS -X POST "$HTTP1" \
-    -H 'Content-Type: application/json' \
-    --data "$(python3 -c "
-import json
-print(json.dumps({
-  'jsonrpc':'2.0','method':'eth_call','id':1,
-  'params':[{'to':'${to}','from':'${from_addr}','data':'${data}'},'latest',${state_json}]
-}))")" \
-    2>/dev/null \
-  | python3 -c '
-import json, sys
-resp = json.load(sys.stdin)
-if "error" in resp: print("error:" + str(resp["error"].get("message",""))); sys.exit(0)
-print(resp.get("result","0x"))' || echo "error:curl"
 }
 
 eth_call_debug() {
@@ -245,10 +230,10 @@ edit_commission_data=$(python3 -c "
 print('0x'+'${SEL_EDIT_COMMISSION}'+format(int('${new_commission_rate}'),'064x'))
 ")
 
-# Read val1's current consensus address (needed to restore after T-7.c)
+# Read val1's current consensus address (used in T-7.c to confirm the change took effect)
 raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
-VAL1_ORIGINAL_CONSENSUS="0x${raw: -40}"
-log "  val1 current consensus: ${VAL1_ORIGINAL_CONSENSUS}"
+VAL1_CONSENSUS_BEFORE_C="0x${raw: -40}"
+log "  val1 consensus before T-7.c: ${VAL1_CONSENSUS_BEFORE_C}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T-7.a — editCommissionRate (real tx)
