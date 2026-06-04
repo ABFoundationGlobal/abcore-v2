@@ -406,45 +406,52 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# T-7.c — editConsensusAddress (real tx, no restore)
-# sleep 7 s after T-7.b to clear cooldown.  Change to a test address and verify.
-# Restore is intentionally NOT attempted: editConsensusAddress does not clear
-# the old address from consensusToOperator, so trying to re-register the original
-# address triggers DuplicateConsensusAddress.  This is by design — consensus
-# addresses are permanently one-way deregistered.
+# T-7.c — editConsensusAddress (eth_call dry-run, no real tx)
+# Real tx omitted: editConsensusAddress does not clear the old address from
+# consensusToOperator, so the change cannot be undone.  A permanent consensus
+# address change breaks BSCValidatorSet (parlia won't recognise the new key)
+# and corrupts T-11 and later tests.
+# Instead: sleep 7 s so the 5 s cooldown from T-7.b expires naturally, then
+# verify via eth_call that the function succeeds.  No stateDiff needed because
+# the real cooldown has already cleared.
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
-log "── T-7.c: editConsensusAddress (real tx) ───────────────────────────────────"
-log "  Sleeping 7 s to clear BREATHE_BLOCK_INTERVAL cooldown from T-7.b..."
+log "── T-7.c: editConsensusAddress (eth_call, cooldown naturally expired) ───────"
+log "  Sleeping 7 s so T-7.b cooldown expires (BREATHE_BLOCK_INTERVAL = 5 s)..."
 sleep 7
 
 TEST_NEW_CONSENSUS="0xdeadc0de00000000000000000000000000000001"
 TEST_NEW_CONSENSUS_PAD=$(printf '%064s' "${TEST_NEW_CONSENSUS#0x}" | tr '[:upper:]' '[:lower:]' | tr ' ' '0')
 edit_consensus_data="0x${SEL_EDIT_CONSENSUS}${TEST_NEW_CONSENSUS_PAD}"
 
-log "  Dry-run editConsensusAddress(${TEST_NEW_CONSENSUS})..."
-eth_call_debug "$STAKE_HUB" "$edit_consensus_data" "$VAL1"
+_t7c_result=$(curl -sS -X POST "$HTTP1" \
+  -H 'Content-Type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${STAKE_HUB}\",\"from\":\"${VAL1}\",\"data\":\"${edit_consensus_data}\"},\"latest\"],\"id\":1}" \
+  2>/dev/null \
+  | python3 -c "
+import json, sys
+resp = json.load(sys.stdin)
+if 'error' in resp:
+    data = resp['error'].get('data','') or ''
+    sel = data[2:10].lower() if len(data) >= 10 else 'no_data'
+    print('revert:' + sel)
+else:
+    print('success')
+" 2>/dev/null || echo "exception")
 
-t7c_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 200000 \
-  "$edit_consensus_data" "T-7.c:editConsensusAddress") || {
-  fail "T-7.c: editConsensusAddress tx failed"; t7c_tx=""; }
+if [[ "$_t7c_result" == "success" ]]; then
+  ok "T-7.c: editConsensusAddress eth_call succeeds (cooldown cleared after T-7.b)"
+else
+  fail "T-7.c: editConsensusAddress eth_call expected success, got '${_t7c_result}'"
+fi
 
-if [[ "${t7c_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-  # Verify new consensus address in storage
-  raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_GET_CONSENSUS}${VAL1_PAD}")
-  new_cons="0x${raw: -40}"
-  [[ "${new_cons,,}" == "${TEST_NEW_CONSENSUS,,}" ]] \
-    && ok "T-7.c: getValidatorConsensusAddress(val1) == ${TEST_NEW_CONSENSUS} (updated)" \
-    || fail "T-7.c: expected ${TEST_NEW_CONSENSUS}, got ${new_cons}"
-
-  # Verify consensusToOperator mapping
-  raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_CONSENSUS_TO_OP}${TEST_NEW_CONSENSUS_PAD}")
-  mapped="0x${raw: -40}"
-  [[ "${mapped,,}" == "${VAL1,,}" ]] \
-    && ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == val1 (routing updated)" \
-    || fail "T-7.c: expected val1, got ${mapped}"
-
-  ok "T-7.c: ConsensusAddressEdited — real tx confirmed"
+# Verify real storage is unchanged (eth_call does not modify state)
+raw=$(eth_call_raw "$STAKE_HUB" "0x${SEL_CONSENSUS_TO_OP}${TEST_NEW_CONSENSUS_PAD}")
+mapped_op="0x${raw: -40}"
+if [[ "$mapped_op" == "0x0000000000000000000000000000000000000000" ]]; then
+  ok "T-7.c: consensusToOperator(${TEST_NEW_CONSENSUS}) == 0x0 (eth_call left chain state unchanged)"
+else
+  fail "T-7.c: consensusToOperator unexpectedly set to ${mapped_op}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
