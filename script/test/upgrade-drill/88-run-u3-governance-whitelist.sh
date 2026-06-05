@@ -172,7 +172,9 @@ send_tx_wait() {
   done
   # tx not mined — check if it was evicted from pool and retry once
   local _tx_in_pool
-  _tx_in_pool=$(attach_exec "$GETH" "$IPC1" \
+  # Query eviction from the same node the tx was submitted through ($ipc), not
+  # from $IPC1, to avoid false positives due to propagation delay.
+  _tx_in_pool=$(attach_exec "$GETH" "$ipc" \
     "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
     2>/dev/null || echo "null")
   if [[ "$_tx_in_pool" == "null" ]]; then
@@ -184,7 +186,7 @@ send_tx_wait() {
       log "  ${label}: re-submitted tx=${tx:0:20}…" >&2
       for i in $(seq 1 60); do
         sleep 1
-        status=$(attach_exec "$GETH" "$IPC1" \
+        status=$(attach_exec "$GETH" "$ipc" \
           "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
           2>/dev/null || echo "p")
         if [[ "$status" == "0x1" || "$status" == "1" ]]; then echo "$tx"; return 0; fi

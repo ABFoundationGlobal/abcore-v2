@@ -49,7 +49,7 @@ echo "" | tee -a "$REPORT"
 
 # ── 2. Nonce changes from system transactions ─────────────────────────────────
 echo "=== 2. NONCE CHANGES FROM SYSTEM TRANSACTIONS ===" | tee -a "$REPORT"
-echo "  Look for SetNonce calls (verbosity 5 / vmodule state=5)." | tee -a "$REPORT"
+echo "  Look for SetNonce calls (verbosity 5 / vmodule state_processor=4)." | tee -a "$REPORT"
 for n in 1 2 3; do
   logfile=$(val_log "$n")
   [[ -f "$logfile" ]] || continue
@@ -106,7 +106,7 @@ import re, sys
 logfile_path = None
 import os
 # find the logfile
-for root, dirs, files in os.walk(os.environ.get('DATADIR_ROOT','data')):
+for root, dirs, files in os.walk(os.environ.get('LOGDIR', 'data')):
     for f in files:
         if f == 'geth.log':
             logfile_path = os.path.join(root, f)

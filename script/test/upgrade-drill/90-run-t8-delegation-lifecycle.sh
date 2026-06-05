@@ -668,7 +668,7 @@ fi
 # T-8.f — real claimBatch after unbondPeriod expires
 # Requires unbondPeriod <= 15 s (abchain-local genesis default).
 # T-8.b queued an unbond request; by the time T-8.c/d/e finish (~10 s), the
-# 15 s period may not have elapsed yet.  We sleep until claimable >= 1 (max 30 s).
+# 15 s period may not have elapsed yet.  We sleep until claimable >= 1 (timeout 40 s).
 # ─────────────────────────────────────────────────────────────────────────────
 log ""
 log "── T-8.f: real claimBatch after unbondPeriod ────────────────────────────────"

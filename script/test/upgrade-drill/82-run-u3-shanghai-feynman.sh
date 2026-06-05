@@ -422,7 +422,7 @@ for i in 0 1 2; do
   done
   # If still pending, check whether the tx was evicted from the pool (dropped nonce)
   if [[ "$_status" == "p" ]]; then
-    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc 1)" \
+    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc "$n")" \
       "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
       2>/dev/null || echo "null")
     if [[ "$_tx_in_pool" == "null" && -n "$calldata" ]]; then
@@ -433,7 +433,7 @@ for i in 0 1 2; do
       if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
         log "  val${n}: re-submitted tx=${tx}"
         for _try in $(seq 1 30); do
-          _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+          _status=$(attach_exec "$GETH" "$(val_ipc "$n")" \
             "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
             2>/dev/null || echo "p")
           [[ "$_status" == "p" ]] || break
@@ -498,7 +498,7 @@ for i in 0 1 2; do
     sleep 1
   done
   if [[ "$_status" == "p" ]]; then
-    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc 1)" \
+    _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc "$n")" \
       "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
       2>/dev/null || echo "null")
     if [[ "$_tx_in_pool" == "null" && -n "$del_calldata" ]]; then
@@ -509,7 +509,7 @@ for i in 0 1 2; do
       if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
         log "  val${n}: re-submitted delegate tx=${tx}"
         for _try in $(seq 1 30); do
-          _status=$(attach_exec "$GETH" "$(val_ipc 1)" \
+          _status=$(attach_exec "$GETH" "$(val_ipc "$n")" \
             "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
             2>/dev/null || echo "p")
           [[ "$_status" == "p" ]] || break
