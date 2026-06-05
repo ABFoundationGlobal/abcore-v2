@@ -238,21 +238,21 @@ debug_stuck_tx() {
   # 2. Tx details from geth (nonce, gas, status)
   local tx_info
   tx_info=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var t=eth.getTransactionByHash('${tx_hash}');return t?JSON.stringify({nonce:t.nonce,gas:t.gas,blockNumber:t.blockNumber}):'null';})()" \
+    "(function(){var t=eth.getTransaction('${tx_hash}');return t?JSON.stringify({nonce:t.nonce,gas:t.gas,blockNumber:t.blockNumber}):'null';})()" \
     2>/dev/null | tr -d '"' || echo "err")
   log "  [DEBUG] txByHash=${tx_info}" >&2
 
   # 3. Txpool pending vs queued counts
   local pool_status
   pool_status=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var s=txpool.status();return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
+    "(function(){var s=txpool.status;return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
     2>/dev/null | tr -d '"' || echo "err")
   log "  [DEBUG] txpool.status=${pool_status}" >&2
 
   # 4. Whether the tx is in pending or queued pool
   local pool_inspect
   pool_inspect=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var c=txpool.content();var a='${addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
+    "(function(){var c=txpool.content;var a='${addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
     2>/dev/null | tr -d '"' || echo "err")
   log "  [DEBUG] txpool.content[${addr:0:10}...]=${pool_inspect}" >&2
 
@@ -401,7 +401,7 @@ done
 # With breathe_block_interval=5s system transactions run from the sealer's address
 # and increment its nonce.  If the sealer seals a breathe block while our user tx
 # is in the pending pool, the user tx nonce becomes stale and is evicted.
-# Detect this (getTransactionByHash returns null) and re-submit once.
+# Detect this (eth.getTransaction returns null) and re-submit once.
 log "Waiting for registration transactions to be mined..."
 for i in 0 1 2; do
   n=$(( i + 1 ))
@@ -423,7 +423,7 @@ for i in 0 1 2; do
   # If still pending, check whether the tx was evicted from the pool (dropped nonce)
   if [[ "$_status" == "p" ]]; then
     _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc "$n")" \
-      "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+      "(function(){var t=eth.getTransaction('${tx}');return t?'found':'null';})()" \
       2>/dev/null || echo "null")
     if [[ "$_tx_in_pool" == "null" && -n "$calldata" ]]; then
       log "  val${n}: tx dropped (nonce evicted by system tx) — re-submitting with fresh nonce..."
@@ -499,7 +499,7 @@ for i in 0 1 2; do
   done
   if [[ "$_status" == "p" ]]; then
     _tx_in_pool=$(attach_exec "$GETH" "$(val_ipc "$n")" \
-      "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+      "(function(){var t=eth.getTransaction('${tx}');return t?'found':'null';})()" \
       2>/dev/null || echo "null")
     if [[ "$_tx_in_pool" == "null" && -n "$del_calldata" ]]; then
       log "  val${n}: delegate tx dropped — re-submitting with fresh nonce..."

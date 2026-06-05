@@ -175,7 +175,7 @@ send_tx_wait() {
   # Query eviction from the same node the tx was submitted through ($ipc), not
   # from $IPC1, to avoid false positives due to propagation delay.
   _tx_in_pool=$(attach_exec "$GETH" "$ipc" \
-    "(function(){var t=eth.getTransactionByHash('${tx}');return t?'found':'null';})()" \
+    "(function(){var t=eth.getTransaction('${tx}');return t?'found':'null';})()" \
     2>/dev/null || echo "null")
   if [[ "$_tx_in_pool" == "null" ]]; then
     log "  ${label}: tx dropped from pool (nonce evicted by system tx) — re-submitting..." >&2
@@ -203,13 +203,13 @@ send_tx_wait() {
   nonce_l=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','latest')"  2>/dev/null | tr -d '"' || echo "err")
   nonce_p=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','pending')" 2>/dev/null | tr -d '"' || echo "err")
   pool_s=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var s=txpool.status();return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
+    "(function(){var s=txpool.status;return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
     2>/dev/null | tr -d '"' || echo "err")
   pool_c=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var c=txpool.content();var a='${from_addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
+    "(function(){var c=txpool.content;var a='${from_addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
     2>/dev/null | tr -d '"' || echo "err")
   tx_info=$(attach_exec "$GETH" "$IPC1" \
-    "(function(){var t=eth.getTransactionByHash('${tx}');return t?JSON.stringify({nonce:t.nonce,blockNumber:t.blockNumber}):'null';})()" \
+    "(function(){var t=eth.getTransaction('${tx}');return t?JSON.stringify({nonce:t.nonce,blockNumber:t.blockNumber}):'null';})()" \
     2>/dev/null | tr -d '"' || echo "err")
   log "  [DEBUG] nonce_latest=${nonce_l}  nonce_pending=${nonce_p}" >&2
   log "  [DEBUG] txByHash=${tx_info}  pool_in=${_tx_in_pool}" >&2
