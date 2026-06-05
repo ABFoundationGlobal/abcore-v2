@@ -170,7 +170,52 @@ send_tx_wait() {
       return 1
     fi
   done
-  log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2; return 1
+  # tx not mined — check if it was evicted from pool and retry once
+  local _tx_in_pool
+  # Query eviction from the same node the tx was submitted through ($ipc), not
+  # from $IPC1, to avoid false positives due to propagation delay.
+  _tx_in_pool=$(attach_exec "$GETH" "$ipc" \
+    "(function(){var t=eth.getTransaction('${tx}');return t?'found':'null';})()" \
+    2>/dev/null || echo "null")
+  if [[ "$_tx_in_pool" == "null" ]]; then
+    log "  ${label}: tx dropped from pool (nonce evicted by system tx) — re-submitting..." >&2
+    tx=$(attach_exec "$GETH" "$ipc" \
+      "eth.sendTransaction({from:'${from_addr}',to:'${to_addr}',value:'${value_hex}',gas:${gas},data:'${data}'})" \
+      2>/dev/null || echo "")
+    if [[ "$tx" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+      log "  ${label}: re-submitted tx=${tx:0:20}…" >&2
+      for i in $(seq 1 60); do
+        sleep 1
+        status=$(attach_exec "$GETH" "$ipc" \
+          "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.status:'p';})()" \
+          2>/dev/null || echo "p")
+        if [[ "$status" == "0x1" || "$status" == "1" ]]; then echo "$tx"; return 0; fi
+        if [[ "$status" == "0x0" || "$status" == "0" ]]; then
+          log "  FAIL: ${label}: re-submitted tx reverted (tx=${tx})" >&2
+          return 1
+        fi
+      done
+    fi
+  fi
+  log "  FAIL: ${label}: tx not mined in 60 s (tx=${tx})" >&2
+  # Dump txpool diagnostics
+  local nonce_l nonce_p pool_s pool_c tx_info
+  nonce_l=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','latest')"  2>/dev/null | tr -d '"' || echo "err")
+  nonce_p=$(attach_exec "$GETH" "$IPC1" "eth.getTransactionCount('${from_addr}','pending')" 2>/dev/null | tr -d '"' || echo "err")
+  pool_s=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var s=txpool.status;return JSON.stringify({pending:s.pending,queued:s.queued});})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  pool_c=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var c=txpool.content;var a='${from_addr}'.toLowerCase();var p=c.pending&&c.pending[a]?Object.keys(c.pending[a]):'[]';var q=c.queued&&c.queued[a]?Object.keys(c.queued[a]):'[]';return JSON.stringify({pending_nonces:p,queued_nonces:q});})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  tx_info=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var t=eth.getTransaction('${tx}');return t?JSON.stringify({nonce:t.nonce,blockNumber:t.blockNumber}):'null';})()" \
+    2>/dev/null | tr -d '"' || echo "err")
+  log "  [DEBUG] nonce_latest=${nonce_l}  nonce_pending=${nonce_p}" >&2
+  log "  [DEBUG] txByHash=${tx_info}  pool_in=${_tx_in_pool}" >&2
+  log "  [DEBUG] txpool.status=${pool_s}" >&2
+  log "  [DEBUG] txpool.content[${from_addr:0:10}...]=${pool_c}" >&2
+  return 1
 }
 
 # Query BSCGovernor.state(proposalId); returns decimal integer
@@ -357,10 +402,23 @@ print(build('${SEL_EXECUTE}'))
   log "${label}: waiting for BSCTimelock delay (3 s)..."
   sleep 10
 
-  # ── execute ──
+  # ── execute (with one retry in case the tx is transiently dropped) ──
+  # In P2P test networks a tx can occasionally fail to propagate to the block
+  # producers' mempools and time out without being mined.  Re-submitting once
+  # (with the same data) is sufficient to recover.
   log ""
   log "${label}: executing proposal"
-  LAST_EXEC_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 1000000 "$execute_data" "${label}:execute()") || return 1
+  _exec_attempts=0
+  while true; do
+    _exec_attempts=$(( _exec_attempts + 1 ))
+    LAST_EXEC_TX=$(send_tx_wait "$IPC1" "$VAL1" "$GOVERNOR" "0x0" 1000000 "$execute_data" "${label}:execute()") && break
+    if [[ "$_exec_attempts" -ge 2 ]]; then
+      log "  FAIL: ${label}: execute() failed after ${_exec_attempts} attempts" >&2
+      return 1
+    fi
+    log "  ${label}: execute() not mined, retrying (attempt ${_exec_attempts})..."
+    sleep 3
+  done
   ok "${label}: execute() mined"
 
   cur=$(governor_state "$PROPOSAL_ID_HEX")

@@ -18,6 +18,12 @@ BREATHE_BLOCK_INTERVAL=${BREATHE_BLOCK_INTERVAL:-60}
 
 GETH="${GETH:-${REPO_ROOT}/build/bin/geth}"
 
+# Optional: set GETH_VERBOSITY=5 and/or GETH_VMODULE to enable debug logging.
+# Example targeted module logging for nonce/txpool investigation:
+#   GETH_VMODULE="txpool=5,parlia=5,state_processor=4"
+GETH_VERBOSITY=${GETH_VERBOSITY:-3}
+GETH_VMODULE=${GETH_VMODULE:-""}
+
 log() { echo "[$(date +'%H:%M:%S')] $*"; }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -231,8 +237,12 @@ launch_validator() {
     extra_args+=(--config "${TOML_CONFIG}")
   fi
   extra_args+=(--override.breatheblockinterval "$BREATHE_BLOCK_INTERVAL")
+  extra_args+=(--verbosity "$GETH_VERBOSITY")
+  if [[ -n "${GETH_VMODULE:-}" ]]; then
+    extra_args+=(--vmodule "$GETH_VMODULE")
+  fi
 
-  log "Starting validator-${n} (p2p=${p2p}, http=${http})"
+  log "Starting validator-${n} (p2p=${p2p}, http=${http}, verbosity=${GETH_VERBOSITY})"
   (
     nohup "$GETH" \
       "${extra_args[@]}" \

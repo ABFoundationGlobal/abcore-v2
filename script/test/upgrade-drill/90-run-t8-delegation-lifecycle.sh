@@ -11,6 +11,9 @@
 #         simulate lockTime elapsed and verify claimBatch dry-run succeeds.
 # T-8.e  StakeCredit read queries: shares/BNB conversion, lockedBNBs,
 #         unbondSequence, totalPooledBNB.
+# T-8.f  real claimBatch after unbondPeriod elapses: sleep until T-8.b's unbond
+#         request is claimable, send real claimBatch tx, verify BNB received.
+#         Requires unbondPeriod <= 15 s (abchain-local genesis default).
 #
 # Prerequisites:
 #   - U-3 completed; validators registered and self-delegated.
@@ -195,6 +198,8 @@ TOPIC_UNDELEGATED=$(attach_exec "$GETH" "$IPC1" \
   "web3.sha3('Undelegated(address,address,uint256,uint256)')" 2>/dev/null)
 TOPIC_REDELEGATED=$(attach_exec "$GETH" "$IPC1" \
   "web3.sha3('Redelegated(address,address,address,uint256,uint256,uint256)')" 2>/dev/null)
+TOPIC_CLAIMED=$(attach_exec "$GETH" "$IPC1" \
+  "web3.sha3('Claimed(address,address,uint256)')" 2>/dev/null)
 
 for _s in SEL_DELEGATE SEL_UNDELEGATE SEL_REDELEGATE SEL_CLAIM_BATCH SEL_GET_CREDIT \
            SEL_POOLED_BNB SEL_BALANCE_OF SEL_PENDING_UNBOND SEL_CLAIMABLE_UNBOND \
@@ -498,7 +503,7 @@ targets_enc = enc_addr_array([val2])
 amounts_enc = enc_uint_array([1])
 
 off0 = 2 * 32
-off1 = off0 + 32 + len(targets_enc) // 2
+off1 = off0 + len(targets_enc) // 2
 head = p32(off0) + p32(off1)
 print('0x' + sel + head + targets_enc + amounts_enc)
 ")
@@ -657,6 +662,126 @@ if [[ "$total_pooled" != "-1" ]]; then
   ok "T-8.e: totalPooledBNB() on val2_credit callable (= ${total_pooled} wei)"
 else
   fail "T-8.e: totalPooledBNB() on val2_credit call failed (no data returned)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# T-8.f — real claimBatch after unbondPeriod expires
+# Requires unbondPeriod <= 15 s (abchain-local genesis default).
+# T-8.b queued an unbond request; by the time T-8.c/d/e finish (~10 s), the
+# 15 s period may not have elapsed yet.  We sleep until claimable >= 1 (timeout 40 s).
+# ─────────────────────────────────────────────────────────────────────────────
+log ""
+log "── T-8.f: real claimBatch after unbondPeriod ────────────────────────────────"
+
+# Poll until claimableUnbondRequest >= 1 (timeout 40 s)
+claimable=0
+for _poll in $(seq 1 40); do
+  raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_CLAIMABLE_UNBOND}${VAL1_PAD}")
+  claimable=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x': print(0); exit()
+print(int(raw, 16))
+" 2>/dev/null || echo "0")
+  if [[ "$claimable" -ge 1 ]]; then break; fi
+  sleep 1
+done
+log "  claimableUnbondRequest(val1) after wait: ${claimable}"
+
+if [[ "$claimable" -ge 1 ]]; then
+  ok "T-8.f: claimableUnbondRequest(val1) == ${claimable} (unbondPeriod elapsed)"
+else
+  fail "T-8.f: claimableUnbondRequest(val1) still 0 after 40 s — unbondPeriod not elapsed?"
+fi
+
+# Record val1 balance as hex to avoid JS scientific-notation precision loss.
+# eth.getBalance() returns e.g. 9.97e+23 for large balances in JS Number (only
+# ~15 significant digits); web3.toHex() gives the exact big-integer hex string.
+bal_before_hex=$(attach_exec "$GETH" "$IPC1" \
+  "web3.toHex(eth.getBalance('${VAL1}'))" 2>/dev/null | tr -d '"' || echo "0x0")
+log "  val1 balance before claim: ${bal_before_hex}"
+
+blk_before=$(attach_exec "$GETH" "$IPC1" "eth.blockNumber" 2>/dev/null || echo "0")
+claim_tx=$(send_tx_wait "$IPC1" "$VAL1" "$STAKE_HUB" "0x0" 500000 \
+  "$claim_data" "T-8.f:claimBatch") || {
+  fail "T-8.f: claimBatch tx failed"; claim_tx=""; }
+blk_after="0"
+if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  blk_after=$(attach_exec "$GETH" "$IPC1" \
+    "(function(){var r=eth.getTransactionReceipt('${claim_tx}');return r?r.blockNumber:0;})()" \
+    2>/dev/null || echo "0")
+fi
+
+if [[ "${claim_tx:-}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+  # Verify Claimed event was emitted and extract the claimed amount.
+  # Use getTransactionReceipt (tx-scoped) instead of eth_getLogs (block-range) to
+  # avoid accidentally picking up an unrelated Claimed event from the same block.
+  claimed_amount=$(curl -sS -X POST "$HTTP1" \
+    -H 'Content-Type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"${claim_tx}\"],\"id\":1}" \
+    2>/dev/null \
+    | python3 -c "
+import json, sys
+resp = json.load(sys.stdin)
+result = resp.get('result') or {}
+logs = result.get('logs', [])
+topic = '${TOPIC_CLAIMED}'.lower()
+for log in logs:
+    topics = [t.lower() for t in log.get('topics', [])]
+    if topics and topics[0] == topic:
+        try:
+            data = bytes.fromhex(log['data'].replace('0x',''))
+            print(int.from_bytes(data[-32:], 'big'))
+            sys.exit(0)
+        except Exception:
+            pass
+print(0)
+" 2>/dev/null || echo "0")
+  if [[ "$claimed_amount" -gt 0 ]]; then
+    ok "T-8.f: Claimed event emitted (amount=${claimed_amount} wei)"
+  else
+    fail "T-8.f: Claimed event missing or zero amount"
+  fi
+
+  # Verify balance increase matches claimed amount (minus gas, so use >= 90% threshold)
+  bal_after_hex=$(attach_exec "$GETH" "$IPC1" \
+    "web3.toHex(eth.getBalance('${VAL1}'))" 2>/dev/null | tr -d '"' || echo "0x0")
+  log "  val1 balance after claim: ${bal_after_hex}"
+  balance_check=$(python3 -c "
+def parse(s):
+    s = (s or '0').strip().strip('\"')
+    return int(s, 16) if s.startswith('0x') else int(s)
+before  = parse('${bal_before_hex}')
+after   = parse('${bal_after_hex}')
+claimed = int('${claimed_amount}') if '${claimed_amount}' else 0
+delta   = after - before
+# Balance must increase by >= 90% of claimed (gas cost is negligible vs 1 BNB)
+ok = delta >= claimed * 9 // 10
+print('true' if ok else f'false (delta={delta} claimed={claimed})')
+" 2>/dev/null || echo "false")
+  if [[ "$balance_check" == "true" ]]; then
+    ok "T-8.f: val1 balance increased by ~claimed amount (claimed=${claimed_amount} wei)"
+  else
+    fail "T-8.f: balance delta does not match claimed amount: ${balance_check}"
+  fi
+
+  # Verify pending unbond count dropped
+  raw=$(eth_call_raw "$VAL2_CREDIT" "0x${SEL_PENDING_UNBOND}${VAL1_PAD}")
+  pending_after=$(python3 -c "
+raw = '${raw}'
+if not raw or raw == '0x' or len(raw) < 10: print(0); exit()
+data = bytes.fromhex(raw[2:])
+try:
+    off = int.from_bytes(data[0:32], 'big')
+    print(int.from_bytes(data[off:off+32], 'big'))
+except Exception:
+    print(0)
+" 2>/dev/null || echo "0")
+  log "  pendingUnbondRequest(val1) after claim: ${pending_after}"
+  if [[ "$pending_after" -eq 0 ]]; then
+    ok "T-8.f: pendingUnbondRequest(val1) == 0 after claim (request consumed)"
+  else
+    fail "T-8.f: pendingUnbondRequest(val1) == ${pending_after} after claim, expected 0"
+  fi
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
