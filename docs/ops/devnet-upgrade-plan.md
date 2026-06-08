@@ -801,9 +801,11 @@ DevNet 搭建（abcore-v1，5 validator + 1 RPC 独立服务器）
 ### Testnet
 
 - DevNet 6 步全部通过后执行
-- N、M、T3～T6 根据当前 Testnet 块高重新设定
+- N、M、T3～T6 根据当前 Testnet 块高重新设定（dev team 定值）
 - 时间戳 fork 的 T 值在发布 binary 时硬编码，选择距发布时间 ≥ 48h 的 UTC 整点
 - 同样需要执行 snapshot restore drill（在 Testnet 的非关键节点上执行）
+
+> **devops 操作编排**：Testnet（之后 Mainnet）的逐步操作流程、职责边界（dev 定值/持私钥/验收 vs devops 操作）、起点确认、滚动替换、监控接入、交接 checklist，见 [testnet-upgrade-plan.md](testnet-upgrade-plan.md)。本节及以下 Mainnet go/no-go 表是 dev team 拥有的参数与验收标准（SoT），testnet-upgrade-plan.md 引用本文而不复制。
 
 ### Mainnet go/no-go 标准（需满足所有指标）
 
@@ -1001,8 +1003,9 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 |------|------|
 | 共识切换 cutover Runbook | [docs/ops/fork-cutover-runbook.md](fork-cutover-runbook.md) |
 | 共识切换回滚 Runbook | [docs/ops/consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) |
-| Validator 升级 Runbook | [docs/ops/validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md) |
-| 节点部署文档 | [docs/ops/node-deployment-v2.md](node-deployment-v2.md) |
+| 节点部署与 v1→v2 升级手册 | [docs/ops/node-and-validator-deployment.md](node-and-validator-deployment.md) |
+| Testnet 升级编排（devops 视角）| [docs/ops/testnet-upgrade-plan.md](testnet-upgrade-plan.md) |
+| ops 文档索引 / 场景路由 | [docs/ops/README.md](README.md) |
 | 链参数配置 | `params/config.go`（ABCoreMainChainConfig / ABCoreTestChainConfig / ABCoreDevnetChainConfig）|
 | Block interval 常量（永久 3 秒）| `params/protocol_params.go:200-203` |
 | System contract one-shot 部署 | `core/systemcontracts/upgrade.go:1453-1475` |

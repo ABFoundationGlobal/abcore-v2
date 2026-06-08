@@ -10,7 +10,7 @@
 > **适用范围说明**
 >
 > - 本手册处理的是“**共识切换已经触发或已跨过分叉块**”后的回滚。
-> - 若只是 v1 → v2 二进制升级失败，但链仍处于纯 Clique 阶段，请使用 [validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md) 中的回滚章节。
+> - 若只是 v1 → v2 二进制升级失败，但链仍处于纯 Clique 阶段，请使用 [node-and-validator-deployment.md §3.8](node-and-validator-deployment.md#38-回滚到-v1仅适用于仍处于-clique-阶段) 中的回滚章节。
 > - 本手册对应本地演练脚本 `script/test/transition/96-run-rollback-drill.sh`，即 T-1.6 场景。
 
 ---
