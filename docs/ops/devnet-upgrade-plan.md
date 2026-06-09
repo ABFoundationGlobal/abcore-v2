@@ -805,7 +805,7 @@ DevNet 搭建（abcore-v1，5 validator + 1 RPC 独立服务器）
 - 时间戳 fork 的 T 值在发布 binary 时硬编码，选择距发布时间 ≥ 48h 的 UTC 整点
 - 同样需要执行 snapshot restore drill（在 Testnet 的非关键节点上执行）
 - **私钥归属与 DevNet 不同（关键差异）**：DevNet 的 validator / 桥私钥由 **dev team 自己生成、自己部署、完全控制**，所以 DevNet 上所有持私钥的链上操作（validator 注册/投票/委托等）都是 dev team 直接执行的（见 §十执行历史）。**Testnet（之后 Mainnet）的私钥在 devops 手里**——持私钥的链上操作改由 **devops 按 dev team 给定的命令执行，dev team 观测判定**。这正是为什么跨链桥能在 DevNet 由桥团队静态评估、却要到 Testnet 才首次实测（私钥与 setup 都在 devops/桥团队侧）。详细 RACI 见 [testnet-upgrade-plan.md §0/§1](testnet-upgrade-plan.md)。
-- **跨链桥首次纳入（DevNet 未覆盖）**：DevNet 阶段没有桥 setup，桥连续性从未实测（见第七节缺口说明）。Testnet 须具备两条桥（AB Connect↔BSC、AB IOT↔AB Connect）的 setup——中继（relayer）+ 对端链连通——并把"桥在每步升级前后连续可用"纳入验收；每步操作编排见 [testnet-upgrade-plan.md §7.5](testnet-upgrade-plan.md)。桥的端到端实测与判定由桥团队负责。
+- **跨链桥首次纳入（DevNet 未覆盖）**：DevNet 阶段没有桥 setup，桥连续性从未实测（见第七节缺口说明）。Testnet 须具备两条桥（AB Connect↔BSC、AB IOT↔AB Connect）的 setup——中继（relayer）+ 对端链连通——并把"桥在每步升级前后连续可用"纳入验收；每步操作编排见 [testnet-upgrade-plan.md §7.6 跨链桥连续性](testnet-upgrade-plan.md#76-跨链桥连续性贯穿全部升级步骤的-todo-devnet-未覆盖)。桥的端到端实测与判定由桥团队负责。
 
 > **devops 操作编排**：Testnet（之后 Mainnet）的逐步操作流程、职责边界（dev team 定值/给步骤/验收 vs devops 操作并**持钥执行链上操作**——testnet 私钥在 devops 手里）、起点确认、滚动替换、监控接入、交接 checklist，见 [testnet-upgrade-plan.md](testnet-upgrade-plan.md)。本节及以下 Mainnet go/no-go 表是 dev team 拥有的参数与验收标准（SoT），testnet-upgrade-plan.md 引用本文而不复制。
 
@@ -864,7 +864,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 > ⚠️ **DevNet 未测试跨链桥（已知缺口）**：ABCore 在生产上有两条跨链桥——**AB Connect ↔ BSC** 与 **AB IOT ↔ AB Connect**（IoT 链即 AB IOT，部署见 `ab-deploy`）。**DevNet 环境没有部署任何桥实例，也没有对端链（BSC / AB IOT）的连通配置，因此 6 步升级的 DevNet 演练完全没有验证过桥在升级前后的连续性。** 桥相关系统合约（TokenHub `0x1004`、RelayerIncentivize `0x1005`、RelayerHub `0x1006`、CrossChain `0x2000`）虽随 Parlia genesis 一次性部署，但其链下中继（relayer）与对端链交互未在 DevNet 接入。
 >
-> **影响**：升级对桥的影响（见下方 Q2 §b/c 的 TODO）在 DevNet 阶段**无法实测，只能由桥团队按实现做静态评估**。**桥的首次实测必须在 Testnet 进行**——Testnet 需具备桥的 setup（中继 + 对端链连通），把"桥连续可用"纳入每步升级的验收（编排见 [testnet-upgrade-plan.md §7.5](testnet-upgrade-plan.md)）。
+> **影响**：升级对桥的影响（见下方 Q2 §b/c 的 TODO）在 DevNet 阶段**无法实测，只能由桥团队按实现做静态评估**。**桥的首次实测必须在 Testnet 进行**——Testnet 需具备桥的 setup（中继 + 对端链连通），把"桥连续可用"纳入每步升级的验收（编排见 [testnet-upgrade-plan.md §7.6 跨链桥连续性](testnet-upgrade-plan.md#76-跨链桥连续性贯穿全部升级步骤的-todo-devnet-未覆盖)）。
 
 ---
 
