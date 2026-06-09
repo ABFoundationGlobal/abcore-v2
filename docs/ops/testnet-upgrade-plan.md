@@ -11,10 +11,12 @@
 
 本文是 testnet（之后 mainnet）升级的**操作 runbook**。它只描述 **devops 要做哪些操作**，不解释代码内部为什么。明确分工：
 
-- **devops（你）**：快照、拉取并校验镜像、按滚动顺序停起容器、等节点健康、把状态交回 dev team。
-- **dev team**：决定所有参数值、改源码、构建并发布 binary、做所有持私钥的链上操作、判定每步升级是否验收通过。
+- **devops（你）**：快照、拉取并校验镜像、按滚动顺序停起容器、等节点健康、**持有 testnet validator / 桥私钥并按 dev team 给定的步骤执行持私钥的链上操作**（注册/投票/委托、桥中继等）、把状态交回 dev team。
+- **dev team**：决定所有参数值、改源码、构建并发布 binary、**给出持私钥操作的精确步骤与命令**、判定每步升级是否验收通过。
 
-你拿到的每个升级版本都是一个**黑盒交付物**：dev team 给你「镜像 tag + sha256 校验值 + 激活点（一个块高 N/M，或一个时间戳 T，已编进 binary）+ 预期观察窗口」。你**不需要**知道这些值怎么算出来、在源码哪里、为什么这么选。
+> 🔑 **私钥归属（testnet 与 devnet 的关键差异）**：**testnet（之后 mainnet）的 validator / 桥私钥在 devops 手里**，因此持私钥的链上操作由 **devops 配合执行**、dev team 观测判定。这与 **DevNet 不同**——DevNet 的私钥由 dev team 自己生成、自己部署、完全控制，那些持私钥操作是 dev team 直接做的（[devnet-upgrade-plan.md](devnet-upgrade-plan.md) 的实测记录因此都是 dev team 自持私钥完成）。本文档的 RACI 按 testnet 口径：**devops 持钥并执行，dev team 定步骤并判定**。
+
+你拿到的每个升级版本都是一个**黑盒交付物**：dev team 给你「镜像 tag + sha256 校验值 + 激活点（一个块高 N/M，或一个时间戳 T，已编进 binary）+ 预期观察窗口 + 任何持私钥操作的精确命令」。你**不需要**知道这些值怎么算出来、在源码哪里、为什么这么选；但持私钥的那一步**由你按命令执行**。
 
 > 🚦 **贯穿全文的红线**：本计划每一步、每一次 validator 重启都是 **rolling（逐个滚动）**，**绝不 stop-all（同时停起多台）**。同时重启过多 validator 会触发死锁，在共识切换那一步（§4 Upgrade 1）会导致**永久卡链**。机理见 [node-and-validator-deployment.md §5](node-and-validator-deployment.md#5-seal-race-死锁recents-机制所有路径通用) 与 [fork-cutover-runbook.md §2](fork-cutover-runbook.md#2-stop-window-race必须了解的故障模式)。
 
@@ -40,12 +42,13 @@
 | 每步升级前对所有节点做全量快照 | C | R/A |
 | canary（先在 1 个非关键 RPC 节点验证新镜像）| C | R/A |
 | validator 滚动替换、等健康、维持出块 | C（约定顺序与安全余量）| R/A |
-| 任何持私钥的链上操作（注册、委托、投票等）| R/A | —（**devops 不持 validator 私钥**）|
+| 持私钥的链上操作的**步骤/命令/参数**（注册、委托、投票、桥操作等）| R/A | C（执行前对齐命令）|
+| 持私钥的链上操作的**实际执行**（testnet validator / 桥私钥在 devops 手里）| C（给命令、观测结果）| R/A（**持钥并执行**）|
 | 每步升级后的观测与验收（missed slot / reorg / 出块轮换 / 最终性）| R/A | C（提供 metrics 访问与 dashboard）|
 | 共识切换（Phase 2）go / abort 决策 | R/A | C/R（执行 abort 与回滚操作）|
 | 协调式回滚的具体执行 | C | R/A |
 
-> **一句话**：凡是"定值、改码、持私钥、判定通过"都归 dev team；devops 只做"快照、拉镜像、滚动停起、等健康、交回"。任何一步如果你发现需要私钥或需要改配置文件里的参数值，**停下来交给 dev team**。
+> **一句话**：dev team 拥有"定值、改码、给步骤、判定通过"；devops 做"快照、拉镜像、滚动停起、等健康、**持钥执行 dev team 给定的链上操作**、交回"。注意与 devnet 的差异：**testnet 私钥在 devops 手里**（devnet 私钥归 dev team），所以持私钥操作在 testnet 是 **devops 执行、dev team 不碰键盘只判定**。任何一步如果你发现命令不清楚、参数值缺失，**停下来找 dev team 对齐再执行**——你执行，但不自己定值。
 
 ---
 
@@ -164,10 +167,10 @@ docker run --rm --entrypoint geth abfoundation/abcore-v2:$TAG version
 - **Upgrade 2 — London 等 block fork**：走通用模板，**块高激活**。激活块高由 dev team 给定，你只部署 dev 交付的 tag、按块高激活流程操作。验收由 dev team。
 
 - **Upgrade 3 — Shanghai / Feynman（关键交接，时间窗紧迫）**：走通用模板，**时间戳激活**。
-  这是唯一一个 dev team 侧有**严格时间窗**的步骤：激活后 dev team 需要在很短的时间窗内（约 24 小时）完成一组**持私钥的链上注册**，**漏做会卡链**。对 devops 的含义：
-  - 你必须**远早于**激活时间戳 T 就完成全网滚动替换，给 dev team 留足注册窗口——不要拖到临近 T 才换完。
+  这是唯一一个有**严格时间窗**的步骤：激活后需要在很短的时间窗内（约 24 小时）完成一组**持私钥的链上注册**，**漏做会卡链**。因为 testnet validator 私钥在 devops 手里，**这组注册由 devops 用 dev team 给定的命令执行**（devnet 阶段是 dev team 自持私钥做的，testnet 改由你做）。对 devops 的含义：
+  - 你必须**远早于**激活时间戳 T 就完成全网滚动替换，给注册留足窗口——不要拖到临近 T 才换完。
   - 确保每个 validator 用 dev team 给的**完整启动参数**启动（这一步会多带几个最终性相关 flag，按 dev team 提供的 compose/command 原样使用）。
-  - 注册本身由 dev team 用私钥执行，**devops 不碰**。注册机制见 [devnet-upgrade-plan.md §三 Upgrade 3](devnet-upgrade-plan.md)，你不需要理解。
+  - **注册由你（devops）持 validator 私钥执行**：dev team 提供精确命令（含每个 validator 的 operator key 用法、`msg.value` 动态查询方式等，机制见 [devnet-upgrade-plan.md §三 Upgrade 3](devnet-upgrade-plan.md)），你按命令逐个执行并把结果交回 dev team 判定。命令不清楚或参数缺失 → 先对齐再执行，不自己猜值。
 
 - **Upgrade 4 — Cancun**：走通用模板，**时间戳激活**。验收（blob 交易等）由 dev team。
 
@@ -248,6 +251,21 @@ Upgrade 1 已经到达或越过激活块高、链卡死或需要撤回：按 [co
 
 每步升级后核对外部集成（区块浏览器 / indexer / 钱包 / 告警管道 / LB 转发新 RPC 方法）是否正常，清单见 [devnet-upgrade-plan.md §七 外部依赖测试清单](devnet-upgrade-plan.md)。
 
+### §7.6 跨链桥连续性（贯穿全部升级步骤的 TODO，DevNet 未覆盖）
+
+> 🌉 **为什么单列**：ABCore 有两条生产跨链桥——**AB Connect ↔ BSC** 与 **AB IOT ↔ AB Connect**（IoT 链即 AB IOT）。**DevNet 阶段没有桥 setup，桥连续性从未实测**（见 [devnet-upgrade-plan.md §七 缺口说明](devnet-upgrade-plan.md)）。因此 **Testnet 是桥的首次实测环境**，且桥必须在**每一步**升级（基线 → Upgrade 1 共识切换/PGB → Upgrade 2 / T1 → … → Upgrade 6 / T6）前后**持续可用、不中断**。这不是某一步的一次性检查，而是贯穿整条升级链路的 TODO。
+
+**前置（进入 §4 升级前，一次性）**：
+- [ ] Testnet 已部署两条桥的 setup：中继（relayer）进程 + 对端链（BSC / AB IOT）连通配置（**桥团队定义实现与配置；若 relayer/桥私钥在 devops 侧则由 devops 部署运行**）。
+- [ ] 桥的健康/延迟/积压指标已接入监控 dashboard（devops 配合提供 metrics 访问；指标定义由桥团队给出）。
+
+**每步升级前后（每个 Upgrade 都做）**：
+- [ ] 升级前记录桥基线：双向消息能正常中继、无积压、最近无失败事件。
+- [ ] 升级后确认桥**仍在中继**：发一笔（或观察一笔）双向跨链消息端到端到账，relayer 无报错、积压未增长。
+- [ ] 任一方向中继中断或积压持续增长 → 视为该步**未通过**，通知桥团队，不进入下一步。
+
+**RACI 边界**（与 §1 一致：testnet 私钥在 devops 手里）：桥的**实现、影响评估、最终判定**归**桥团队 / dev team**；桥的**持私钥操作（中继签名、合约调用）若密钥在 devops 侧，则由 devops 按桥团队给定步骤执行**；**devops 还负责**运行 relayer、核对桥监控指标、每步交接时确认"桥未中断"、异常上报。devops 执行但不定桥参数、不判定桥是否合格。各 Upgrade 对桥的具体影响评估见 [devnet-upgrade-plan.md §Q2 b/c](devnet-upgrade-plan.md)。
+
 ---
 
 ## §8 可选自动化：Jenkins 作为参考
@@ -258,7 +276,7 @@ DevNet 的部署编排在一个独立的 `devnet-ops` 仓库用 Jenkins 完成�
 
 - `jenkins/Jenkinsfile.newchain` — 全新链/节点 bootstrap
 - `jenkins/Jenkinsfile.rolling` — 滚动升级，内置"升级后 fork 验证"和"安全余量 abort"两个 stage
-- `scripts/register-validators.sh` — 生成密钥并做链上注册（**dev team / 持私钥，不是 devops 范围**）
+- `scripts/register-validators.sh` — 生成密钥并做链上注册（**testnet：密钥在 devops 手里，故由 devops 持钥执行注册；dev team 提供注册命令/参数并判定**。注意 devnet 阶段该脚本是 dev team 自持私钥运行的）
 
 无论手动还是 Jenkins，两个 devnet 实战教训务必照做：
 
@@ -284,8 +302,10 @@ DevNet 的部署编排在一个独立的 `devnet-ops` 仓库用 Jenkins 完成�
 - [ ] 全部节点已换到新 tag
 - [ ] 全网 head 一致，日志无 `BAD BLOCK`
 - [ ] metrics 正常上报，dashboard 可见
+- [ ] **跨链桥仍在中继、未中断**（[§7.6](#76-跨链桥连续性贯穿全部升级步骤的-todo-devnet-未覆盖)；devops 核对指标，桥团队判定）
 - [ ] 交回 dev team 做观测与验收，由其签收观察窗
 
 **testnet → mainnet 放行 gate**
 
 - [ ] [devnet-upgrade-plan.md §六 go/no-go 表](devnet-upgrade-plan.md) 全部满足（testnet 稳定运行 ≥2 周、各项阈值达标），由 dev team 拍板。
+- [ ] **两条跨链桥在全部 6 步升级中均保持连续可用**，无未解决的中继中断/积压（[§7.6](#76-跨链桥连续性贯穿全部升级步骤的-todo-devnet-未覆盖)；桥团队签收）—— 这是 DevNet 未覆盖、必须在 Testnet 补齐的项。
