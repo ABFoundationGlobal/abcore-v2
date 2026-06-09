@@ -330,7 +330,9 @@ services:
     container_name: abcore-validator
     restart: unless-stopped
     environment:
-      NETWORK: testnet
+      # 取自宿主 $NETWORK（见 §0，testnet 或 mainnet）；compose 会从 shell 环境读取。
+      # 务必在 up 之前 export NETWORK，避免 mainnet 误用 testnet 默认值。
+      NETWORK: ${NETWORK:-testnet}
       # 高级调优（可选）：将 node.toml 放入 $DOCKER_DIR/nodedata，取消下行注释
       # BSC_CONFIG: /data/node.toml
     volumes:
@@ -476,9 +478,10 @@ docker exec abcore-validator geth attach \
 # 2. 拉新镜像（始终强制 pull，勿凭 grep 跳过，见 §2.3 提示）
 docker pull abfoundation/abcore-v2:$TAG
 
-# 3. 逐个 validator 滚动替换（遵守 §3.2 滚动约束）：停一个 → up -d 新 tag → 等健康出块 → 下一个
+# 3. 逐个 validator 滚动替换（遵守 §3.2 滚动约束）：停一个 → 拉新镜像 → 强制重建 → 等健康出块 → 下一个
 cd $DOCKER_DIR
-docker compose up -d        # compose 内 image tag 取自 $TAG
+docker compose pull                    # 显式拉取 $TAG，同名 tag 被重推时确保本地是最新 image
+docker compose up -d --force-recreate  # 必须 --force-recreate，否则只重启旧容器、跑的还是旧 image
 docker compose logs -f --tail=50
 # 健康判据同 §3.5 步骤 4
 ```
@@ -580,7 +583,7 @@ docker exec <container> geth attach --exec 'eth.blockNumber' /data/geth.ipc
 # 停止 / 重启（数据完整保留）
 docker stop <container>;  docker restart <container>
 # 升级镜像（run 部署）：docker stop && docker rm，再以新 TAG 重新 docker run
-# 升级镜像（compose 部署）：docker compose pull && docker compose up -d
+# 升级镜像（compose 部署）：docker compose pull && docker compose up -d --force-recreate
 # 资源使用 / 版本
 docker stats <container>;  docker exec <container> geth version
 ```

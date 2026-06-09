@@ -133,11 +133,17 @@ docker run --rm --entrypoint geth abfoundation/abcore-v2:$TAG version
 2. **前置**：全量快照（[§3.1](#31-全量快照一致性--双签安全)）+ canary（[§3.3](#33-canary)）。
 3. **滚动替换**（每台 validator 逐个做，遵守 [滚动约束](node-and-validator-deployment.md#32-clique-滚动升级约束)）：
    ```bash
-   # 停一个 → 起新 tag → 等健康 → 确认出块 → 下一个
-   docker stop abcore-validator && docker compose up -d   # 以实际部署方式为准
-   until docker exec abcore-validator geth attach \
-           --exec 'eth.blockNumber + " peers=" + admin.peers.length' /data/geth.ipc \
-           2>/dev/null | grep -E '[0-9]+ peers=[1-9]'; do sleep 2; done
+   # 停一个 → 拉新镜像 → 强制重建 → 等健康 → 确认出块 → 下一个（以实际部署方式为准）
+   docker stop abcore-validator
+   docker compose pull                            # 显式拉取，同名 tag 重推时确保是最新 image
+   docker compose up -d --force-recreate          # 必须 --force-recreate，否则仍跑旧 image
+   # 等健康，最多 180s（90×2s）；超时仍不健康则停下排查，勿继续滚动下一个
+   for i in $(seq 1 90); do
+     docker exec abcore-validator geth attach \
+       --exec 'eth.blockNumber + " peers=" + admin.peers.length' /data/geth.ipc \
+       2>/dev/null | grep -qE '[0-9]+ peers=[1-9]' && break
+     sleep 2
+   done
    # 确认 head 追上其他节点（差 ≤5 块）、该节点重新出块后，再下一个
    ```
    RPC 节点最后替换（保持 ≥1 个对外）。
