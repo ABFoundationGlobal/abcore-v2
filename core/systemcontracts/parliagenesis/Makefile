@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-GENESIS_CONTRACT_BRANCH := test/shorten-local-drill-params
-GENESIS_CONTRACT_COMMIT := 3711f14e91e31c0ac0c4a78e9e8b0a87ae5d3fb7
+GENESIS_CONTRACT_BRANCH := feat/devnet-foundation-safe-multisig
+GENESIS_CONTRACT_COMMIT := 69daadc12458b97c83de36ee00ca6ed09e973745
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
