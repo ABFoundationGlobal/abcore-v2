@@ -1,6 +1,6 @@
 # Phase 2 共识激活操作手册（fork cutover）
 
-> **适用范围**：所有 validator 已经完成 v1 → v2 binary 升级（Phase 1，参考 [validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md)），全网仍以 pure Clique 跑链（`ParliaGenesisBlock = nil`），现在准备激活 Parlia 共识，把 chain 切到 dual-consensus 模式。
+> **适用范围**：所有 validator 已经完成 v1 → v2 binary 升级（Phase 1，参考 [node-and-validator-deployment.md §3](node-and-validator-deployment.md#3-v11315-裸机--v2-docker-在线迁移phase-1仍-clique)），全网仍以 pure Clique 跑链（`ParliaGenesisBlock = nil`），现在准备激活 Parlia 共识，把 chain 切到 dual-consensus 模式。
 >
 > **文档版本**: 1.0
 > **适用版本**: abcore-v2
@@ -18,7 +18,7 @@
 
 ### 1.1 Phase 1 vs Phase 2
 
-Phase 1 升级（v1.13.15 → abcore-v2 binary，`ParliaGenesisBlock = nil`）是 **binary swap**，consensus 引擎不变（仍是 Clique），同 Clique 滚动升级一致 —— 详见 [validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md)。
+Phase 1 升级（v1.13.15 → abcore-v2 binary，`ParliaGenesisBlock = nil`）是 **binary swap**，consensus 引擎不变（仍是 Clique），同 Clique 滚动升级一致 —— 详见 [node-and-validator-deployment.md §3](node-and-validator-deployment.md#3-v11315-裸机--v2-docker-在线迁移phase-1仍-clique)。
 
 Phase 2 升级（`ParliaGenesisBlock = nil` → `ParliaGenesisBlock = N`）是 **consensus engine 切换的激活**：v2 binary 不变，但 chain config 里多了一行 `ParliaGenesisBlock`，DualConsensus 引擎从 block N 开始用 Parlia 替代 Clique。这才是真正"切共识"的那一步。
 
@@ -33,6 +33,8 @@ Phase 2 升级（`ParliaGenesisBlock = nil` → `ParliaGenesisBlock = N`）是 *
 ---
 
 ## 2. Stop-window race（必须了解的故障模式）
+
+> 本节是通用 seal-race（`Recents` 滑动窗口，所有升级路径共用，见 [node-and-validator-deployment.md §5](node-and-validator-deployment.md#5-seal-race-死锁recents-机制所有路径通用)）在**共识激活点**的致命特例：stop-all 时窗口内 seal 出的 Clique-form 块 N 被重启后的 Parlia 引擎拒绝，导致永久死锁。通用规则（"绝不同时重启超过 floor(V/2) 个 validator"）见上述合并文档；本节只记录 Phase-2 专属的失败机理与真实事件。
 
 ### 2.1 故障场景
 
@@ -100,7 +102,7 @@ T+t5     重启所有节点
 
 **不要 stop-all。** 让 chain 持续在 Clique 模式跑，逐个 validator stop → 升级 chain config → restart → wait healthy，下一个。所有 validator 必须在 chain 跑到 N 之前完成升级。
 
-这跟 Phase 1 的 binary 升级是同样的滚动节奏（[validator-upgrade-v1-to-v2.md §5](validator-upgrade-v1-to-v2.md)），但有一个新约束：**chain 必须没有跑到 N**。
+这跟 Phase 1 的 binary 升级是同样的滚动节奏（[node-and-validator-deployment.md §3.6](node-and-validator-deployment.md#36-多节点滚动顺序3-节点示例)），但有一个新约束：**chain 必须没有跑到 N**。
 
 ### 3.2 安全余量计算
 
@@ -284,11 +286,11 @@ DevNet 测试套件历史上用 stop-all 是因为 testing 简化（让所有节
 
 | 阶段 | Doc |
 |------|-----|
-| 节点首次部署 | [node-deployment-v2.md](node-deployment-v2.md) |
-| Phase 1 binary 升级（v1 → v2，仍 Clique） | [validator-upgrade-v1-to-v2.md](validator-upgrade-v1-to-v2.md) |
+| 节点首次部署 / Phase 1 binary 升级（v1 → v2，仍 Clique） | [node-and-validator-deployment.md](node-and-validator-deployment.md) |
 | **Phase 2 共识激活（PGB=nil → PGB=N）** | **本文** |
 | Phase 2 失败后回滚到 Clique | [consensus-switch-rollback-runbook.md](consensus-switch-rollback-runbook.md) |
-| 完整 5-phase 升级路径规划 | [devnet-upgrade-plan.md](devnet-upgrade-plan.md) |
+| testnet / mainnet 升级编排（devops 视角） | [testnet-upgrade-plan.md](testnet-upgrade-plan.md) |
+| 完整升级路径规划与 fork 参数（SoT） | [devnet-upgrade-plan.md](devnet-upgrade-plan.md) |
 
 ---
 
