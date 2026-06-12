@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-GENESIS_CONTRACT_BRANCH := feat/devnet-foundation-safe-multisig
-GENESIS_CONTRACT_COMMIT := 69daadc12458b97c83de36ee00ca6ed09e973745
+GENESIS_CONTRACT_BRANCH := master
+GENESIS_CONTRACT_COMMIT := 364d9256d90ac828a5629b39aad6fd45d86c6207
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
