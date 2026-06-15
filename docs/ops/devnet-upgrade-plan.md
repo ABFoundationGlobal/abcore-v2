@@ -1104,7 +1104,20 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 - **PGB basis**：head≈#2039 @ 06-15T13:08Z，period=3s，target ~15:00 UTC，aligned 4400（% 200 == 0）。
 - **节点状态**（06-15T13:43Z 核实）：val-0/val-1 同步、Clique 相位、出块正常、5~6 peers、启动日志确认 PGB=4400 且 v0.3.0+ fork 全 nil。等块高到 4400 自动切 Parlia。
 
-**Cutover 后待验证**（步骤见 §三 Upgrade 1）：
-1. block 4400 extraData=197B（`IsOnParliaGenesis` 路径），Engine 从 clique 切 parlia，后续每 200 块为 epoch block。
-2. Parlia round-robin + 节点同步健康。
-3. **foundation 多签 fee**（本轮核心）：deposit() system tx 每块不 revert；发非零 gasPrice 的 legacy tx 制造 fee → Safe `0x0B53…6bE8` 余额增长 ≈15%；anvil[1,2,3] 的 2/3 多签 `execTransaction` 转出。注：v0.3.0（London/EIP-1559）后 fee 模型变化，需复测 15% 仍正确。
+**Cutover 实测**（06-15T15:06:34Z，block 4400 切换成功）：
+1. ✅ **PGB cutover**：block 4400 extraData=197B（`IsOnParliaGenesis` 路径），日志 `Apply upgrade parliaGenesis at height 4400`，17 个系统合约（0x1000–0x1008 / 0x2000–0x2006 / 0x3000）一次性部署；4400 起 `miner` 字段非零（Parlia 写 `header.Coinbase`，Clique 阶段恒 0x0）= Engine 已切 Parlia；4401=97B（非 epoch）、4600=197B（epoch）节奏正确。
+2. ✅ **共识健康**：4 validator round-robin（近 20 块各出 5 块均匀轮换），val-0/val-1 同步、无 INVALID/errInvalid/finalize 失败。
+3. ✅ **explorer**：Blockscout `BLOCK_TRANSFORMER=base`（未踩 2026-05-14 伪 miner 污染坑），健康、索引追平链高，Parlia 块 miner 是真实 validator 地址（非 ecrecover 伪地址）。`user-ops-indexer` 重启无害（ERC-4337 组件，devnet 无 bundler）。
+
+**foundation 多签 fee 实测**（本轮核心，06-15T15:3x）：
+- ✅ **deposit() 不卡链**：发 2 笔 legacy 非零 gasPrice（1gwei）tx，`status=0x1` 上链，链继续推进，无 finalize 失败 —— 验证 [genesis-contract#16](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/16) `call{gas:30000}` 对真实 Safe v1.5.0 proxy 不卡链。
+- ✅ **Safe 收 15%**：两笔 tx 同 block 5313 结算，`deposit()` emit `foundationTransfer(5906250000000)` + `systemTransfer(33468750000000)`，foundation Safe `0x0B53…6bE8` 余额 0 → 5,906,250,000,000 wei。比例 5.90625e12 / (5.90625e12 + 33.46875e12) = **15.0%**（v0.2.0 阶段 `INIT_BURN_RATIO=0`，剩 85% 全归 systemReward）。
+- ✅ **走成功路径**：是 `foundationTransfer`（成功）非 `foundationTransferFailed` —— 真实 Safe proxy 的 cold SLOAD + delegatecall 在 30000 gas 内完成。
+- ✅ **Safe 状态正常**：owners=anvil[1,2,3]、threshold=2、VERSION=1.5.0、nonce=0。
+- ⏳ **待执行**：anvil[1,2,3] 的 2/3 多签 `execTransaction` 从 Safe 转出（验证资金可出）。
+
+> **关键**：foundation 进账基数 = 区块**用户交易**手续费总和（`deposit()` system tx 自身 `onlyZeroGasPrice`，gasprice=0）。v0.2.0 无 London/EIP-1559，必须发 legacy 非零 gasPrice tx 才产生 fee；空块 fee=0 → foundation 收 0（非 bug）。此前升级后从未发过用户交易，故余额一直为 0。
+>
+> **单测覆盖 vs 链上实测**：`genesis-contract/test/ABChainConfig.t.sol` 已覆盖 15% 比例数学 + `vm.etch` 失败路径，但 `FOUNDATION_ADDR` 用占位 EOA，**未覆盖真实 Safe multisig proxy 收款的成功路径** —— 这正是本次链上实测补上的 gap。
+>
+> **v0.3.0 复测**：London/EIP-1559 激活后 fee 模型变（baseFee+priority），需复测 foundation 仍稳定收 ≈15%。
