@@ -2,7 +2,7 @@
 
 > 本文档用于指导 DevNet 搭建、升级演练，以及后续 Testnet / Mainnet 的推进策略。
 > **本文档是升级计划的 single source of truth。** drill 脚本 README（`script/test/upgrade-drill/README.md`）是工程验证视角，不等于运营计划；以本文档为准。
-> **Last updated**: 2026-05-19
+> **Last updated**: 2026-06-15
 
 ---
 
@@ -1059,198 +1059,52 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 ---
 
-## 十、Execution History（devnet 实际执行记录）
+## 十、Execution History
 
-> 本节记录 devnet 每一次升级的实际执行情况，作为 testnet/mainnet 同阶段升级的参照模板。每行记录三件事：calculation basis 和 ETA 准确性、触达的代码改动 PR、跨越过程中踩到的坑及对应修复。
+> 本节只跟踪**当前这次 reset（2026-06-15，预计为最后一次演练）**的执行情况。
+> 此前 v0.2.0 → v0.7.0 全程演练（历经多次 reset）的逐次实测细节已归档，只保留
+> ① 核心 **Lesson Learned**（踩坑根因，对 testnet/mainnet 仍有指导意义）
+> ② **历史升级汇总表**（PR 锚点，供 commit 比对）。
+> 每次升级"怎么测"的权威步骤在 §三 Upgrade 1~6，不在本节。
 
-### v0.2.0 — Phase 2: Clique → Parlia cutover
+### Lesson Learned（历次 reset 提炼，testnet/mainnet 必读）
 
-- **Cutover**：block 50000，actual **2026-05-14T07:58:43Z**（target ~08:00，早 77s）。basis: head=#36871 @ 05-13T21:02Z, period=3.03s, safety=13129 blocks ≈ 11h。Image v0.2.0。
-- **Activation PR** [#94](https://github.com/ABFoundationGlobal/abcore-v2/pull/94)（`ParliaGenesisBlock: 50000`）。
-- **配套 PRs**：[#82](https://github.com/ABFoundationGlobal/abcore-v2/pull/82) seal-race tuning · [#84](https://github.com/ABFoundationGlobal/abcore-v2/pull/84) `stop_below_pgb_or_die`(Layer A) · [#85](https://github.com/ABFoundationGlobal/abcore-v2/pull/85) cutover-runbook(Layer B) · [#86](https://github.com/ABFoundationGlobal/abcore-v2/pull/86) `VerifyForkBlockOnDisk`(Layer C) · [#90](https://github.com/ABFoundationGlobal/abcore-v2/pull/90) `--abcore.devnet`+MuirGlacier align · [#91](https://github.com/ABFoundationGlobal/abcore-v2/pull/91) remove `script/devnet/` · [#93](https://github.com/ABFoundationGlobal/abcore-v2/pull/93) Jenkins automation notes · [#95](https://github.com/ABFoundationGlobal/abcore-v2/pull/95) T-1.7 rollback drill · [#96](https://github.com/ABFoundationGlobal/abcore-v2/pull/96) Blockscout checklist · devnet-ops #3/#4。
+1. **下游 indexer 的 consensus-switch 适配必须在 cutover 之前确认。** 首轮 v0.2.0 cutover 后 Blockscout `BLOCK_TRANSFORMER=clique` 在 Parlia 阶段对 extraData 末 65 字节 ecrecover 出无意义伪 miner 地址，~3h 内 `total_addresses` 从 9 涨到 2388。根因 + 现场修复（改 `base` + Parlia 区间 refetch + DELETE 孤儿行）已固化进 §三 Upgrade 1 的 [Blockscout pre-cutover checklist](#blockscout-pre-cutover-checklist)。
 
-**踩到的问题 + 根因**：
+2. **本地测试用 `abchain-local`（network=dev）会被 dev-only patch 掩盖生产 bug。** 第三次 reset（2026-05-26）卡死于首个 breathe block：`BSCValidatorSet.init()` 填了 `currentValidatorSet` 但没初始化平行数组 `validatorExtraSet`，`updateValidatorSetV2 → _forceMaintainingValidatorsExit` 越界 → `INVALID` → Finalize 失败 → 链停摆。本地测不出是因为 `abchain-local` 的 dev-only patch 在 `init()` 里补了 `validatorExtraSet.push(...)`，而生产模板 `abchain-dev`（network=testnet）不含。修复 [genesis-contract#12](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/12) 把初始化提进 `init()` 主体（所有环境一致）。**判据**：一个 dev-only patch 是不是"会卡链的坑"，取决于生产模板缺它时，是否有 Parlia 自动注入的系统 tx（`onlyCoinbase`）或必经路径会 revert——系统 tx 在 `Finalize()` revert = 块产不出 = 确定性重试永久卡死，无链上补救空间。**所有系统 tx 路径（breathe block / finality reward / slash）必须用生产模板 bytecode 实测**（breathe block 已在 [#113](https://github.com/ABFoundationGlobal/abcore-v2/pull/113) U-3 覆盖；slash 路径仍 defer 到 cloud testnet）。
 
-1. **Fork-block seal-window race**（2026-05-07，DevNet）：stop-all-then-restart-all 模式下 Clique 偶尔多 seal 一块到 height==PGB，重启用新 config 时 Parlia 判 `errInvalidSpanValidators` 死锁。根因：测试脚本约束违反，也是真实 production cutover 风险。三层防御 [#84](https://github.com/ABFoundationGlobal/abcore-v2/pull/84)(`stop_below_pgb_or_die` fail-fast) + [#85](https://github.com/ABFoundationGlobal/abcore-v2/pull/85)(runbook 改 rolling-only) + [#86](https://github.com/ABFoundationGlobal/abcore-v2/pull/86)(engine 检测 Clique-form 在 PGB refuse-to-start)。
+3. **EpochLength 不要从 `Clique.Epoch` 继承。** PGB reseed 早期从 `Clique.Epoch`（30000）拷 snapshot EpochLength，导致 PGB 之后按固定块高激活的 fork（如 LubanBlock 165400）`% 30000 ≠ 0` → 非 epoch block → Luban 扩展信息延迟到下一个 epoch block 才出现在 extraData（链不 split，仅可观察性推迟）；二阶 bug：`snapshot.go` 的 Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `EpochLength == defaultEpochLength` 时触发，30000 永不满足。修复 [#103](https://github.com/ABFoundationGlobal/abcore-v2/pull/103)+[#104](https://github.com/ABFoundationGlobal/abcore-v2/pull/104)：`ParliaConfig` 加 `Epoch` 字段，reseed 读 `Parlia.Epoch`（fallback `defaultEpochLength=200`）。**运维建议**：PGB 可以是任何块号（`IsOnParliaGenesis` 接管）；但 PGB 之后计划在固定块高激活的 fork 应对齐 `% epochLength == 0`，否则扩展信息延迟一个 epoch 窗口。
 
-2. **MuirGlacierBlock 不一致**（2026-05-11）：V1 inline genesis 不含 `muirGlacierBlock`，但 `ABCoreDevnetChainConfig` 设 0，rolling upgrade `ConfigCompatError`。修复：devnet-ops #4 给 Jenkinsfile.init 加 `'muirGlacierBlock': 0`；[#90](https://github.com/ABFoundationGlobal/abcore-v2/pull/90) 同步 + `TestABCoreDevnetCompatWithLiveGenesis` 钉死契约。
+4. **alloc 用 `10^Exp` 公式不用 hex 字面值。** devnet-ops validator alloc 曾用 hex 字面值 off-by-one（`0x33b2...`=10^9 ether < 20亿 self-delegation 阈值）导致 `SelfDelegationNotEnough` revert。[devnet-ops#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12) 改用 `big.Int.Exp(10,28)`。
 
-3. **Blockscout `BLOCK_TRANSFORMER=clique` 在 Parlia 阶段产生伪 miner 地址**（2026-05-14 cutover 后）：~3h 内 `total_addresses` 从 9 涨到 2388。根因：`clique` transformer 忽略 RPC miner、拿 Parlia extraData 末 65 字节 ecrecover 出无意义伪地址。现场修复：改 `base` + Parlia 区间 refetch + DELETE 孤儿行（2388→23）；文档化 [#96](https://github.com/ABFoundationGlobal/abcore-v2/pull/96)。**教训**：下游 indexer 的 consensus-switch 适配必须在 cutover **之前**确认。
+5. **tag 重推后节点可能跑旧 image。** `Jenkinsfile.rolling` 的 `docker images | grep -q '^TAG$'` skip 在 tag 重打时仍命中 → 跳过 `docker pull` → 节点跑旧 binary。[devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10) 去掉 grep-skip，永远 `docker pull`。
 
-### v0.3.0 — Phase 3: London + 13 BSC block forks
+### 历史升级汇总表（v0.2.0 → v0.7.0，commit 比对锚点）
 
-- **Cutover**：block 165400，actual **2026-05-18T08:08:43Z**（target ~08:00）。basis: head=#152404 @ 05-17T21:18Z, period=3.000s, safety=12996 blocks ≈ 10.83h。Image v0.3.0。
-- **PR** [#98](https://github.com/ABFoundationGlobal/abcore-v2/pull/98)（14 个 fork field 同设 165400）；配套 [#99](https://github.com/ABFoundationGlobal/abcore-v2/pull/99)（docs + abcoreDevNet 路由对称化，retro 引发）。
+> 全程在 chain 17140 演练，历经多次 reset（最终存活链为 2026-05-28 fourth-pass）。逐次实测细节已归档；下表 PR 链接为 commit 比对锚点。本次 2026-06-15 reset 后重新逐档推进，激活点见下方跟踪段。
 
-**踩到的问题（升级 day 实测）+ 根因**：
+| 升级 | 版本 | 激活内容 | 配置 PR | 历史结果 |
+|---|---|---|---|---|
+| 1 | v0.2.0 | Clique → Parlia 共识切换（PGB） | [#103](https://github.com/ABFoundationGlobal/abcore-v2/pull/103)/[#104](https://github.com/ABFoundationGlobal/abcore-v2/pull/104) | ✅ |
+| 2 | v0.3.0 | London + 13 BSC block forks（EIP-1559） | [#105](https://github.com/ABFoundationGlobal/abcore-v2/pull/105) | ✅ |
+| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix | [#110](https://github.com/ABFoundationGlobal/abcore-v2/pull/110)/[#114](https://github.com/ABFoundationGlobal/abcore-v2/pull/114) | ✅ |
+| 4 | v0.5.0 | Cancun + Haber + HaberFix（EIP-4844 blob） | [#118](https://github.com/ABFoundationGlobal/abcore-v2/pull/118) | ✅ |
+| 5 | v0.6.0 | Pascal + Prague + Bohr + Lorentz + Maxwell | [#121](https://github.com/ABFoundationGlobal/abcore-v2/pull/121) | ✅ |
+| 6 | v0.7.0 | Fermi + Osaka + Mendel | [#123](https://github.com/ABFoundationGlobal/abcore-v2/pull/123) | ✅ |
 
-1. **误以为 fork block 165400 自身应是 Luban-form 438B**（实际 97B）。根因：M=165400 是 **LubanBlock**（非 PGB，PGB=50000 已过），选址按 `snap.EpochLength=200` 假设（`165400 % 200 == 0`），但运行时 `snap.EpochLength=30000`（PGB reseed 时从 `Clique.Epoch` 拷贝），`165400 % 30000 ≠ 0` → 非 epoch block → `prepareValidators` 不写 validator list → **97B 是正确行为**。链不报错也不 split（`verifyHeader` 的 isEpoch 检查接受非 epoch block 空 list）；后果只是 Luban 扩展信息延迟到下一个 epoch block 180000（实测 2026-05-18T20:18:43Z 出 438B，6/6 节点 hash 一致 `0x449ecb..711ae6`）。PGB 自身不受影响（`IsOnParliaGenesis` 强制视为 epoch boundary）。
+历史实测亮点（已验证，testnet/mainnet 可预期）：fast finality（BEP-126）自 Feynman 激活后 justified/finalized 持续推进；epoch promotion 在 block 184999（200→500）/189999（500→1000）精确切换；EVM fork（Pascal EIP-7623 floor gas、Prague EIP-7702 set-code + EIP-2537 BLS precompile）均链上验证；出块速度全程永久 3s（Lorentz/Maxwell/Fermi BlockInterval 均 override 3000ms）。
 
-2. **误以为 `lubanUpgrade[abcoreDevNet]` 漏注册导致 bytecode 没升级**。实际：一次性字节码部署 → 后续 fork 不需 bytecode 升级 → `Empty upgrade config height=165400` 是预期 INFO（PR #99 起 early-return 消除）。另：调试用错 selector（从 BSC bytecode 反推 `0x96713da9`，ABCore 编译版 `getMiningValidators()` 是 `0x4df6e0c3`），正确 selector 返回 5 validators + 5 空 BLS pubkey，**正常**。教训：查 ABI 去 `consensus/parlia/abi.go`，不要从 BSC mainnet bytecode 反推。
+### Reset (2026-06-15) — 重走升级路径，单独验证 foundation 多签 fee（进行中）
 
-**Verification 结果**：✓ chain config gates 全部生效 ✓ EIP-1559 header schema ✓ `getMiningValidators()` 返回 5 validators ✓ Parlia round-robin 健康 ✓ legacy type-0 tx 仍可发送 ✓ block 180000 Luban epoch block 438B extraData。**v0.3.0 升级完全成功**。
+本次 reset 目的：在 v1（Clique）阶段先部署 foundation Safe 多签 `0x0B53A578F024580563Ef1349b1F2c289115f6bE8`（owners=anvil[1,2,3]/2），再逐档走 v0.2.0 → v0.7.0，重点在 **Upgrade 1（v0.2.0）后单独验证 foundation 多签 fee 路径**（PR #16 `call{gas:30000}` 对真实 Safe 不卡链、Safe 收 15%、2/3 多签可转出）。这是此前几次 reset 未覆盖的新验证目标（foundation 地址此前是占位 `0x…f000`）。
 
-**根因修复（EpochLength misalignment，本次 devnet reset 同步修，PR #103 + #104）**：
-1. `params.ParliaConfig` 加 `Epoch uint64` 字段
-2. PGB reseed 路径改读 `chainConfig.Parlia.Epoch`，fallback `defaultEpochLength=200`，不再从 `Clique.Epoch` 拷贝
-3. 三个 ABCore chain config 显式设 `Parlia: &ParliaConfig{Epoch: 200}`
-4. ABCoreDevnetChainConfig 清空 PGB 之后所有 fork 字段，PGB 重新选址为 1600
+#### Upgrade 1：v0.2.0 — Clique → Parlia cutover
 
-**二阶 bug 同步消除**：`snapshot.go` 的 `apply()` Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `snap.EpochLength == defaultEpochLength` 时触发，30000 永不满足；修复后正确发生。
+- **配置 PR** [#126](https://github.com/ABFoundationGlobal/abcore-v2/pull/126)：`ABCoreDevnetChainConfig` 只调度 v0.2.0——`ParliaGenesisBlock = 4400`，v0.3.0+ 所有 block/timestamp fork 设 `nil`（PGB-only 合法，`IsOnParliaGenesis` 把 PGB 当 epoch boundary，不依赖 London）。Image `abfoundation/abcore-v2:v0.2.0`（foundation Safe addr 经 [#125](https://github.com/ABFoundationGlobal/abcore-v2/pull/125) 重嵌系统合约 bytecode）。
+- **PGB basis**：head≈#2039 @ 06-15T13:08Z，period=3s，target ~15:00 UTC，aligned 4400（% 200 == 0）。
+- **节点状态**（06-15T13:43Z 核实）：val-0/val-1 同步、Clique 相位、出块正常、5~6 peers、启动日志确认 PGB=4400 且 v0.3.0+ fork 全 nil。等块高到 4400 自动切 Parlia。
 
-**对未来 fork 调度的指导（运维建议，非协议约束）**：PGB 可以是任何块号（`IsOnParliaGenesis` 接管）；但 PGB 之后**计划在固定块高激活的 fork**（LubanBlock 等）应对齐 `% epochLength == 0`，否则该 fork 扩展信息延迟到下一个 epoch block 才出现在 extraData（链不 split，仅"可观察性"推迟一个 epoch 窗口）。
-
----
-
-### Devnet reset (2026-05-21) — Second rehearsal pass
-
-为彻底验证 EpochLength misalignment 修复，2026-05-21 重置整个 devnet（清空 chaindata + 重打 v0.2.0/v0.3.0 tag），重新走 v0.2.0 → v0.3.0 升级路径。这一轮 Parlia.Epoch=200 从 PGB 起就正确写入 snapshot；M=6000 选在 epoch boundary，**激活块自身就是 Luban-form 438B**，避免了首轮 165400=97B 的可观察性延迟。
-
-#### v0.2.0-rerun — Phase 2: Clique → Parlia cutover
-
-- **Reset** 2026-05-21 07:34 UTC (block 1 ts=1779348908)；**Cutover** block (N) **1600**，actual **~08:55 UTC**（target ~08:49）。basis: head=#273 @ 07:49:35Z, period=3.000s, raw=1473 → aligned 1600 (% 200 == 0)。Image v0.2.0（覆盖发布 digest sha256:2a7381...）。
-- **PR** [#104](https://github.com/ABFoundationGlobal/abcore-v2/pull/104)（`ParliaGenesisBlock: 1600`，drops PGB 200-grid invariant）；配套 [#103](https://github.com/ABFoundationGlobal/abcore-v2/pull/103)（`ParliaConfig.Epoch` + PGB reseed 读 `Parlia.Epoch`）、[devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10)（Jenkinsfile force-pull）。
-
-**踩到的问题 + 根因**：
-
-1. **`Jenkinsfile.rolling` grep-skip 跳过 `docker pull`**：tag v0.2.0 重推到 Docker Hub 但节点跑旧 image，因 `docker images | grep -q '^TAG$'` 在 tag 重打时仍命中。修复 [devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10) 去掉 grep-skip 永远 `docker pull`（配套加 SSH `set -e`、quoting、trap-cleanup）。
-2. **Explorer reset 路径不对**：bind mount 在 `services/*-data` 不是 compose 顶层，`docker volume prune` 没清掉旧链 db。修复：`rm -rf docker-compose/services/{blockscout-db-data,redis-data,stats-db-data}` + 清空 `services/dets`。
-3. **占位 PGB 违反 % 200 invariant**：PR #103 merge 时 PGB 填成 64709，PR #104 修正 1600 并明确"PGB 不要求 200 grid（IsOnParliaGenesis 接管），但后续 fork block 要求"。
-
-**Verification 结果**：✓ block 1600 (PGB) extraData=197B (IsOnParliaGenesis 路径) ✓ 后续每 200 块都是 epoch block ✓ Parlia round-robin 健康 ✓ 6/6 节点同步差 ≤ 9 块 ✓ Explorer total_blocks 追上。
-
-#### v0.3.0-rerun — Phase 3: London + 13 BSC block forks
-
-- **Cutover** block (M) **6000**（14 fork all at 6000，6000 % 200 == 0），actual **2026-05-21 12:52:34 UTC**（仅 4s off model）。basis: head=#2198 @ 09:42:24Z, period=3.000s, raw=5798 → aligned 6000。Image v0.3.0（digest sha256:3b610cff...）。Observation window 仅 4400 blocks (~3h40)，**deliberately shorter，do not copy to testnet/mainnet**。
-- **PR** [#105](https://github.com/ABFoundationGlobal/abcore-v2/pull/105)（14 fork fields all at 6000；加 `LubanBlock % Parlia.Epoch == 0` test invariant；清 stale epoch=30000 引用）。
-
-**激活效果实测**（block 6000 = 2026-05-21T12:52:34Z, hash 0x96008b...ab5cef）：
-
-| Block | extraData length | baseFeePerGas | 含义 |
-|---|---|---|---|
-| 5800 | 197B | nil | pre-London epoch (pre-Luban form: 32 vanity + 5×20 addr + 65 seal) ✓ |
-| 5999 | 97B | nil | 非 epoch block，无 validator list（vanity + seal only）✓ |
-| **6000** | **438B** | **0** | **Luban-form epoch block + EIP-1559 启用**（32 + 1 count + 5×(20 addr + 48 BLS pubkey) + 65 seal）✓ |
-| 6200 | 438B | 0 | 持续 Luban-form ✓ |
-
-**关键差异（vs 首轮 165400 retro）**：M=6000 自己**就是**第一个 Luban-form epoch block，无延迟，验证 PR #105"对齐 200 grid → 激活块即首个 Luban-form epoch block"的设计目标。
-
-**踩到的问题**：① 首轮 description "4400 blocks gap well above observation window"说法不实（4400 ≪ 28800），commit 58eccb87 改为"deliberately shorter, do not copy"。② Explorer block 6000 `extra_data: null`（小问题不阻塞）：RPC 返回 438B 但 Blockscout JSON 返回 null，主功能不受影响，未来单独排查。
-
-**Verification 结果**：✓ block 6000 extraData=438B (Luban-form, 5×48=240B BLS pubkey 槽就位) ✓ baseFeePerGas=0 (`InitialBaseFeeForBSC=0`) ✓ 启动日志 14 个 fork = 6000 ✓ round-robin 健康 ✓ 6/6 节点同步差 ≤ 9 块 ✓ image 全升 v0.3.0（验证 devnet-ops#10 修复生效）。**v0.3.0-rerun 完全成功**。
-
-### Devnet reset (2026-05-26) — Third pass: staking-aligned alloc + v0.4.0 cutover ❌ 卡死于首个 breathe block
-
-为支持 `abcore-v2-genesis-contract#11` 折中对齐（abchain-test/dev 的 5 个 staking/governance balance 阈值对齐 abchain-main，6 个时间参数保留 dev 短窗口），devnet 第三次 reset。driver：partial-align 后 `min_self_delegation = 20亿 ether`，原 validator 各 10^7 ether alloc 不够 → `SelfDelegationNotEnough` revert。决策：validator alloc 提到 100亿 + 新增 funder（`0xf39Fd6...`）1000亿，用于跨 propose_start_threshold 300亿 govAB；同时合并 v0.2.0/v0.3.0/v0.4.0 三段 cutover 到同一 reset 窗口。
-
-**新调度（一次 reset 跑完三段 fork）**：Reset block 1 ts=1779760741 @ **05-26 01:59:01 UTC** → T1=PGB block 2400 (reset+2h) → T2=London+13 forks block 3600 (reset+3h) → T3=Shanghai+Kepler+Feynman+FeynmanFix ts=1779782400 (**05-26 08:00:00 UTC** hard deadline)。新 `ABCoreDevnetGenesisHash` = `0x2f73871f16c2eab50b60624dec65620c9777b9cfb4d5242e902cfd1a73b00791`。
-
-**T1 实测**：block 2400（hash `0x59bae5da...aec10`），actual **05-26 03:59:48 UTC**。Image v0.4.0（一次 rolling 含 T1/T2/T3 三段 schedule），主 PR [#110](https://github.com/ABFoundationGlobal/abcore-v2/pull/110)（升 pin、改 alloc、reschedule、新 GenesisHash）。✓ 2400 extraData=197B (IsOnParliaGenesis) ✓ 每 200 块都是 epoch block ✓ round-robin 健康 ✓ 6/6 同步。
-
-**T2 实测**：block 3600（= T1+1200，gap 故意短，不要复制；hash `0x391a3070...ad4ba`），actual **05-26 04:59:48 UTC**，与 #110 合并。激活效果实测：
-
-| Block | extraData length | baseFeePerGas | 含义 |
-|---|---|---|---|
-| 2400 | 197B | nil | PGB pre-Luban epoch |
-| 3500 | 97B | nil | 非 epoch block,无 validator list |
-| 3599 | 97B | nil | 紧邻 fork 但非 epoch block |
-| **3600** | **438B** | **0** | **first Luban-form epoch block + EIP-1559 启用** |
-| 3800 | 438B | 0 | 持续 Luban-form ✓ |
-
-3600 = first Luban-form epoch block (3600 % 200 == 0)，与首次 v0.3.0-rerun 一致：M 自己即激活块。
-
-#### v0.4.0 — T3: Shanghai + Kepler + Feynman + FeynmanFix（首次执行）
-
-T3 timestamp = 1779782400（2026-05-26 08:00:00 UTC），与 #110 合并。`T3 % 86400 = 28800` → 距下一个 UTC-day breathe boundary 16h，validator 注册窗口 16h。
-
-**Verification 实测**（T3 后 ~50 分钟）：✓ `minSelfDelegationBNB()`=20亿、`minDelegationBNBChange()`=1亿、`LOCK_AMOUNT()`=1 ether ✓ funder 起步 10^29 wei 完整 ✓ 5 个 validator 全部 `createValidator`+`delegate` 成功，每个 `getVotes()`=23亿 govAB（20亿 self + 3亿 delegate）✓ `getValidators()` 返回 5 个，待下一个 breathe block 刷新 ✓ 出块正常轮流。
-
-**关键架构改动（vs 前两次 reset）**：① genesis alloc 新增 funder（让 governance 演练能跨 `propose_start_threshold=300亿 govAB`：5×23亿=115亿 < 300亿，需 funder 再 delegate 185亿）；② reset+rolling 一次完成 T1/T2/T3 三段 fork（chain state 整体新建，无需逐段观察窗口）；③ partial-align 决策（`abcore-v2-genesis-contract#11` 把 abchain-test/dev staking 阈值对齐 main、时间参数保留 dev 短窗口；配套 [#109](https://github.com/ABFoundationGlobal/abcore-v2/pull/109)、[devnet-ops#11](https://github.com/ABFoundationGlobal/devnet-ops/pull/11)+[#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12)）。
-
-**踩到的问题**：① devnet-ops#11 validator alloc hex 字面值 off-by-one（`0x33b2...`=10^9 ether < 20亿 self-delegation），[devnet-ops#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12)+abcore-v2#110 改用 `big.Int.Exp(10,28)`=100亿 ether（教训：alloc 用 `10^Exp` 公式不用 hex 字面值）。② Copilot 抓到注释过去时，`b335879` 修。
-
-**结果：第一个 breathe block 卡死链 ❌**
-
-2026-05-27 00:00:00 UTC 第一个 Go 层 breathe block 触发 `updateValidatorSetV2`，**链卡死无法 finalize**，head 停在 26403，日志每 3s 重试报 `invalid opcode: INVALID`（~8.7h 后发现）。
-
-**根因**：`BSCValidatorSet.init()` 填了 `currentValidatorSet`（5 个）但**没初始化平行数组 `validatorExtraSet`**（长度 0）。`updateValidatorSetV2 → _forceMaintainingValidatorsExit` 按 `currentValidatorSet.length` 循环访问 `validatorExtraSet[i]`，越界 → Solidity 0.6.x assert → INVALID → Finalize 失败。**为什么本地测不出**：`updateValidatorSetV2` 缺 `initValidatorExtraSet` lazy-init 修饰符（其它入口都有）；本地 `abchain-local`（`network="dev"`）的 generate.py dev-only patch 在 `init()` 里补 `validatorExtraSet.push(...)`，而 ABCoreDevNet 用 `abchain-dev`（`network="testnet"` 贴近生产）不含该 patch。修复 [abcore-v2-genesis-contract#12](https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract/pull/12)（master `ffd4057`）把初始化提进 `init()` 主体，所有环境一致。
-
-**连带第二个坑**：`SystemReward.doInit()` 没注册 `0x1000`/`0x1001` 为 operator，`distributeFinalityReward`/`submitDoubleSignEvidence` 调 `claimRewards`（`onlyOperator`）会 revert。同属 dev-only patch 缺失。**devnet 当前 `systemRewardBaseRatio=0`，`distributeFinalityReward` 提前 return 未触发**（fast finality 奖励启用后才爆）。#12 一并修。
-
-### Lesson Learned（这次卡死的核心教训）
-
-**核心问题：本地测试用 `abchain-local`（network=dev）会被 dev-only patch 掩盖生产 bug。** `generate.py` 的 4 处 `network=="dev"` patch 其实是两类东西混在一个开关里：
-
-| dev-only patch | 性质 | 生产模板缺它的后果 |
-|---|---|---|
-| `validatorExtraSet` init | **正确性缺口**（误当便利） | breathe block 卡链（坑1） |
-| SystemReward 注册 0x1000/0x1001 operator | **正确性缺口**（误当便利） | finality reward 路径 revert（坑2，devnet 暂未触发） |
-| `enableMaliciousVoteSlash=true` | 功能开关 | 生产有意默认关，不影响出块 |
-| 两个 `handleSynPackage` 去 `onlyCrossChainContract` | 纯本地便利 | 生产必须保留（安全边界）；devnet 无跨链 relayer，系统 tx 不触发，不卡链 |
-
-**判据**：一个 dev-only patch 是不是"会卡链的坑"，取决于**生产模板缺它时有没有 Parlia 自动注入的系统 tx（`onlyCoinbase`）或必经路径会 revert**。系统 tx 在 `Finalize()` revert = 块产不出 = 卡链，确定性重试永久卡死无链上补救空间；普通 tx revert 只影响那一笔。**根源是命名错位**：`abchain-local`（本地单机）选 `network="dev"`（带便利 patch），`abchain-dev`（多节点 DevNet）选 `network="testnet"`（贴近生产），取值交叉导致"本地测得过、DevNet 卡死"。
-
-**改进措施**：① 所有系统 tx 路径必须用生产模板 bytecode（abchain-dev/test）实测——breathe block 验证已在 [#113](https://github.com/ABFoundationGlobal/abcore-v2/pull/113) 加入 U-3（含 negative case），slash 路径（`slash`→`felony`→`updateValidatorSetV2`）仍未在生产模板实跑（[#112](https://github.com/ABFoundationGlobal/abcore-v2/pull/112) T-12 defer 到 cloud testnet）；② 加 invariant 检查（断言 `validatorExtraSet.length == currentValidatorSet.length` 等平行数组/集合一致性）；③ 三条系统 tx 路径需在生产模板下全部验证不卡链：breathe block（坑1 已修+已测）、finality reward（坑2 已修，fast finality 启用后需测）、slash（未测，T-12 defer）。
-
----
-
-### Devnet reset (2026-05-28) — Fourth pass: bytecode-fix re-run
-
-第三次 reset 卡死，修复后用**完全相同的调度和 alloc** 重跑。**唯一改动：T3 timestamp**（[#114](https://github.com/ABFoundationGlobal/abcore-v2/pull/114)）从过期的 `1779782400`（05-26 08:00 UTC）重设为 `1779955200`（**2026-05-28 08:00 UTC**）。其余不变：T1=PGB 2400、T2=3600、alloc 5×10^10 + funder 10^11 ether、devnet bytecode pin `ffd4057`（含 validatorExtraSet+SystemReward 修复，由 [#113](https://github.com/ABFoundationGlobal/abcore-v2/pull/113) 带入 master）。`ABCoreDevnetGenesisHash` = `0x2f73871f...b00791` 不变（系统合约 bytecode 在 PGB 植入不在 block 0 alloc，bytecode 修复 + T3 改动都不影响 block 0 hash）。
-
-T3 仍 breathe 对齐：`T3 % 86400 = 28800`，注册窗口 16h（05-28 00:00 边界后 8h 激活、05-29 00:00 前 16h）。Reset 最晚 05-28 04:00 UTC（让 T2=reset+3h 在 T3 前）。操作：`Jenkinsfile.init RESET=true` → 立即 `Jenkinsfile.rolling`（T1 前）→ T3 后 `Jenkinsfile.register-validators`（16h 窗口）。
-
-**结果 ✅**：链稳定运行，第一个 breathe block 顺利通过，未再出现 `validatorExtraSet` 越界停摆；其后跨 epoch 边界、fast finality 正常。**05-28 fourth pass 即当前存活链。**
-
-### Upgrade 4：v0.5.0 — Cancun + Haber + HaberFix（2026-06-01 T4）— 成功 ✅
-
-配置 [#118](https://github.com/ABFoundationGlobal/abcore-v2/pull/118)（已合并 master `4ae923dee`）：`CancunTime = HaberTime = HaberFixTime = 1780300800`（2026-06-01 08:00 UTC = T4），`BlobScheduleConfig.Cancun = DefaultCancunBlobConfig`，`PragueTime = nil`（正确留给 T5 未提前）。
-
-**链上实测（T4 后 2026-06-01 09:57 UTC）**：latest `#124809` / finalized `#124808`（差 1 块，fast finality 健康跨 T4 未中断）；区块头出现 `blobGasUsed=0`/`excessBlobGas=0`，T4 前的块（如 `#115640`）这两字段为空 → **Cancun 确在 T4 激活生效**；节点已 rolling 升到含 #118 镜像，出块正常。
-
-> fast finality 自 T3 (Feynman) 激活后生效，与 Cancun 无关（T4 前 finalized 推进即明证）；flag 早带/T3 生效详见 §三 Upgrade 3「Fast finality 节点启动参数」。
-
-**观察窗口**：≥ 48h 后推进 Upgrade 5 (T5)。
-
-### Upgrade 5：v0.6.0 — Pascal + Prague + Bohr + Lorentz + Maxwell（2026-06-03 T5）— 成功 ✅
-
-配置见 [#121](https://github.com/ABFoundationGlobal/abcore-v2/pull/121)（已合并 master）。devnet 缩短窗口：Pascal/Prague/Bohr = `1780473600`（06-03 08:00 UTC = T5）、Lorentz = `1780488000`（T5+4h，epoch 200→500）、Maxwell = `1780502400`（T5+8h，epoch 500→1000）；BlobScheduleConfig 加 Prague。
-
-**链上实测（2026-06-03，ssh ab-d4 `devnet-rpc-0` IPC 调 `parlia.getSnapshot()`，最权威）：**
-
-- **当前态**：`epoch_length=1000`、`turn_length=1`、`block_interval=3000`、5 validators —— 全部符合预期。
-- **epoch promotion 回溯**（传历史块号读当时 snapshot）：epoch=200（≤184998）→ 500（184999–189998）→ 1000（≥189999）。两次切换**精确发生在 block 184999 / 189999**，符合 `snapshot.go` 的 `(number+1)%newEpoch==0`（184999→185000%500==0；189999→190000%1000==0）。切换块时间戳 184999@12:07 UTC / 189999@16:17 UTC，即 fork 时刻后第一个新-epoch 边界。
-- **共识健康**：184999/185000、189999/190000 四节点（ab-d1/d2/d3/d4）block hash 完全一致，无 reorg；finalized 持续推进、lag=1（fast finality 跨 epoch 变化未受影响）；block interval 实测 5 块 15s（仍 3s）。
-
-**Fork 特性验证（全部通过）**：Pascal EIP-7623（真实 tx receipt `gasUsed=41000` = floor `21000 + 10×2000`，远高于 pre-7623 的 29000 → floor 生效，@ block 193946）；Prague EIP-7702 type-4 set-code tx 成功，`cast code` 返回 `0xef0100+addr` 委托标记；Prague EIP-2537 BLS12-381 G1Add 256B→128B 正确；Bohr no-op（turn_length=1）；block interval 仍 3s。**升级成功。**
-
-### Upgrade 6：v0.7.0 — Fermi + Osaka + Mendel（2026-06-05 T6）— 成功 ✅
-
-配置见 [#123](https://github.com/ABFoundationGlobal/abcore-v2/pull/123)（已 merged）。`ABCoreDevnetChainConfig` 设 Fermi = Osaka = Mendel = `1780646400`（**2026-06-05 08:00 UTC = T6**），BlobScheduleConfig 加 `Osaka: DefaultOsakaBlobConfigBSC`。三者在 ABCore 基本 no-op（Fermi BlockInterval 已 override 3000ms；Osaka BPO 只换 blob schedule；Mendel 随 Osaka）。
-
-**链上实测（2026-06-06，ssh ab-d4 `devnet-rpc-0`）**：节点 chain config 已含 `fermiTime=osakaTime=mendelTime=1780646400`（二进制 Git Commit `002f315`，#123 merged 后 build）；T6 已过 ~37h，链高 ~282000 健康推进，`epoch_length=1000`/`turn_length=1`/`block_interval=3000`/5 validators，跨 T6 无停摆、无 reorg。**Osaka/Fermi/Mendel 已激活,devnet 自此走完 v0.2.0 → v0.7.0 全升级路径。**
-
----
-
-## 十一、DevNet 升级全过程总结（v0.2.0 → v0.7.0 全部完成 ✅）
-
-devnet 自 Clique PoA 起,经 6 次升级完成到 Parlia PoSA + 全套 BSC/EVM fork 的迁移。全程在 chain 17140 上演练（经多次 reset,最终存活链为 2026-05-28 fourth-pass re-run）。
-
-| 升级 | 版本 | 激活内容 | 激活点 | PR | 结果 |
-|---|---|---|---|---|---|
-| 1 | v0.2.0 | Clique → Parlia 共识切换 | block 2400 (PGB) | #103/#104 | ✅ |
-| 2 | v0.3.0 | London + 13 BSC block forks | block 3600 | — | ✅ |
-| 3 | v0.4.0 | Shanghai + Kepler + Feynman + FeynmanFix | T3 = 1779955200（05-28 08:00 UTC） | #114 | ✅ |
-| 4 | v0.5.0 | Cancun + Haber + HaberFix（EIP-4844） | T4 = 1780300800（06-01 08:00 UTC） | #118 | ✅ |
-| 5 | v0.6.0 | Pascal + Prague + Bohr + Lorentz + Maxwell | T5 = 1780473600（06-03 08:00 UTC,L/M +4h/+8h） | #121 | ✅ |
-| 6 | v0.7.0 | Fermi + Osaka + Mendel | T6 = 1780646400（06-05 08:00 UTC） | #123 | ✅ |
-
-**关键实测亮点**:
-- **fast finality**(BEP-126):`--vote` 自 05-21 reset 即挂载、T3/Feynman 激活后生效;实测 justified/finalized 持续推进、header 带 BLS attestation。
-- **epoch promotion**:Lorentz/Maxwell 把 Parlia epoch 200→500→1000(块数,非出块速度),实测在 block 184999(200→500)、189999(500→1000)精确切换。
-- **EVM fork**:Pascal EIP-7623(真实 tx receipt gasUsed=floor 实证)、Prague EIP-7702(set-code 委托)+ EIP-2537(BLS12-381 precompile)均链上验证。
-- **出块速度永久 3s**:Lorentz/Maxwell/Fermi 的 BlockInterval 全 override 为 3000ms,激活无影响。
-
-**后续**:此文档作为 Testnet(26888)/ Mainnet(36888)升级的模板(见 §六)。testnet/mainnet 的时间戳偏移用保守值(L/M +1d/+7d),不用 devnet 的缩短窗口。
-
-
+**Cutover 后待验证**（步骤见 §三 Upgrade 1）：
+1. block 4400 extraData=197B（`IsOnParliaGenesis` 路径），Engine 从 clique 切 parlia，后续每 200 块为 epoch block。
+2. Parlia round-robin + 节点同步健康。
+3. **foundation 多签 fee**（本轮核心）：deposit() system tx 每块不 revert；发非零 gasPrice 的 legacy tx 制造 fee → Safe `0x0B53…6bE8` 余额增长 ≈15%；anvil[1,2,3] 的 2/3 多签 `execTransaction` 转出。注：v0.3.0（London/EIP-1559）后 fee 模型变化，需复测 15% 仍正确。
