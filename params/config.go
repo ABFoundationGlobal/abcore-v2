@@ -449,162 +449,33 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// === DevNet reset 2026-05-26: compressed T1 / T2 / T3 schedule ===
+		// === DevNet re-run 2026-06-15: ONLY v0.2.0 (Clique → Parlia) scheduled ===
 		//
-		// The devnet is scheduled for reset on 2026-05-26 (no later than
-		// 04:00 UTC) with a new genesis alloc (each validator 10^10 ether
-		// plus a well-known funder at 10^11 ether) to support the mainnet-
-		// aligned staking thresholds shipped in abcore-v2-genesis-contract
-		// PR #11 (min_self_delegation = 2_000_000_000 ether,
-		// propose_start_threshold = 30_000_000_000 ether). The pre-reset
-		// PGB=1600 / T2=6000 / T3=2026-05-25 schedule is preserved in §10 of
-		// devnet-upgrade-plan.md as historical record. This file is being
-		// merged ahead of the reset window so v2 binaries built from master
-		// pick up the new ABCoreDevnetChainConfig automatically when the
-		// rolling-upgrade step (Jenkinsfile.rolling) runs after init.
+		// This re-run walks the upgrade path one step at a time again, starting
+		// from a fresh v1 (Clique) reset. Only the v0.2.0 consensus switch is
+		// scheduled here; v0.3.0–v0.7.0 (London + 13 BSC block forks, Shanghai/
+		// Kepler/Feynman, Cancun/Haber, Bohr/Pascal/Prague/Lorentz/Maxwell,
+		// Fermi/Osaka/Mendel) are intentionally left nil and will be added back
+		// one upgrade at a time in subsequent PRs.
 		//
-		// New schedule (block_interval = 3 s):
+		// Leaving London (and everything gated on IsLondon) nil while PGB is set
+		// is a valid v0.2.0-only config: consensus/parlia treats the PGB block as
+		// an epoch boundary regardless of London, and CheckConfigForkOrder only
+		// requires PGB to precede London *when London is set*. This matches the
+		// original v0.2.0 single-step schedule (see §10 history, PR #104).
 		//
-		//   T1 = block 2400 (ParliaGenesisBlock, Clique → Parlia)
-		//   T2 = block 3600 (London + 13 BSC block forks)
-		//   T3 = 2026-05-28 08:00:00 UTC = unix 1779955200
-		//        (Shanghai + Kepler + Feynman + FeynmanFix, timestamp-based)
+		//   T1 = block 4400 (ParliaGenesisBlock, Clique → Parlia)
+		//        target ~2026-06-15 15:00 UTC (block_interval 3s; computed from the
+		//        live reset height + ~2h, then rounded up to the 200-grid). 4400 %
+		//        200 == 0 — operational tidiness; PGB does not require grid alignment.
 		//
-		// Wall-clock layout assuming reset at 04:00 UTC (worst-case latest reset):
-		//   reset:  04:00 UTC (block 0)
-		//   T1:     06:00 UTC (block 2400 = reset + 2h)
-		//   T2:     07:00 UTC (block 3600 = reset + 3h)
-		//   T3:     08:00 UTC (hard deadline, timestamp-based)
+		// v0.2.0 validation now also covers the foundation Safe multisig fee path
+		// (deposit() → call{gas:30000} → FOUNDATION_ADDR Safe). See
+		// devnet-upgrade-plan.md §3 "Upgrade 1" foundation verification steps.
 		//
-		// Constraint: reset must complete no later than 2026-05-28 04:00 UTC so
-		// T2 (block 3600 = reset + 3h) lands strictly before T3 (08:00 UTC).
-		// Earlier reset is fine — T3 stays anchored to wall-clock, T1/T2 just
-		// trigger earlier in real time.
-		//
-		// 200-grid alignment for T2 (LubanBlock and friends): 3600 % 200 == 0.
-		// This matters because LubanBlock changes validator extraData layout from
-		// 20B/validator to 68B/validator (BLS pubkey appended), but the
-		// Luban-form list is only written at epoch boundaries
-		// (block.Number % Parlia.Epoch == 0). Aligning T2 to the grid makes T2
-		// itself the first verifiable Luban-form epoch block.
-		//
-		// PGB (T1) does not need 200-grid alignment for protocol reasons —
-		// consensus/parlia/parlia.go treats the PGB block as an epoch boundary
-		// regardless of `PGB % epochLength` (see the IsOnParliaGenesis branches
-		// in getValidatorBytesFromHeader and verifyHeader). 2400 % 200 == 0 is
-		// kept for operational tidiness only.
-		LondonBlock:     big.NewInt(3600),
-		RamanujanBlock:  big.NewInt(3600),
-		NielsBlock:      big.NewInt(3600),
-		MirrorSyncBlock: big.NewInt(3600),
-		BrunoBlock:      big.NewInt(3600),
-		EulerBlock:      big.NewInt(3600),
-		GibbsBlock:      big.NewInt(3600),
-		NanoBlock:       big.NewInt(3600),
-		MoranBlock:      big.NewInt(3600),
-		PlanckBlock:     big.NewInt(3600),
-		LubanBlock:      big.NewInt(3600),
-		PlatoBlock:      big.NewInt(3600),
-		HertzBlock:      big.NewInt(3600),
-		HertzfixBlock:   big.NewInt(3600),
-		// Timestamp-based T3 forks. Cancun and Prague stay nil until later
-		// upgrades (v0.5.0+).
-		//
-		// Why this T3 is safe (breathe-block alignment check):
-		//   BreatheBlockInterval = 24h (params/protocol_params.go:211).
-		//   T3 % 86400 = 28800 → T3 lands 8h AFTER the 2026-05-28 00:00 UTC
-		//   breathe boundary, and 16h BEFORE the 2026-05-29 00:00 UTC boundary.
-		//   This gives operators a ~16h window after Feynman activation to
-		//   complete `createValidator` + `delegate` on all 5 validators before
-		//   the first Go-layer breathe block fires `updateValidatorSetV2`.
-		//   See devnet-upgrade-plan.md §3 "Validator 注册流程与活动窗口".
-		//
-		// Why all four times equal T3:
-		//   - ShanghaiTime: EIP-3855 (PUSH0), EIP-3860 (initcode size limit),
-		//     EIP-4895 BSC-adapted staking withdrawal semantics
-		//   - KeplerTime: BSC convention pairs Kepler with Shanghai
-		//   - FeynmanTime: enables `updateValidatorSetV2` + StakeHub validator
-		//     election at breathe blocks
-		//   - FeynmanFixTime: BSC convention pairs FeynmanFix with Feynman on
-		//     non-mainnet networks (mainnet split them by ~14 days)
-		// CheckConfigForkOrder permits all four times at T3.
-		ShanghaiTime:   newUint64(1779955200), // 2026-05-28 08:00:00 UTC
-		KeplerTime:     newUint64(1779955200),
-		FeynmanTime:    newUint64(1779955200),
-		FeynmanFixTime: newUint64(1779955200),
-		// === T4 (v0.5.0 upgrade): Cancun + Haber + HaberFix ===
-		//
-		// EIP-4844 blob transactions. Activated by timestamp T4 =
-		// 2026-06-01 08:00:00 UTC = unix 1780300800. See
-		// devnet-upgrade-plan.md §3 "Upgrade 4: v0.5.0 — Cancun + Haber + HaberFix".
-		//
-		// Why all three equal T4: BSC convention pairs Haber/HaberFix with Cancun
-		// (mainnet split them only because it activated them on different real
-		// dates). CheckConfigForkOrder permits all three at the same timestamp.
-		//
-		// BlobScheduleConfig.Cancun is REQUIRED once CancunTime is set, otherwise
-		// CheckConfigForkOrder fails at startup with `invalid chain configuration:
-		// missing entry for fork "cancun" in blobSchedule`. Target 3 / Max 6 is
-		// the BSC Cancun default (DefaultCancunBlobConfig).
-		CancunTime:   newUint64(1780300800), // 2026-06-01 08:00:00 UTC (T4)
-		HaberTime:    newUint64(1780300800),
-		HaberFixTime: newUint64(1780300800),
-		// === T5 (v0.6.0 upgrade): Bohr + Pascal + Prague + Lorentz + Maxwell ===
-		//
-		// Activated by timestamp T5 = 2026-06-03 08:00:00 UTC = unix 1780473600.
-		// See devnet-upgrade-plan.md §3 "Upgrade 5: v0.6.0".
-		//
-		// Assignments are ordered by the BSC fork order (Bohr → Pascal → Prague →
-		// Lorentz → Maxwell), matching the ChainConfig struct field order.
-		// CheckConfigForkOrder requires non-decreasing timestamps, which
-		// Bohr=Pascal=Prague(T5) ≤ Lorentz(T5+4h) ≤ Maxwell(T5+8h) satisfies.
-		//   - Bohr:   no-op on ABCore — getTurnLength() returns 1 when turnLength==0,
-		//             same as pre-Bohr; kept on the main path to match upstream
-		//             fork order. Only visible change: a 1-byte turnLength(=1)
-		//             appended to epoch-block header.extra.
-		//   - Pascal: EIP-7623 (calldata cost)
-		//   - Prague: EIP-7702 (EOA delegation), EIP-2537 (BLS12-381 precompile)
-		//   - Lorentz/Maxwell: Parlia epoch length 200 → 500 → 1000 BLOCKS (not a
-		//             block-interval change — interval stays 3s, see
-		//             protocol_params.go). The snapshot.go auto-promotion needs the
-		//             chain to cross a block where number % newEpochLength == 0
-		//             after the fork time, so we stagger them 4h apart (devnet uses
-		//             a shortened window vs the plan's +1d/+7d) to observe each
-		//             promotion (200→500, then 500→1000) separately.
-		BohrTime:    newUint64(1780473600), // 2026-06-03 08:00:00 UTC (T5)
-		PascalTime:  newUint64(1780473600), // T5
-		PragueTime:  newUint64(1780473600), // T5
-		LorentzTime: newUint64(1780488000), // T5+4h = 2026-06-03 12:00:00 UTC — epoch 200→500
-		MaxwellTime: newUint64(1780502400), // T5+8h = 2026-06-03 16:00:00 UTC — epoch 500→1000
-		// === T6 (v0.7.0 upgrade): Fermi + Osaka + Mendel ===
-		//
-		// Activated by timestamp T6 = 2026-06-05 08:00:00 UTC = unix 1780646400.
-		// See devnet-upgrade-plan.md §3 "Upgrade 6: v0.7.0". Field order matches
-		// the BSC fork order (Fermi → Osaka → Mendel); all three at T6, and
-		// T6 > Maxwell, so CheckConfigForkOrder's non-decreasing requirement holds.
-		//   - Fermi:  no-op on ABCore — FermiBlockInterval is overridden to 3000ms
-		//             in protocol_params.go, so block time stays 3s. Activated only
-		//             to keep up with the upstream BSC fork order.
-		//   - Osaka:  BPO (Blob-Parameter-Only) fork — requires a
-		//             BlobScheduleConfig.Osaka entry or CheckConfigForkOrder fails
-		//             at startup (same gate as Cancun@T4 / Prague@T5).
-		//   - Mendel: activates together with Osaka.
-		FermiTime:  newUint64(1780646400), // 2026-06-05 08:00:00 UTC (T6)
-		OsakaTime:  newUint64(1780646400), // T6
-		MendelTime: newUint64(1780646400), // T6
-		// Prague entry is REQUIRED once PragueTime is set; Osaka entry is REQUIRED
-		// once OsakaTime is set — otherwise CheckConfigForkOrder fails at startup
-		// with `invalid chain configuration: missing entry for fork "<fork>" in
-		// blobSchedule` (same as Cancun at T4). BSC keeps Prague's and Osaka's blob
-		// params identical to Cancun (Target 3 / Max 6) via the *BSC variants — NOT
-		// the ETH-mainnet DefaultPragueBlobConfig / DefaultOsakaBlobConfig. chapel/bsc
-		// configs use the BSC variants; we match them.
-		BlobScheduleConfig: &BlobScheduleConfig{
-			Cancun: DefaultCancunBlobConfig,
-			Prague: DefaultPragueBlobConfigBSC,
-			Osaka:  DefaultOsakaBlobConfigBSC,
-		},
-		ParliaGenesisBlock: big.NewInt(2400),
+		// No BlobScheduleConfig: it is only required once CancunTime/PragueTime/
+		// OsakaTime are set; all three are nil in this v0.2.0-only config.
+		ParliaGenesisBlock: big.NewInt(4400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
 		// (also the precondition for the Lorentz/Maxwell auto-promotion logic in

@@ -77,7 +77,7 @@ v0.7.0 — Fermi + Osaka + Mendel（BSC 主网 2026 最新 fork）
 | 共识（初始）| Clique PoA |
 | Clique Period | 3s（与 mainnet 一致）|
 | Clique Epoch | 30000 |
-| ParliaGenesisBlock | 演练时设定；当前 devnet 实测值 2400（2026-05-28 reset re-run 后；PGB 与 05-26 那次相同，但 05-26 已卡死，存活链是 05-28）|
+| ParliaGenesisBlock | 演练时设定；**2026-06-15 re-run 单档 v0.2.0：PGB = 4400**（fresh v1 reset 后，距 15:00 UTC ~2h，200-grid 对齐）。历史 2026-05-28 reset re-run 用 PGB=2400（见 §十）|
 
 ### 系统合约字节码路由
 
@@ -380,6 +380,38 @@ cast call 0x0000000000000000000000000000000000001000 \
 
 # 7. 等待第一个 Parlia epoch boundary（块高为 ceil(N/200)*200），验证 validator set 不变
 ```
+
+**Foundation 多签 fee 验证（v0.2.0 后，本轮新增）：**
+
+`deposit()` 是 Parlia 出块时每块由 coinbase 调用的 system tx，把 `FOUNDATION_RATIO`(15%) 的区块手续费通过 `call{value:,gas:30000}` 发给 `FOUNDATION_ADDR`（devnet = Safe multisig `0x0B53A578F024580563Ef1349b1F2c289115f6bE8`，owners=anvil[1,2,3]/2，由 init pipeline 在 PGB 前部署）。**只有 Parlia 接管出块后这条路径才跑**，所以 v0.2.0 是第一个能验证的档。
+
+```bash
+SAFE=0x0B53A578F024580563Ef1349b1F2c289115f6bE8
+RPC=http://rpc-0:8545
+
+# 1. deposit() system tx 每块不 revert（核心：验证 call{gas:30000} 对真实 Safe 不卡链）
+#    若 deposit revert，链会卡在 finalize；上面"blockNumber 正常推进"已覆盖，
+#    但额外确认日志无 "deposit" 相关 system tx 失败。
+
+# 2. Safe 已部署且 owners/threshold 正确
+cast call $SAFE "getOwners()(address[])"   --rpc-url $RPC   # = anvil[1,2,3]
+cast call $SAFE "getThreshold()(uint256)"  --rpc-url $RPC   # = 2
+
+# 3. 发非零 gasPrice 的 LEGACY 交易制造区块 fee → 观察 Safe 余额增长 ≈15%
+#    v0.2.0 无 London/EIP-1559，必须 --legacy + 非零 --gas-price，否则 fee=0
+#    foundation 收不到钱（非 bug）。
+BEFORE=$(cast balance $SAFE --rpc-url $RPC)
+cast send <recipient> --value 0 --legacy --gas-price 1gwei \
+  --private-key <funder_key> --rpc-url $RPC
+# 等几个块后
+AFTER=$(cast balance $SAFE --rpc-url $RPC)
+echo "Safe gained: $((AFTER - BEFORE)) wei (应 ≈ 该块总 fee 的 15%)"
+
+# 4. owners 2/3 多签从 Safe execTransaction 转出，验证多签可用（资金能进能出）
+#    用 anvil[1]+anvil[2] 两个 owner 签名（地址升序拼接），relayer 广播。
+```
+
+> **v0.3.0 复测**：London/EIP-1559 激活后 fee 模型从 legacy gasPrice 变为 baseFee+priority，`deposit()` 收到的 `msg.value` 构成变化。v0.3.0 后需复测 foundation 仍稳定收到 ≈15%。
 
 **回滚预案：**
 - 块 N 之前：全网换回 PGB=nil 配置，Clique 继续，无影响
