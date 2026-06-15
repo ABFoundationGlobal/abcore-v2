@@ -1,6 +1,6 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-GENESIS_CONTRACT_BRANCH := test/shorten-local-drill-params
-GENESIS_CONTRACT_COMMIT := f3716e3f90d451dee57c9b82778949090fbc64d7
+GENESIS_CONTRACT_BRANCH := master
+GENESIS_CONTRACT_COMMIT := 364d9256d90ac828a5629b39aad6fd45d86c6207
 
 # Foundation Safe multisig address — baked into local default/ bytecodes.
 # Also deployed on-chain by 79-deploy-foundation-safe.sh before U-1.
