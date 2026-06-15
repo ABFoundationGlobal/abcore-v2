@@ -1075,7 +1075,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 3. **EpochLength 不要从 `Clique.Epoch` 继承。** PGB reseed 早期从 `Clique.Epoch`（30000）拷 snapshot EpochLength，导致 PGB 之后按固定块高激活的 fork（如 LubanBlock 165400）`% 30000 ≠ 0` → 非 epoch block → Luban 扩展信息延迟到下一个 epoch block 才出现在 extraData（链不 split，仅可观察性推迟）；二阶 bug：`snapshot.go` 的 Lorentz/Maxwell 自动 epoch 切换（200→500→1000）只在 `EpochLength == defaultEpochLength` 时触发，30000 永不满足。修复 [#103](https://github.com/ABFoundationGlobal/abcore-v2/pull/103)+[#104](https://github.com/ABFoundationGlobal/abcore-v2/pull/104)：`ParliaConfig` 加 `Epoch` 字段，reseed 读 `Parlia.Epoch`（fallback `defaultEpochLength=200`）。**运维建议**：PGB 可以是任何块号（`IsOnParliaGenesis` 接管）；但 PGB 之后计划在固定块高激活的 fork 应对齐 `% epochLength == 0`，否则扩展信息延迟一个 epoch 窗口。
 
-4. **alloc 用 `10^Exp` 公式不用 hex 字面值。** devnet-ops validator alloc 曾用 hex 字面值 off-by-one（`0x33b2...`=10^9 ether < 20亿 self-delegation 阈值）导致 `SelfDelegationNotEnough` revert。[devnet-ops#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12) 改用 `big.Int.Exp(10,28)`。
+4. **alloc 用 `10^Exp` 公式不用 hex 字面值。** devnet-ops validator alloc 曾用 hex 字面值 off-by-one（`0x33b2...`=10^9 ether < 20亿 self-delegation 阈值）导致 `SelfDelegationNotEnough` revert。[devnet-ops#12](https://github.com/ABFoundationGlobal/devnet-ops/pull/12) 改用 `new(big.Int).Exp(big.NewInt(10), big.NewInt(28), nil)` 算 10^28 wei = 100亿 ether。
 
 5. **tag 重推后节点可能跑旧 image。** `Jenkinsfile.rolling` 的 `docker images | grep -q '^TAG$'` skip 在 tag 重打时仍命中 → 跳过 `docker pull` → 节点跑旧 binary。[devnet-ops#10](https://github.com/ABFoundationGlobal/devnet-ops/pull/10) 去掉 grep-skip，永远 `docker pull`。
 
@@ -1096,7 +1096,7 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 
 ### Reset (2026-06-15) — 重走升级路径，单独验证 foundation 多签 fee（进行中）
 
-本次 reset 目的：在 v1（Clique）阶段先部署 foundation Safe 多签 `0x0B53A578F024580563Ef1349b1F2c289115f6bE8`（owners=anvil[1,2,3]/2），再逐档走 v0.2.0 → v0.7.0，重点在 **Upgrade 1（v0.2.0）后单独验证 foundation 多签 fee 路径**（PR #16 `call{gas:30000}` 对真实 Safe 不卡链、Safe 收 15%、2/3 多签可转出）。这是此前几次 reset 未覆盖的新验证目标（foundation 地址此前是占位 `0x…f000`）。
+本次 reset 目的：在 v1（Clique）阶段先部署 foundation Safe 多签 `0x0B53A578F024580563Ef1349b1F2c289115f6bE8`（owners=anvil[1,2,3]/2），再逐档走 v0.2.0 → v0.7.0，重点在 **Upgrade 1（v0.2.0）后单独验证 foundation 多签 fee 路径**（genesis-contract#16 `call{gas:30000}` 对真实 Safe 不卡链、Safe 收 15%、2/3 多签可转出）。这是此前几次 reset 未覆盖的新验证目标（foundation 地址此前是占位 `0x…f000`）。
 
 #### Upgrade 1：v0.2.0 — Clique → Parlia cutover
 
