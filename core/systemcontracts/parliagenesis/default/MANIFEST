@@ -7,7 +7,7 @@ OUTDIR:       default
 GENERATE_CMD: abchain-local
 
 # SHA-256 checksums
-ValidatorContract                      e581043b6fe37bf183899d1237ebc3be67b3690af86cb8af041fbc0699e92716
+ValidatorContract                      97a21302c3828187cc229de923096e24bd79c89a2b308eceacd6e19592965e6b
 SlashContract                          5ffce5cf6856fa6dd7a6d720bd5e81730001387f6cfc8d537b15b1e85f18f070
 SystemRewardContract                   1d58a8feefa61d89756136d29ff2518d79cb5b3af9c3d34cabecf59a7a4af266
 LightClientContract                    769dca7c430fae125a1bf6eb07cc8edfd438933f2194b612886429b1e847d656

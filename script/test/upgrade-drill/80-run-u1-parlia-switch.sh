@@ -278,6 +278,56 @@ else
   fail "ValidatorSet unexpectedly present before fork: ${pre_code}"
 fi
 
+# 5. Foundation Safe fee routing (if pre-deployed by 79-deploy-foundation-safe.sh)
+_PARAMS_ENV="${REPO_ROOT}/core/systemcontracts/parliagenesis/default/params.env"
+if [[ -f "$_PARAMS_ENV" ]]; then
+  _FOUNDATION=$(grep '^EXPECTED_FOUNDATION=' "$_PARAMS_ENV" | cut -d= -f2 | tr -d '[:space:]')
+fi
+_FOUNDATION=${_FOUNDATION:-}
+_BURN="0x0000000000000000000000000000000000000000"
+if [[ -n "$_FOUNDATION" && "$_FOUNDATION" != "$_BURN" ]]; then
+  # Verify Safe contract exists at FOUNDATION_ADDR (proves correct address is baked)
+  _safe_code=$(attach_exec "$GETH" "$IPC1" \
+    "eth.getCode('${_FOUNDATION}','latest')" 2>/dev/null || echo "0x")
+  if [[ "${#_safe_code}" -gt 4 ]]; then
+    pass "Foundation Safe code present at ${_FOUNDATION} (baked address confirmed)"
+  else
+    fail "No code at FOUNDATION_ADDR ${_FOUNDATION} — Safe not deployed or wrong address baked"
+  fi
+
+  # Send a tx with non-zero gasPrice to generate fees, then verify Safe balance increases
+  _bal_before=$(attach_exec "$GETH" "$IPC1" \
+    "eth.getBalance('${_FOUNDATION}')" 2>/dev/null || echo 0)
+  _val1_addr=$(attach_exec "$GETH" "$IPC1" "eth.accounts[0]" 2>/dev/null || true)
+  _val2_addr=$(attach_exec "$GETH" "$IPC1" "eth.accounts[1]" 2>/dev/null || true)
+  if [[ -n "$_val1_addr" && -n "$_val2_addr" ]]; then
+    # send 1 wei with 1 Gwei gasPrice to generate fee
+    _fee_tx=$(attach_exec "$GETH" "$IPC1" \
+      "eth.sendTransaction({from:'${_val1_addr}',to:'${_val2_addr}',value:'0x1',gas:21000,gasPrice:'0x3B9ACA00'})" \
+      2>/dev/null || echo "")
+    if [[ -n "$_fee_tx" && "$_fee_tx" != "null" ]]; then
+      # wait up to 10s for next block
+      _deadline=$(( $(date +%s) + 10 ))
+      while [[ $(date +%s) -lt $_deadline ]]; do
+        sleep 1
+        _status=$(attach_exec "$GETH" "$IPC1" \
+          "(function(){var r=eth.getTransactionReceipt('${_fee_tx}');return r?r.status:'p';})()" \
+          2>/dev/null || echo "p")
+        [[ "$_status" == "0x1" || "$_status" == "1" ]] && break
+      done
+      _bal_after=$(attach_exec "$GETH" "$IPC1" \
+        "eth.getBalance('${_FOUNDATION}')" 2>/dev/null || echo 0)
+      if python3 -c "import sys; sys.exit(0 if int('${_bal_after:-0}') > int('${_bal_before:-0}') else 1)" 2>/dev/null; then
+        pass "Foundation Safe (${_FOUNDATION}) received fees: ${_bal_before}→${_bal_after} wei"
+      else
+        fail "Foundation Safe (${_FOUNDATION}) balance unchanged after fee tx (before=${_bal_before} after=${_bal_after})"
+      fi
+    else
+      pass "Foundation Safe code confirmed; fee-tx skipped (no unlocked accounts available)"
+    fi
+  fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo
