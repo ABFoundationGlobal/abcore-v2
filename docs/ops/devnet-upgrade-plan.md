@@ -1121,3 +1121,16 @@ DevNet 演练期间，每次 Upgrade 后需验证以下外部集成（如有部�
 > **单测覆盖 vs 链上实测**：`genesis-contract/test/ABChainConfig.t.sol` 已覆盖 15% 比例数学 + `vm.etch` 失败路径，但 `FOUNDATION_ADDR` 用占位 EOA，**未覆盖真实 Safe multisig proxy 收款的成功路径** —— 这正是本次链上实测补上的 gap。
 >
 > **v0.3.0 复测**：London/EIP-1559 激活后 fee 模型变（baseFee+priority），需复测 foundation 仍稳定收 ≈15%。
+
+#### Upgrade 2：v0.3.0 — London + 13 BSC block forks（成功 ✅）
+
+- **配置 PR** [#129](https://github.com/ABFoundationGlobal/abcore-v2/pull/129)：`ABCoreDevnetChainConfig` 加 `LondonBlock` + 13 BSC block forks（Ramanujan…Hertzfix）全设 **block 26000**；PGB 仍 4400，v0.4.0+ timestamp forks 仍 nil，无 BlobScheduleConfig。Image `abfoundation/abcore-v2:v0.3.0`（val-0/val-1 @ ab-d1 + rpc-0 @ ab-d4 全升）。
+- **M basis**：head≈24506 @ 06-16T07:51Z，period=3s，aligned 26000（% 200 == 0，REQUIRED：LubanBlock 落 epoch boundary → 激活块自身即首个 Luban-form 438B epoch block）。
+- **Cutover 实测**（06-16T09:07Z，block 26000）：
+  - ✅ **EIP-1559**：block 26000 出现 `baseFeePerGas=0x0`（`InitialBaseFeeForBSC=0`，值为 0 但字段从无到有）；25999（fork 前）无该字段 → London 确在 26000 激活。
+  - ✅ **Luban extraData**：block 26000 = **438B**（32 vanity + 5×68B validators + 65 seal），M%200==0 故激活块自身即首个 Luban-form epoch block，无延迟（对比历史 165400 的 97B 延迟坑——本次对齐避免）。
+  - ✅ **链推进 + 共识**：head 跨 26000 持续推进、两 val 同步、round-robin 健康、无 INVALID/errExtraSigners/finalize 失败。
+  - ✅ **explorer**：rpc-0（数据源）同步，Blockscout `healthy:true` 索引追平，block 26000 正确索引（`base_fee:0`、miner 真实 validator 地址）。
+- **与历史 v0.3.0 比对**：fork 字段集合（14 个）+ 设法（全同块高）与历史 [#105](https://github.com/ABFoundationGlobal/abcore-v2/pull/105)（block 6000）逐字段一致；激活效果（M 自身首个 Luban-form 438B + EIP-1559）一致。差异仅块高值（26000 vs 6000）与 PGB（4400 vs 1600），均因 reset 后链高不同重算。
+
+> **下一步**：v0.4.0（Shanghai + Kepler + Feynman + FeynmanFix）—— 含 StakeHub validator 注册窗口（详见 §三 Upgrade 3）+ foundation fee 在 EIP-1559 下的 ≈15% 复测。
