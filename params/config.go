@@ -482,9 +482,10 @@ var (
 		// the 165400 retro in §10 of devnet-upgrade-plan.md).
 		//
 		// Scheduling Shanghai/Kepler/Feynman/FeynmanFix while Cancun/Prague/Osaka
-		// stay nil is valid: those later forks are gated on IsLondon but remain nil,
-		// and CheckConfigForkOrder only requires the set timestamp forks to be
-		// ascending and to follow the block forks.
+		// stay nil is valid: those later forks are gated on IsLondon but remain nil.
+		// CheckConfigForkOrder's timestamp list starts at keplerTime (ShanghaiTime
+		// is not in its ordering check); the set forks it does track must be
+		// ascending and follow the block forks — satisfied here (all four = T3).
 		//
 		// No BlobScheduleConfig: it is only required once CancunTime/PragueTime/
 		// OsakaTime are set; all three are still nil in this v0.4.0 schedule.
