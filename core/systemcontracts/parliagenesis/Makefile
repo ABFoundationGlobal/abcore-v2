@@ -82,7 +82,7 @@ devnet: _build
 build: OUTDIR = default
 build: GENERATE_CMD = abchain-local --foundation-addr $(FOUNDATION_SAFE_ADDR)
 build: _build
-	@python3 -c "\
+	@$(PYTHON) -c "\
 import re, pathlib; \
 p = pathlib.Path('$(PARLIA_DIR)default/params.env'); \
 p.write_text(re.sub(r'(?m)^EXPECTED_FOUNDATION=.*', 'EXPECTED_FOUNDATION=$(FOUNDATION_SAFE_ADDR)', p.read_text()))"

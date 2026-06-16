@@ -297,7 +297,7 @@ if [[ -n "$_FOUNDATION" && "$_FOUNDATION" != "$_BURN" ]]; then
 
   # Send a tx with non-zero gasPrice to generate fees, then verify Safe balance increases
   _bal_before=$(attach_exec "$GETH" "$IPC1" \
-    "eth.getBalance('${_FOUNDATION}')" 2>/dev/null || echo 0)
+    "web3.toHex(eth.getBalance('${_FOUNDATION}'))" 2>/dev/null || echo 0x0)
   _val1_addr=$(attach_exec "$GETH" "$IPC1" "eth.accounts[0]" 2>/dev/null || true)
   _val2_addr=$(attach_exec "$GETH" "$IPC1" "eth.accounts[1]" 2>/dev/null || true)
   if [[ -n "$_val1_addr" && -n "$_val2_addr" ]]; then
@@ -315,10 +315,11 @@ if [[ -n "$_FOUNDATION" && "$_FOUNDATION" != "$_BURN" ]]; then
           2>/dev/null || echo "p")
         [[ "$_status" == "0x1" || "$_status" == "1" ]] && break
       done
+      # Use web3.toHex to avoid scientific notation for large wei values
       _bal_after=$(attach_exec "$GETH" "$IPC1" \
-        "eth.getBalance('${_FOUNDATION}')" 2>/dev/null || echo 0)
-      if python3 -c "import sys; sys.exit(0 if int('${_bal_after:-0}') > int('${_bal_before:-0}') else 1)" 2>/dev/null; then
-        pass "Foundation Safe (${_FOUNDATION}) received fees: ${_bal_before}→${_bal_after} wei"
+        "web3.toHex(eth.getBalance('${_FOUNDATION}'))" 2>/dev/null || echo 0x0)
+      if python3 -c "import sys; sys.exit(0 if int('${_bal_after:-0x0}', 0) > int('${_bal_before:-0x0}', 0) else 1)" 2>/dev/null; then
+        pass "Foundation Safe (${_FOUNDATION}) received fees: ${_bal_before}→${_bal_after}"
       else
         fail "Foundation Safe (${_FOUNDATION}) balance unchanged after fee tx (before=${_bal_before} after=${_bal_after})"
       fi
