@@ -207,22 +207,37 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	// itself the first Luban-form (438B) epoch block — see config.go comment.
 	require.Zero(t, devCfg.LubanBlock.Int64()%int64(devCfg.Parlia.Epoch),
 		"devnet LubanBlock must be aligned to the Parlia epoch grid (block %% %d == 0)", devCfg.Parlia.Epoch)
-	laterTimeForks := []struct {
+	// v0.4.0 schedule: Shanghai/Kepler/Feynman/FeynmanFix all set to T3.
+	const v040ForkTime = uint64(1781614800) // 2026-06-16 13:00:00 UTC
+	v040TimeForks := []struct {
 		name string
 		val  *uint64
 	}{
 		{"ShanghaiTime", devCfg.ShanghaiTime}, {"KeplerTime", devCfg.KeplerTime},
 		{"FeynmanTime", devCfg.FeynmanTime}, {"FeynmanFixTime", devCfg.FeynmanFixTime},
+	}
+	for _, f := range v040TimeForks {
+		require.NotNilf(t, f.val, "devnet %s must be scheduled in the v0.4.0 schedule", f.name)
+		require.Equalf(t, v040ForkTime, *f.val, "devnet %s must be at T3 %d (v0.4.0)", f.name, v040ForkTime)
+	}
+	// T3 must NOT fall on a 24h breathe boundary (would give a zero-length
+	// validator-registration window before updateValidatorSetV2). See config.go.
+	require.NotZerof(t, v040ForkTime%86400, "devnet T3 must not land on a breathe boundary (T3 %% 86400 != 0)")
+	// v0.5.0+ timestamp forks must still be nil, added back one upgrade at a time.
+	laterTimeForks := []struct {
+		name string
+		val  *uint64
+	}{
 		{"CancunTime", devCfg.CancunTime}, {"HaberTime", devCfg.HaberTime}, {"HaberFixTime", devCfg.HaberFixTime},
 		{"BohrTime", devCfg.BohrTime}, {"PascalTime", devCfg.PascalTime}, {"PragueTime", devCfg.PragueTime},
 		{"LorentzTime", devCfg.LorentzTime}, {"MaxwellTime", devCfg.MaxwellTime},
 		{"FermiTime", devCfg.FermiTime}, {"OsakaTime", devCfg.OsakaTime}, {"MendelTime", devCfg.MendelTime},
 	}
 	for _, f := range laterTimeForks {
-		require.Nilf(t, f.val, "devnet %s must be nil in the v0.3.0 schedule", f.name)
+		require.Nilf(t, f.val, "devnet %s must be nil in the v0.4.0 schedule", f.name)
 	}
 	// No BlobScheduleConfig is required while Cancun/Prague/Osaka are nil.
-	require.Nil(t, devCfg.BlobScheduleConfig, "devnet BlobScheduleConfig must be nil in the v0.3.0 schedule")
+	require.Nil(t, devCfg.BlobScheduleConfig, "devnet BlobScheduleConfig must be nil in the v0.4.0 schedule")
 
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")

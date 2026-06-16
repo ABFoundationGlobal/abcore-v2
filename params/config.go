@@ -449,19 +449,29 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// === DevNet re-run 2026-06-15: v0.2.0 DONE, v0.3.0 scheduled ===
+		// === DevNet re-run 2026-06-15: v0.2.0 + v0.3.0 DONE, v0.4.0 scheduled ===
 		//
 		// This re-run walks the upgrade path one step at a time. v0.2.0 (Clique →
-		// Parlia at PGB 4400) activated successfully on 2026-06-15. v0.3.0 (London
-		// + the 13 BSC block forks) is now scheduled at block 26000. v0.4.0–v0.7.0
-		// (Shanghai/Kepler/Feynman, Cancun/Haber, Bohr/Pascal/Prague/Lorentz/
-		// Maxwell, Fermi/Osaka/Mendel — all timestamp forks) remain nil and will
-		// be added one upgrade at a time in subsequent PRs.
+		// Parlia at PGB 4400) and v0.3.0 (London + 13 BSC block forks at block
+		// 26000) both activated successfully (2026-06-15 / 2026-06-16). v0.4.0
+		// (Shanghai + Kepler + Feynman + FeynmanFix) is now scheduled at timestamp
+		// T3. v0.5.0–v0.7.0 (Cancun/Haber, Bohr/Pascal/Prague/Lorentz/Maxwell,
+		// Fermi/Osaka/Mendel) remain nil and will be added one upgrade at a time.
 		//
 		//   T1 = block 4400  (ParliaGenesisBlock, Clique → Parlia) — done 2026-06-15
-		//   T2 = block 26000 (London + 13 BSC block forks)
-		//        target ~2026-06-16 09:06 UTC (block_interval 3s; computed from the
-		//        live height + ~75min, then aligned to the 200-grid).
+		//   T2 = block 26000 (London + 13 BSC block forks)         — done 2026-06-16
+		//   T3 = 2026-06-16 13:00:00 UTC = unix 1781614800
+		//        (Shanghai + Kepler + Feynman + FeynmanFix)
+		//
+		// Feynman activates StakeHub-driven validator election: at the first Go-layer
+		// breathe block (BreatheBlockInterval = 24h, UTC-day aligned) after T3,
+		// updateValidatorSetV2 runs and an EMPTY StakeHub reverts → chain halt (see
+		// the 2026-05-26 halt retro in §10). T3 % 86400 = 46800 → T3 sits 13h after
+		// the 06-16 00:00 UTC breathe boundary and 11h before the 06-17 00:00 UTC
+		// one, giving an ~11h window to register all 5 validators (createValidator)
+		// before that breathe block. T3 deliberately NOT on a breathe boundary
+		// (would give a zero-length window). Registration is an ops step (Jenkins
+		// register-validators), not part of this PR — see §3 Upgrade 3.
 		//
 		// 26000 % 200 == 0 is REQUIRED, not just tidy: LubanBlock is one of the 13
 		// forks, and the Luban extraData format change (20B → 68B per validator,
@@ -471,27 +481,33 @@ var (
 		// the activation block stays 97B (correct, but easily misread as a bug; see
 		// the 165400 retro in §10 of devnet-upgrade-plan.md).
 		//
-		// London-only (with all later timestamp forks nil) is a valid config:
-		// IsShanghai/IsCancun/... are gated on IsLondon but stay nil here, and
-		// CheckConfigForkOrder only requires the block forks to be ascending and to
-		// precede the (nil) timestamp forks.
+		// Scheduling Shanghai/Kepler/Feynman/FeynmanFix while Cancun/Prague/Osaka
+		// stay nil is valid: those later forks are gated on IsLondon but remain nil,
+		// and CheckConfigForkOrder only requires the set timestamp forks to be
+		// ascending and to follow the block forks.
 		//
 		// No BlobScheduleConfig: it is only required once CancunTime/PragueTime/
-		// OsakaTime are set; all three are still nil in this v0.3.0 schedule.
-		LondonBlock:        big.NewInt(26000),
-		RamanujanBlock:     big.NewInt(26000),
-		NielsBlock:         big.NewInt(26000),
-		MirrorSyncBlock:    big.NewInt(26000),
-		BrunoBlock:         big.NewInt(26000),
-		EulerBlock:         big.NewInt(26000),
-		GibbsBlock:         big.NewInt(26000),
-		NanoBlock:          big.NewInt(26000),
-		MoranBlock:         big.NewInt(26000),
-		PlanckBlock:        big.NewInt(26000),
-		LubanBlock:         big.NewInt(26000), // 非 no-op：epoch block extraData → Luban-form 438B；必须落 epoch boundary
-		PlatoBlock:         big.NewInt(26000),
-		HertzBlock:         big.NewInt(26000),
-		HertzfixBlock:      big.NewInt(26000),
+		// OsakaTime are set; all three are still nil in this v0.4.0 schedule.
+		LondonBlock:     big.NewInt(26000),
+		RamanujanBlock:  big.NewInt(26000),
+		NielsBlock:      big.NewInt(26000),
+		MirrorSyncBlock: big.NewInt(26000),
+		BrunoBlock:      big.NewInt(26000),
+		EulerBlock:      big.NewInt(26000),
+		GibbsBlock:      big.NewInt(26000),
+		NanoBlock:       big.NewInt(26000),
+		MoranBlock:      big.NewInt(26000),
+		PlanckBlock:     big.NewInt(26000),
+		LubanBlock:      big.NewInt(26000), // 非 no-op：epoch block extraData → Luban-form 438B；必须落 epoch boundary
+		PlatoBlock:      big.NewInt(26000),
+		HertzBlock:      big.NewInt(26000),
+		HertzfixBlock:   big.NewInt(26000),
+		// v0.4.0 (T3 = 2026-06-16 13:00:00 UTC). Feynman enables StakeHub election;
+		// 5 validators must be registered before the 06-17 00:00 UTC breathe block.
+		ShanghaiTime:       newUint64(1781614800),
+		KeplerTime:         newUint64(1781614800),
+		FeynmanTime:        newUint64(1781614800),
+		FeynmanFixTime:     newUint64(1781614800),
 		ParliaGenesisBlock: big.NewInt(4400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
