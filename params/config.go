@@ -449,32 +449,49 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		// === DevNet re-run 2026-06-15: ONLY v0.2.0 (Clique → Parlia) scheduled ===
+		// === DevNet re-run 2026-06-15: v0.2.0 DONE, v0.3.0 scheduled ===
 		//
-		// This re-run walks the upgrade path one step at a time again, starting
-		// from a fresh v1 (Clique) reset. Only the v0.2.0 consensus switch is
-		// scheduled here; v0.3.0–v0.7.0 (London + 13 BSC block forks, Shanghai/
-		// Kepler/Feynman, Cancun/Haber, Bohr/Pascal/Prague/Lorentz/Maxwell,
-		// Fermi/Osaka/Mendel) are intentionally left nil and will be added back
-		// one upgrade at a time in subsequent PRs.
+		// This re-run walks the upgrade path one step at a time. v0.2.0 (Clique →
+		// Parlia at PGB 4400) activated successfully on 2026-06-15. v0.3.0 (London
+		// + the 13 BSC block forks) is now scheduled at block 26000. v0.4.0–v0.7.0
+		// (Shanghai/Kepler/Feynman, Cancun/Haber, Bohr/Pascal/Prague/Lorentz/
+		// Maxwell, Fermi/Osaka/Mendel — all timestamp forks) remain nil and will
+		// be added one upgrade at a time in subsequent PRs.
 		//
-		// Leaving London (and everything gated on IsLondon) nil while PGB is set
-		// is a valid v0.2.0-only config: consensus/parlia treats the PGB block as
-		// an epoch boundary regardless of London, and CheckConfigForkOrder only
-		// requires PGB to precede London *when London is set*. This matches the
-		// original v0.2.0 single-step schedule (see §10 history, PR #104).
+		//   T1 = block 4400  (ParliaGenesisBlock, Clique → Parlia) — done 2026-06-15
+		//   T2 = block 26000 (London + 13 BSC block forks)
+		//        target ~2026-06-16 09:06 UTC (block_interval 3s; computed from the
+		//        live height + ~75min, then aligned to the 200-grid).
 		//
-		//   T1 = block 4400 (ParliaGenesisBlock, Clique → Parlia)
-		//        target ~2026-06-15 15:00 UTC (block_interval 3s; computed from the
-		//        live reset height + ~2h, then rounded up to the 200-grid). 4400 %
-		//        200 == 0 — operational tidiness; PGB does not require grid alignment.
+		// 26000 % 200 == 0 is REQUIRED, not just tidy: LubanBlock is one of the 13
+		// forks, and the Luban extraData format change (20B → 68B per validator,
+		// 438B epoch block) is only written on a Parlia epoch block. Aligning the
+		// fork block to the epoch grid makes the activation block itself the first
+		// Luban-form epoch block — otherwise it is deferred to ceil(M/200)*200 and
+		// the activation block stays 97B (correct, but easily misread as a bug; see
+		// the 165400 retro in §10 of devnet-upgrade-plan.md).
 		//
-		// v0.2.0 validation now also covers the foundation Safe multisig fee path
-		// (deposit() → call{gas:30000} → FOUNDATION_ADDR Safe). See
-		// devnet-upgrade-plan.md §3 "Upgrade 1" foundation verification steps.
+		// London-only (with all later timestamp forks nil) is a valid config:
+		// IsShanghai/IsCancun/... are gated on IsLondon but stay nil here, and
+		// CheckConfigForkOrder only requires the block forks to be ascending and to
+		// precede the (nil) timestamp forks.
 		//
 		// No BlobScheduleConfig: it is only required once CancunTime/PragueTime/
-		// OsakaTime are set; all three are nil in this v0.2.0-only config.
+		// OsakaTime are set; all three are still nil in this v0.3.0 schedule.
+		LondonBlock:        big.NewInt(26000),
+		RamanujanBlock:     big.NewInt(26000),
+		NielsBlock:         big.NewInt(26000),
+		MirrorSyncBlock:    big.NewInt(26000),
+		BrunoBlock:         big.NewInt(26000),
+		EulerBlock:         big.NewInt(26000),
+		GibbsBlock:         big.NewInt(26000),
+		NanoBlock:          big.NewInt(26000),
+		MoranBlock:         big.NewInt(26000),
+		PlanckBlock:        big.NewInt(26000),
+		LubanBlock:         big.NewInt(26000), // 非 no-op：epoch block extraData → Luban-form 438B；必须落 epoch boundary
+		PlatoBlock:         big.NewInt(26000),
+		HertzBlock:         big.NewInt(26000),
+		HertzfixBlock:      big.NewInt(26000),
 		ParliaGenesisBlock: big.NewInt(4400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength

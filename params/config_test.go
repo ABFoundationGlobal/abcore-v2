@@ -174,11 +174,12 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 	require.NotNil(t, devCfg.Parlia, "devnet Parlia config must be set")
 	require.Equal(t, uint64(200), devCfg.Parlia.Epoch, "devnet Parlia.Epoch = 200 (BSC defaultEpochLength)")
 
-	// 2026-06-15 re-run: ONLY v0.2.0 (PGB) is scheduled. Every v0.3.0+ fork —
-	// LondonBlock + the 13 BSC block forks, and the Shanghai/Cancun/Prague/Fermi
-	// timestamp forks — must be nil, and they are added back one upgrade at a
-	// time in later PRs. Assert each is nil so an accidental re-introduction
-	// (e.g. a bad merge) fails this test.
+	// 2026-06-16 re-run: v0.2.0 (PGB) DONE, v0.3.0 scheduled. LondonBlock + the
+	// 13 BSC block forks must all be set to the same block 26000. The v0.4.0+
+	// timestamp forks (Shanghai/Cancun/Prague/Fermi) must still be nil, added
+	// back one upgrade at a time in later PRs. Assert each block fork == 26000
+	// (and each timestamp fork nil) so an accidental drift / bad merge fails.
+	const v030ForkBlock = int64(26000)
 	laterBlockForks := []struct {
 		name string
 		val  *big.Int
@@ -199,8 +200,13 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 		{"HertzfixBlock", devCfg.HertzfixBlock},
 	}
 	for _, f := range laterBlockForks {
-		require.Nilf(t, f.val, "devnet %s must be nil in the v0.2.0-only schedule", f.name)
+		require.NotNilf(t, f.val, "devnet %s must be scheduled in the v0.3.0 schedule", f.name)
+		require.Equalf(t, v030ForkBlock, f.val.Int64(), "devnet %s must be at block %d (v0.3.0)", f.name, v030ForkBlock)
 	}
+	// LubanBlock must land on a Parlia epoch boundary so the activation block is
+	// itself the first Luban-form (438B) epoch block — see config.go comment.
+	require.Zero(t, devCfg.LubanBlock.Int64()%int64(devCfg.Parlia.Epoch),
+		"devnet LubanBlock must be aligned to the Parlia epoch grid (block %% %d == 0)", devCfg.Parlia.Epoch)
 	laterTimeForks := []struct {
 		name string
 		val  *uint64
@@ -213,10 +219,10 @@ func TestGetBuiltInChainConfig_ABCore(t *testing.T) {
 		{"FermiTime", devCfg.FermiTime}, {"OsakaTime", devCfg.OsakaTime}, {"MendelTime", devCfg.MendelTime},
 	}
 	for _, f := range laterTimeForks {
-		require.Nilf(t, f.val, "devnet %s must be nil in the v0.2.0-only schedule", f.name)
+		require.Nilf(t, f.val, "devnet %s must be nil in the v0.3.0 schedule", f.name)
 	}
 	// No BlobScheduleConfig is required while Cancun/Prague/Osaka are nil.
-	require.Nil(t, devCfg.BlobScheduleConfig, "devnet BlobScheduleConfig must be nil in the v0.2.0-only schedule")
+	require.Nil(t, devCfg.BlobScheduleConfig, "devnet BlobScheduleConfig must be nil in the v0.3.0 schedule")
 
 	// An unknown genesis hash must return nil.
 	require.Nil(t, GetBuiltInChainConfig(common.Hash{}), "unknown genesis hash should return nil")
