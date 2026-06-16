@@ -1,23 +1,23 @@
 genesis_contract_repo:   https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
-genesis_contract_commit: ffd40570435bc1857decdb08465a597e50778a3a
-generated_at:            2026-05-27T09:57:50Z
+genesis_contract_commit: 364d9256d90ac828a5629b39aad6fd45d86c6207
+generated_at:            2026-06-12T09:46:37Z
 
 # Build parameters
 OUTDIR:       devnet
 GENERATE_CMD: abchain-dev
 
 # SHA-256 checksums
-ValidatorContract                      363a31a6f0ba1ce9adcd99748c931faea35074d36699792265321f55ccb875fd
-SlashContract                          f8641a6b5b41c08c255ff68d28652b92960cf6b8a9e0d6576e560e8f19563b15
-SystemRewardContract                   d614168aff73d0d22ea4bee04c669fe481ecf6725eda1fb544a03399396bbc21
-LightClientContract                    e52d8eadbf4fef35a9f898791dd420e5477653fb2827fb6e6c95eb1ec20958d6
-TokenHubContract                       0496bf26eeca9394709dfcb4912290594db3fe271d0583ac0e66a7c95a2abe37
-RelayerIncentivizeContract             d0ba115e98cd4bbfa7a88c44521a649dba54e15e2ed2088862f01c0022e6d5d3
-RelayerHubContract                     d4d2642d61f47ef1cd41eb8b3e6649c06ae94ed60287438be0427895b7bc07a5
-GovHubContract                         5f378714dad57dc013af87bb3530cd7ff975a78e3de4f676757edb4c49a936af
-TokenManagerContract                   73493e1e0f9830131ff0e6ceb9618bdf86f05923f71cad67d57e6659aa8625ed
-CrossChainContract                     8ddacb9a74f467eefa1191a444d623b8c9a2833c6921b68cb80476af9863ce7e
-StakingContract                        db038ee51b42ba15d1af57a7a0c976e9b6f41f86013dcd3010280efff4ab3b62
+ValidatorContract                      5454ae81b7340ae0ad6bdf34020a30c7c90a72f2d637d906c17ec167474b7ad8
+SlashContract                          72fbcf9830d94fdbc938406385aff8ec76f5ccae0d94ffcdc08b8b913930e5c9
+SystemRewardContract                   69d472b74092c80cecf7cfd1c5ba987c4dd32814abe45df579a0bb3c682a6072
+LightClientContract                    85ef7aca53365aa7409e15c7a01ccaa37ab3edb355bf8228a8bafc1dd51e031f
+TokenHubContract                       fc42ea24316e095501ce396d1506d913e12d1c2fddf074d180ec572fcafce8fa
+RelayerIncentivizeContract             18a9d21a096c827cd19e03b5cc58255b3128ad99176e14eeabf236a6b9b8f4a5
+RelayerHubContract                     4ea45760cf4a87523d6a74a2ac16e19ffe59b652a7f7cc256bb38b35f21e0444
+GovHubContract                         0d3ffb0d4fb99211cb4a17765adae7abd22bc0b440ea3de0866ff7530a7c26a8
+TokenManagerContract                   ebe8a4f983e6de41185eb9b09e205c46383d172ee0eca4014c73105e39f6bad0
+CrossChainContract                     561be080e3bc13c8ad8501ea59d7a0fa6275cf98a6ce75529bff09d972238d39
+StakingContract                        08f9e766a0de84aea6ea8d3aca8a942033004353e12ac86d41199aa35828abf1
 StakeHubContract                       07ad3a2a22808b8b0c4bbe35d460c4c9eac31174dcd7d08bb3211dd02871f594
 StakeCreditContract                    529987cdd19ff32e40af3bad8882e94f7ed2f7d590ed1594b91f4ac8083988d7
 GovernorContract                       a36dd3f6d807adb7aeee06e53efca489b2f1518647039c20353937dc8af78856
