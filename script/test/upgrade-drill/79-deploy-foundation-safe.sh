@@ -102,13 +102,6 @@ wait_for_tx() {
   die "${label}: tx ${tx} not mined within ${timeout}s"
 }
 
-get_contract_addr() {
-  local ipc="$1" tx="$2"
-  attach_exec "$GETH" "$ipc" \
-    "(function(){var r=eth.getTransactionReceipt('${tx}');return r?r.contractAddress:'null';})()" \
-    2>/dev/null || echo "null"
-}
-
 # ── Phase 1: import deployer key and start network ────────────────────────────
 
 log "79 pre-U-1: deploying foundation Safe"
@@ -298,9 +291,13 @@ FACTORY_TX=$(attach_exec "$GETH" "$IPC1" \
   "eth.sendTransaction({from:'${DEPLOYER_ADDR}',data:'${FACTORY_BIN}',gas:3000000})")
 [[ -n "$FACTORY_TX" && "$FACTORY_TX" != "null" ]] || die "SafeProxyFactory deploy tx send failed"
 wait_for_tx "$IPC1" "$FACTORY_TX" 60 "SafeProxyFactory"
-FACTORY=$(get_contract_addr "$IPC1" "$FACTORY_TX")
-[[ "$(lc "$FACTORY")" == "$(lc "$FACTORY_PRED")" ]] \
-  || die "factory at ${FACTORY} != predicted ${FACTORY_PRED}"
+# Verify by checking code at the predicted address (more robust than receipt.contractAddress
+# which can be null on some geth versions even for successful CREATE transactions).
+_factory_code=$(attach_exec "$GETH" "$IPC1" \
+  "eth.getCode('${FACTORY_PRED}','latest')" 2>/dev/null || echo "0x")
+[[ "${#_factory_code}" -gt 4 ]] \
+  || die "factory not deployed at predicted address ${FACTORY_PRED} (code absent)"
+FACTORY="${FACTORY_PRED}"
 log "  factory=${FACTORY} ✓"
 
 # ── Phase 7: deploy Safe singleton (deployer nonce 1) ─────────────────────────
@@ -310,9 +307,11 @@ SINGLETON_TX=$(attach_exec "$GETH" "$IPC1" \
   "eth.sendTransaction({from:'${DEPLOYER_ADDR}',data:'${SINGLETON_BIN}',gas:6000000})")
 [[ -n "$SINGLETON_TX" && "$SINGLETON_TX" != "null" ]] || die "Safe singleton deploy tx send failed"
 wait_for_tx "$IPC1" "$SINGLETON_TX" 120 "Safe-singleton"
-SINGLETON=$(get_contract_addr "$IPC1" "$SINGLETON_TX")
-[[ "$(lc "$SINGLETON")" == "$(lc "$SINGLETON_PRED")" ]] \
-  || die "singleton at ${SINGLETON} != predicted ${SINGLETON_PRED}"
+_singleton_code=$(attach_exec "$GETH" "$IPC1" \
+  "eth.getCode('${SINGLETON_PRED}','latest')" 2>/dev/null || echo "0x")
+[[ "${#_singleton_code}" -gt 4 ]] \
+  || die "singleton not deployed at predicted address ${SINGLETON_PRED} (code absent)"
+SINGLETON="${SINGLETON_PRED}"
 log "  singleton=${SINGLETON} ✓"
 
 # ── Phase 8: create Safe proxy via factory.createProxyWithNonce ───────────────
