@@ -478,20 +478,20 @@ var (
 		//
 		// No BlobScheduleConfig: it is only required once CancunTime/PragueTime/
 		// OsakaTime are set; all three are still nil in this v0.3.0 schedule.
-		LondonBlock:     big.NewInt(26000),
-		RamanujanBlock:  big.NewInt(26000),
-		NielsBlock:      big.NewInt(26000),
-		MirrorSyncBlock: big.NewInt(26000),
-		BrunoBlock:      big.NewInt(26000),
-		EulerBlock:      big.NewInt(26000),
-		GibbsBlock:      big.NewInt(26000),
-		NanoBlock:       big.NewInt(26000),
-		MoranBlock:      big.NewInt(26000),
-		PlanckBlock:     big.NewInt(26000),
-		LubanBlock:      big.NewInt(26000), // 非 no-op：epoch block extraData → Luban-form 438B；必须落 epoch boundary
-		PlatoBlock:      big.NewInt(26000),
-		HertzBlock:      big.NewInt(26000),
-		HertzfixBlock:   big.NewInt(26000),
+		LondonBlock:        big.NewInt(26000),
+		RamanujanBlock:     big.NewInt(26000),
+		NielsBlock:         big.NewInt(26000),
+		MirrorSyncBlock:    big.NewInt(26000),
+		BrunoBlock:         big.NewInt(26000),
+		EulerBlock:         big.NewInt(26000),
+		GibbsBlock:         big.NewInt(26000),
+		NanoBlock:          big.NewInt(26000),
+		MoranBlock:         big.NewInt(26000),
+		PlanckBlock:        big.NewInt(26000),
+		LubanBlock:         big.NewInt(26000), // 非 no-op：epoch block extraData → Luban-form 438B；必须落 epoch boundary
+		PlatoBlock:         big.NewInt(26000),
+		HertzBlock:         big.NewInt(26000),
+		HertzfixBlock:      big.NewInt(26000),
 		ParliaGenesisBlock: big.NewInt(4400),
 		Clique:             &CliqueConfig{Period: 3, Epoch: 30000},
 		// Parlia.Epoch = 200 aligns devnet with BSC mainnet's defaultEpochLength
