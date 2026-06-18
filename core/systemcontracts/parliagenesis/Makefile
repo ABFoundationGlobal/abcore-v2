@@ -1,6 +1,10 @@
 GENESIS_CONTRACT_REPO   ?= https://github.com/ABFoundationGlobal/abcore-v2-genesis-contract.git
 GENESIS_CONTRACT_BRANCH := master
 GENESIS_CONTRACT_COMMIT := 364d9256d90ac828a5629b39aad6fd45d86c6207
+
+# Foundation Safe multisig address — baked into local default/ bytecodes.
+# Also deployed on-chain by 79-deploy-foundation-safe.sh before U-1.
+FOUNDATION_SAFE_ADDR := 0x0B53A578F024580563Ef1349b1F2c289115f6bE8
 GENESIS_CONTRACT_DIR    := abcore-v2-genesis-contract
 PARLIA_DIR            := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 FORGE                 := $(or $(shell which forge 2>/dev/null),$(HOME)/.foundry/bin/forge)
@@ -72,9 +76,17 @@ devnet: GENERATE_CMD = abchain-dev
 devnet: _build
 
 ## Generate contracts with local development parameters → default/
+## Bakes FOUNDATION_SAFE_ADDR into BSCValidatorSet (Safe multisig as fee recipient).
+## After _build, patches params.env because extract-params.py reads the function
+## signature default (address(0xdEaD)), not the --foundation-addr CLI override.
 build: OUTDIR = default
-build: GENERATE_CMD = abchain-local
+build: GENERATE_CMD = abchain-local --foundation-addr $(FOUNDATION_SAFE_ADDR)
 build: _build
+	@$(PYTHON) -c "\
+import re, pathlib; \
+p = pathlib.Path('$(PARLIA_DIR)default/params.env'); \
+p.write_text(re.sub(r'(?m)^EXPECTED_FOUNDATION=.*', 'EXPECTED_FOUNDATION=$(FOUNDATION_SAFE_ADDR)', p.read_text()))"
+	@echo "Written default/params.env (EXPECTED_FOUNDATION=$(FOUNDATION_SAFE_ADDR))"
 
 ## Internal: compile contracts and extract deployedBytecode into $(PARLIA_DIR)$(OUTDIR)/
 _build:

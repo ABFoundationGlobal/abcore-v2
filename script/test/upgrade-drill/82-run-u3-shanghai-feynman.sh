@@ -101,15 +101,24 @@ if [[ "$_now" -ge "$FORK_TIME" ]]; then
   die "FORK_TIME (${FORK_TIME}) is in the past. Set FORK_TIME to a future timestamp."
 fi
 
-# Breathe block fires at the next multiple of BREATHE_BLOCK_INTERVAL.
-# Registration must complete before then.
+# Breathe block fires at the next multiple of BREATHE_BLOCK_INTERVAL after
+# FORK_TIME.  Registration must complete before that breathe block, so the
+# usable window is: window = next_breathe(FORK_TIME) - FORK_TIME.
+# If this window is < 30 s, advance FORK_TIME past the breathe boundary so
+# the first post-Feynman breathe fires in the NEXT interval, giving a full
+# BREATHE_BLOCK_INTERVAL of registration time.
 _breathe_iv=${BREATHE_BLOCK_INTERVAL:-86400}
+_next_breathe_after_fork=$(( ((FORK_TIME / _breathe_iv) + 1) * _breathe_iv ))
+_reg_window=$(( _next_breathe_after_fork - FORK_TIME ))
+if [[ "$_reg_window" -lt 30 ]]; then
+  FORK_TIME=$(( _next_breathe_after_fork + 10 ))
+  log "Registration window was ${_reg_window}s — advanced FORK_TIME to ${FORK_TIME} (10s past breathe boundary, ~$((  _breathe_iv - 10 ))s registration window)"
+  _next_breathe_after_fork=$(( ((FORK_TIME / _breathe_iv) + 1) * _breathe_iv ))
+  _reg_window=$(( _next_breathe_after_fork - FORK_TIME ))
+fi
 _next_breathe=$(( ((_now / _breathe_iv) + 1) * _breathe_iv ))
 _breathe_in=$(( _next_breathe - _now ))
-log "Next breathe block in ${_breathe_in}s (BREATHE_BLOCK_INTERVAL=${_breathe_iv}s). Registration must complete before then."
-if [[ "$_breathe_in" -lt 30 ]]; then
-  log "WARNING: breathe block in < 30 s — registration window is tight"
-fi
+log "Next breathe block in ${_breathe_in}s (BREATHE_BLOCK_INTERVAL=${_breathe_iv}s). Registration window after Feynman: ${_reg_window}s."
 
 # ── Phase 2: patch genesis.json while nodes are still running ────────────────
 #

@@ -91,6 +91,13 @@ if [[ -d "${DATADIR_ROOT}" ]]; then
 fi
 run bash "${SCRIPT_DIR}/00-init.sh"
 
+# ── Pre-U-1: deploy Foundation Safe (Clique phase) ───────────────────────────
+# Starts the Clique network, deploys Safe v1.5.0 multisig at the baked
+# FOUNDATION_ADDR (0x0B53A578F024580563Ef1349b1F2c289115f6bE8), then stops
+# the network. U-1 restarts from the same chain state (Safe persists on disk).
+
+run bash "${SCRIPT_DIR}/79-deploy-foundation-safe.sh"
+
 # ── U-1: Clique→Parlia ────────────────────────────────────────────────────────
 
 run bash "${SCRIPT_DIR}/80-run-u1-parlia-switch.sh"
